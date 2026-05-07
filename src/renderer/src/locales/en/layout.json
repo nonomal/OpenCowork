@@ -29,6 +29,7 @@
     "homeLabel": "Home",
     "tasksLabel": "Tasks",
     "resourcesLabel": "Resources",
+    "extensionsLabel": "Extensions",
     "skillsLabel": "Skills",
     "drawLabel": "Draw",
     "sshLabel": "SSH",
@@ -59,7 +60,16 @@
     "stopAndDelete": "Stop & Delete",
     "exportAsMarkdown": "Export as Markdown",
     "exportAsJson": "Export as JSON",
-    "clearMessages": "Clear Messages",
+    "clearMessages": "Clear Conversation",
+    "clearMessagesConfirmTitle": "Clear conversation “{{title}}”?",
+    "clearMessagesConfirmDescription": "This will remove all messages in the current session and cannot be undone.",
+    "clearMessagesConfirmAction": "Clear Conversation",
+    "clearQueuedMessagesNotice": "This session still has {{count}} queued messages. They will be cleared too.",
+    "clearProjectSessions": "Clear Session List",
+    "clearProjectSessionsConfirmTitle": "Clear session list in “{{projectName}}”?",
+    "clearProjectSessionsConfirmDescription": "This will delete {{count}} non-running sessions in this project and cannot be undone.",
+    "clearProjectSessionsRunningNotice": "{{count}} running sessions will be kept.",
+    "clearProjectSessionsConfirmAction": "Clear Session List",
     "pinToTop": "Pin to Top",
     "switchMode": "Switch Mode",
     "mode": {
@@ -104,7 +114,9 @@
     "allDeleted": "All sessions deleted",
     "projectCreated": "Project created",
     "projectWorkingFolderUpdated": "Project working folder updated",
-    "projectDeleted": "Project deleted"
+    "projectDeleted": "Project deleted",
+    "projectSessionsCleared": "Cleared {{count}} project sessions",
+    "noProjectSessionsCleared": "No project sessions were cleared"
   },
   "topbar": {
     "togglePanel": "Toggle Panel",

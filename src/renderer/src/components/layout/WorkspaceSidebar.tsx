@@ -19,6 +19,7 @@ import {
   History,
   Loader2,
   MessageSquare,
+  Monitor,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -86,6 +87,8 @@ import {
 import { sessionToMarkdown } from '@renderer/lib/utils/export-chat'
 import { openDetachedSessionWindow, openSessionOrFocusDetached } from '@renderer/lib/session-window'
 import { cn } from '@renderer/lib/utils'
+import { ipcClient } from '@renderer/lib/ipc/ipc-client'
+import { IPC } from '@renderer/lib/ipc/channels'
 import { clampLeftSidebarWidth, LEFT_SIDEBAR_DEFAULT_WIDTH } from './right-panel-defs'
 import { WorkingFolderSelectorDialog } from '@renderer/components/chat/WorkingFolderSelectorDialog'
 import { toast } from 'sonner'
@@ -96,7 +99,7 @@ const MINUTE_MS = 60 * 1000
 const HOUR_MS = 60 * MINUTE_MS
 const DAY_MS = 24 * HOUR_MS
 const WEEK_MS = 7 * DAY_MS
-const SIDEBAR_TREE_ROW_CLASS = 'workspace-sidebar-row min-h-8 rounded-xl border border-transparent'
+const SIDEBAR_TREE_ROW_CLASS = 'workspace-sidebar-row min-h-8 rounded-md border border-transparent'
 const SIDEBAR_TREE_ACTIVE_CLASS = 'workspace-sidebar-row--active text-foreground'
 const SIDEBAR_TREE_HOVER_CLASS =
   'workspace-sidebar-row--hover text-foreground/90 hover:text-foreground'
@@ -368,6 +371,17 @@ export function WorkspaceSidebar(): React.JSX.Element {
     | { type: 'session'; id: string; title: string }
     | null
   >(null)
+  const [clearSessionTarget, setClearSessionTarget] = useState<{
+    id: string
+    title: string
+    pendingCount: number
+  } | null>(null)
+  const [clearProjectSessionsTarget, setClearProjectSessionsTarget] = useState<{
+    id: string
+    name: string
+    clearableCount: number
+    runningCount: number
+  } | null>(null)
   const [folderPickerTarget, setFolderPickerTarget] = useState<FolderPickerTarget | null>(null)
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(() => new Set())
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set())
@@ -646,6 +660,53 @@ export function WorkspaceSidebar(): React.JSX.Element {
     toast.success(t('sidebar_toast.allDeleted'))
   }, [clearAllSessions, t])
 
+  const confirmClearSessionMessages = useCallback(() => {
+    if (!clearSessionTarget) return
+    clearSessionMessages(clearSessionTarget.id)
+    clearPendingSessionMessages(clearSessionTarget.id)
+    toast.success(t('sidebar_toast.messagesCleared'))
+    setClearSessionTarget(null)
+  }, [clearSessionMessages, clearSessionTarget, t])
+
+  const isSessionRunning = useCallback(
+    (sessionId: string): boolean =>
+      runningSessions[sessionId] === 'running' ||
+      runningSessions[sessionId] === 'retrying' ||
+      runningSubAgentSessionIds.has(sessionId) ||
+      runningBackgroundSessionIds.has(sessionId) ||
+      streamingSessionIds.has(sessionId) ||
+      activeTeamSessionId === sessionId,
+    [
+      activeTeamSessionId,
+      runningBackgroundSessionIds,
+      runningSessions,
+      runningSubAgentSessionIds,
+      streamingSessionIds
+    ]
+  )
+
+  const confirmClearProjectSessions = useCallback(() => {
+    if (!clearProjectSessionsTarget) return
+    const projectSessions = useChatStore
+      .getState()
+      .sessions.filter((session) => session.projectId === clearProjectSessionsTarget.id)
+    const clearableSessions = projectSessions.filter((session) => !isSessionRunning(session.id))
+    for (const session of clearableSessions) {
+      clearPendingSessionMessages(session.id)
+      deleteSession(session.id)
+    }
+    setClearProjectSessionsTarget(null)
+    if (clearableSessions.length === 0) {
+      toast.info(t('sidebar_toast.noProjectSessionsCleared'))
+      return
+    }
+    toast.success(
+      t('sidebar_toast.projectSessionsCleared', {
+        count: clearableSessions.length
+      })
+    )
+  }, [clearProjectSessionsTarget, deleteSession, isSessionRunning, t])
+
   const confirmRename = useCallback(() => {
     if (!renameDialog) return
     const nextName = renameValue.trim()
@@ -792,6 +853,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
     const unreadCount = unreadCountsBySession[session.id] ?? 0
     const blockedCount = blockedCountsBySession[session.id] ?? 0
     const pendingCount = getPendingSessionMessageCountForSession(session.id)
+    const canClearSession = session.messageCount > 0 || pendingCount > 0
 
     return (
       <ContextMenu key={session.id}>
@@ -923,18 +985,21 @@ export function WorkspaceSidebar(): React.JSX.Element {
             <Download className="size-4" />
             {t('sidebar.exportAsJson')}
           </ContextMenuItem>
-          {session.messageCount > 0 && (
-            <ContextMenuItem
-              onClick={() => {
-                clearSessionMessages(session.id)
-                clearPendingSessionMessages(session.id)
-                toast.success(t('sidebar_toast.messagesCleared'))
-              }}
-            >
-              <Eraser className="size-4" />
-              {t('sidebar.clearMessages')}
-            </ContextMenuItem>
-          )}
+          <ContextMenuItem
+            disabled={!canClearSession}
+            onSelect={() =>
+              deferDropdownAction(() =>
+                setClearSessionTarget({
+                  id: session.id,
+                  title: session.title,
+                  pendingCount
+                })
+              )
+            }
+          >
+            <Eraser className="size-4" />
+            {t('sidebar.clearMessages')}
+          </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
             variant="destructive"
@@ -1020,7 +1085,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
                 )}
               >
                 <FolderOpen className="size-4 shrink-0" />
-                <span className="truncate">{t('navRail.resources')}</span>
+                <span className="truncate">{t('sidebar.extensionsLabel')}</span>
                 <ChevronRight
                   className={cn(
                     'ml-auto size-3.5 shrink-0 transition-transform',
@@ -1063,6 +1128,20 @@ export function WorkspaceSidebar(): React.JSX.Element {
                   >
                     <Wand2 className="size-3.5 shrink-0" />
                     <span className="truncate">{t('navRail.skills')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void ipcClient.invoke(IPC.SSH_WINDOW_OPEN)
+                    }}
+                    className={cn(
+                      'flex h-7 w-full items-center gap-2 px-2 text-[12px] font-medium transition-colors',
+                      SIDEBAR_TREE_ROW_CLASS,
+                      SIDEBAR_TREE_SUBITEM_HOVER_CLASS
+                    )}
+                  >
+                    <Monitor className="size-3.5 shrink-0" />
+                    <span className="truncate">{t('navRail.ssh')}</span>
                   </button>
                 </div>
               </div>
@@ -1133,75 +1212,69 @@ export function WorkspaceSidebar(): React.JSX.Element {
                   )
                   const canToggleExpansion =
                     group.sessions.length > DEFAULT_VISIBLE_SESSIONS_PER_PROJECT
+                  const runningProjectSessionCount = group.sessions.filter((session) =>
+                    isSessionRunning(session.id)
+                  ).length
+                  const clearableProjectSessionCount =
+                    group.sessions.length - runningProjectSessionCount
                   const projectToggleTitle = isCollapsed
                     ? t('rightPanel.expand', { defaultValue: 'Expand' })
                     : t('rightPanel.collapse')
+                  const handleProjectRowKeyDown = (
+                    event: React.KeyboardEvent<HTMLDivElement>
+                  ): void => {
+                    if (event.target !== event.currentTarget) return
+                    if (event.key !== 'Enter' && event.key !== ' ') return
+                    event.preventDefault()
+                    toggleProjectCollapsed(project.id)
+                  }
 
                   return (
-                    <div key={project.id} className="space-y-1">
+                    <div key={project.id} className="space-y-0.5">
                       <ContextMenu>
                         <ContextMenuTrigger asChild>
                           <div
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`${project.name} ${projectToggleTitle}`}
                             className={cn(
-                              'group/project flex items-center gap-1.5 px-1.5 py-1 transition-colors',
+                              'group/project flex w-full items-center gap-1.5 px-1.5 py-1 transition-colors',
                               SIDEBAR_TREE_ROW_CLASS,
-                              isProjectActive ? SIDEBAR_TREE_ACTIVE_CLASS : SIDEBAR_TREE_HOVER_CLASS
+                              SIDEBAR_TREE_HOVER_CLASS,
+                              isProjectActive && 'text-foreground'
                             )}
+                            onClick={() => toggleProjectCollapsed(project.id)}
+                            onKeyDown={handleProjectRowKeyDown}
                             title={project.workingFolder ?? project.name}
                           >
-                            <Button
-                              variant="ghost"
-                              size="icon"
+                            <FolderOpen
                               className={cn(
-                                SIDEBAR_TREE_ACTION_BUTTON_CLASS,
-                                'shrink-0 text-muted-foreground hover:text-foreground'
+                                'size-3.5 shrink-0',
+                                isProjectActive ? 'text-primary/80' : 'text-muted-foreground/80'
                               )}
-                              onClick={() => toggleProjectCollapsed(project.id)}
-                              title={projectToggleTitle}
-                            >
-                              {isCollapsed ? (
-                                <ChevronRight className="size-3.5" />
-                              ) : (
-                                <ChevronDown className="size-3.5" />
-                              )}
-                            </Button>
+                            />
 
-                            <button
-                              type="button"
-                              className="min-w-0 flex-1 rounded-md px-1 py-1 text-left"
-                              onClick={() => toggleProjectCollapsed(project.id)}
-                              title={project.workingFolder ?? project.name}
-                            >
-                              <div className="flex min-w-0 items-center gap-1.5">
-                                <FolderOpen
-                                  className={cn(
-                                    'size-3.5 shrink-0',
-                                    isProjectActive
-                                      ? 'text-accent-foreground/80'
-                                      : 'text-muted-foreground/80'
-                                  )}
-                                />
+                            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                              <span
+                                className={cn(
+                                  'truncate font-semibold text-foreground',
+                                  SIDEBAR_TREE_LABEL_CLASS
+                                )}
+                              >
+                                {project.name}
+                              </span>
+                              {project.sshConnectionId ? (
                                 <span
-                                  className={cn(
-                                    'truncate font-semibold text-foreground',
-                                    SIDEBAR_TREE_LABEL_CLASS
-                                  )}
+                                  className="inline-flex shrink-0 items-center gap-0.5 rounded border border-sky-500/30 bg-sky-500/10 px-1 py-px text-[9px] font-semibold leading-none text-sky-600 dark:text-sky-300"
+                                  title="SSH project"
                                 >
-                                  {project.name}
+                                  <Server className="size-2.5" />
+                                  SSH
                                 </span>
-                                {project.sshConnectionId ? (
-                                  <span
-                                    className="inline-flex shrink-0 items-center gap-0.5 rounded border border-sky-500/30 bg-sky-500/10 px-1 py-px text-[9px] font-semibold leading-none text-sky-600 dark:text-sky-300"
-                                    title="SSH project"
-                                  >
-                                    <Server className="size-2.5" />
-                                    SSH
-                                  </span>
-                                ) : null}
-                              </div>
-                            </button>
+                              ) : null}
+                            </div>
 
-                            <div className="relative flex h-8 w-[116px] shrink-0 items-center justify-end overflow-hidden">
+                            <div className="relative flex h-6 w-[116px] shrink-0 items-center justify-end overflow-hidden">
                               <div
                                 className={cn(
                                   'absolute inset-0 flex items-center justify-end gap-1 text-muted-foreground transition-opacity',
@@ -1221,6 +1294,12 @@ export function WorkspaceSidebar(): React.JSX.Element {
                                   {project.sshConnectionId ? 'SSH' : '本地'}
                                 </span>
                                 <span>{group.sessions.length}</span>
+                                <ChevronRight
+                                  className={cn(
+                                    'size-3.5 transition-transform duration-200 ease-out',
+                                    !isCollapsed && 'rotate-90'
+                                  )}
+                                />
                               </div>
 
                               <div
@@ -1235,7 +1314,10 @@ export function WorkspaceSidebar(): React.JSX.Element {
                                   variant="ghost"
                                   size="icon"
                                   className={SIDEBAR_TREE_ACTION_BUTTON_CLASS}
-                                  onClick={() => handleCreateSession(project.id)}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    handleCreateSession(project.id)
+                                  }}
                                   title={t('sidebar.newChat')}
                                 >
                                   <Plus className="size-3.5" />
@@ -1244,7 +1326,10 @@ export function WorkspaceSidebar(): React.JSX.Element {
                                   variant="ghost"
                                   size="icon"
                                   className={SIDEBAR_TREE_ACTION_BUTTON_CLASS}
-                                  onClick={() => openProjectSession(project.id)}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    openProjectSession(project.id)
+                                  }}
                                   title={t('sidebar.openProject')}
                                 >
                                   <FolderOpen className="size-3.5" />
@@ -1255,6 +1340,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
                                       variant="ghost"
                                       size="icon"
                                       className={SIDEBAR_TREE_ACTION_BUTTON_CLASS}
+                                      onClick={(event) => event.stopPropagation()}
                                       title={tCommon('action.more', { defaultValue: 'More' })}
                                     >
                                       <MoreHorizontal className="size-3.5" />
@@ -1319,6 +1405,23 @@ export function WorkspaceSidebar(): React.JSX.Element {
                                     >
                                       <Download className="size-4" />
                                       {t('sidebar.exportProjectAsJson')}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      variant="destructive"
+                                      disabled={clearableProjectSessionCount === 0}
+                                      onSelect={() =>
+                                        deferDropdownAction(() =>
+                                          setClearProjectSessionsTarget({
+                                            id: project.id,
+                                            name: project.name,
+                                            clearableCount: clearableProjectSessionCount,
+                                            runningCount: runningProjectSessionCount
+                                          })
+                                        )
+                                      }
+                                    >
+                                      <Eraser className="size-4" />
+                                      {t('sidebar.clearProjectSessions')}
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() => {
@@ -1417,6 +1520,23 @@ export function WorkspaceSidebar(): React.JSX.Element {
                             {t('sidebar.exportProjectAsJson')}
                           </ContextMenuItem>
                           <ContextMenuItem
+                            variant="destructive"
+                            disabled={clearableProjectSessionCount === 0}
+                            onSelect={() =>
+                              deferDropdownAction(() =>
+                                setClearProjectSessionsTarget({
+                                  id: project.id,
+                                  name: project.name,
+                                  clearableCount: clearableProjectSessionCount,
+                                  runningCount: runningProjectSessionCount
+                                })
+                              )
+                            }
+                          >
+                            <Eraser className="size-4" />
+                            {t('sidebar.clearProjectSessions')}
+                          </ContextMenuItem>
+                          <ContextMenuItem
                             onClick={() => {
                               togglePinProject(project.id)
                               toast.success(
@@ -1453,9 +1573,14 @@ export function WorkspaceSidebar(): React.JSX.Element {
                         </ContextMenuContent>
                       </ContextMenu>
 
-                      {!isCollapsed ? (
+                      <div
+                        className={cn(
+                          'grid overflow-hidden transition-[grid-template-rows,opacity] duration-200 ease-out',
+                          isCollapsed ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100'
+                        )}
+                      >
                         <div
-                          className="space-y-0.5 pl-7"
+                          className="min-h-0 space-y-0.5 overflow-hidden"
                           title={project.workingFolder ?? project.name}
                         >
                           {displayedSessions.length > 0 ? (
@@ -1495,7 +1620,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
                             </>
                           ) : null}
                         </div>
-                      ) : null}
+                      </div>
                     </div>
                   )
                 })}
@@ -1700,6 +1825,66 @@ export function WorkspaceSidebar(): React.JSX.Element {
           toast.success(t('sidebar_toast.projectWorkingFolderUpdated'))
         }}
       />
+
+      <AlertDialog
+        open={!!clearSessionTarget}
+        onOpenChange={(open) => !open && setClearSessionTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('sidebar.clearMessagesConfirmTitle', {
+                title: clearSessionTarget?.title ?? ''
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('sidebar.clearMessagesConfirmDescription')}
+              {(clearSessionTarget?.pendingCount ?? 0) > 0
+                ? ` ${t('sidebar.clearQueuedMessagesNotice', {
+                    count: clearSessionTarget?.pendingCount ?? 0
+                  })}`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tCommon('action.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmClearSessionMessages}>
+              {t('sidebar.clearMessagesConfirmAction')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!clearProjectSessionsTarget}
+        onOpenChange={(open) => !open && setClearProjectSessionsTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('sidebar.clearProjectSessionsConfirmTitle', {
+                projectName: clearProjectSessionsTarget?.name ?? ''
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('sidebar.clearProjectSessionsConfirmDescription', {
+                count: clearProjectSessionsTarget?.clearableCount ?? 0
+              })}
+              {(clearProjectSessionsTarget?.runningCount ?? 0) > 0
+                ? ` ${t('sidebar.clearProjectSessionsRunningNotice', {
+                    count: clearProjectSessionsTarget?.runningCount ?? 0
+                  })}`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tCommon('action.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmClearProjectSessions}>
+              {t('sidebar.clearProjectSessionsConfirmAction')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>

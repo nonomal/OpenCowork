@@ -266,6 +266,7 @@ export function SessionListPanel(): React.JSX.Element {
   const sessionListScrollRef = useRef<HTMLDivElement>(null)
   const projectIdSet = useMemo(() => new Set(projects.map((project) => project.id)), [projects])
   const initialProjectCollapseAppliedRef = useRef(false)
+  const knownProjectIdsRef = useRef<Set<string>>(new Set())
   const draggingRef = useRef(false)
   const startXRef = useRef(0)
   const startWidthRef = useRef(
@@ -345,7 +346,35 @@ export function SessionListPanel(): React.JSX.Element {
           .filter((projectId) => !expandedProjectId || projectId !== expandedProjectId)
       )
     )
+    knownProjectIdsRef.current = new Set(projects.map((project) => project.id))
     initialProjectCollapseAppliedRef.current = true
+  }, [activeProjectId, activeSessionProjectId, projects])
+
+  useEffect(() => {
+    if (!initialProjectCollapseAppliedRef.current || projects.length === 0) return
+    const nextProjectIds = new Set(projects.map((project) => project.id))
+    const newlyLoadedProjectIds = projects
+      .map((project) => project.id)
+      .filter((projectId) => !knownProjectIdsRef.current.has(projectId))
+
+    knownProjectIdsRef.current = nextProjectIds
+
+    if (newlyLoadedProjectIds.length === 0) return
+
+    const expandedProjectId = activeSessionProjectId ?? activeProjectId
+    setCollapsedProjectIds((prev) => {
+      let changed = false
+      const next = new Set([...prev].filter((projectId) => nextProjectIds.has(projectId)))
+
+      for (const projectId of newlyLoadedProjectIds) {
+        if (projectId === expandedProjectId) continue
+        if (next.has(projectId)) continue
+        next.add(projectId)
+        changed = true
+      }
+
+      return changed || next.size !== prev.size ? next : prev
+    })
   }, [activeProjectId, activeSessionProjectId, projects])
 
   useEffect(() => {
@@ -1278,6 +1307,7 @@ export function SessionListPanel(): React.JSX.Element {
     const isHistoryExpanded =
       expandedHistoryProjectIds.has(group.project.id) ||
       historicalItems.some((session) => session.id === activeSessionId)
+    const isActiveProject = activeProjectId === group.project.id
 
     return (
       <div key={group.project.id} className="mb-1.5">
@@ -1285,14 +1315,17 @@ export function SessionListPanel(): React.JSX.Element {
           <ContextMenuTrigger asChild>
             <button
               className={cn(
-                'mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium transition-colors',
-                activeProjectId === group.project.id
-                  ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                'relative mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium transition-colors',
+                isActiveProject
+                  ? 'text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
               )}
               onClick={() => setActiveProject(group.project.id)}
               title={group.project.name}
             >
+              {isActiveProject && (
+                <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary/70" />
+              )}
               <span
                 className="inline-flex size-4 shrink-0 items-center justify-center"
                 onClick={(event) => {
