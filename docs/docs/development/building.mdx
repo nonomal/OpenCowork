@@ -11,14 +11,10 @@ description: 构建 OpenCowork 生产版本并打包为各平台安装包。
 # 类型检查 + 构建（推荐）
 npm run build
 
-# 构建 + 打包 Windows 安装包
-npm run build:win
-
-# 构建 + 打包 macOS 安装包
-npm run build:mac
-
-# 构建 + 打包 Linux 安装包
-npm run build:linux
+# 构建各平台安装包
+npm run build:win    # Windows (.exe)
+npm run build:mac    # macOS (.dmg)
+npm run build:linux  # Linux (.AppImage / .deb)
 ```
 
 ## 构建产物 / Build Artifacts
@@ -31,34 +27,42 @@ npm run build:linux
 | macOS   | `OpenCowork-x.x.x.dmg`       |
 | Linux   | `OpenCowork-x.x.x.AppImage`  |
 
-## 构建工具 / Build Tools
+## 构建工具链 / Build Pipeline
 
-- **electron-vite**：统一的 Vite 构建配置，支持主进程、预加载、渲染进程
-- **electron-builder**：打包为各平台安装包
-- **better-sqlite3**：作为外部依赖处理（不打包进 renderer bundle）
+1. **electron-vite**：统一的 Vite 构建配置，支持主进程/预加载/渲染进程三入口
+2. **electron-builder**：打包为各平台安装包
+3. **better-sqlite3** 和 **node-pty** 等原生模块通过 `postinstall` 脚本为 Electron 重建
 
 ## 自动更新 / Auto Update
 
-OpenCowork 集成了 GitHub Releases 自动更新：
-
-- 应用启动时检查新版本
-- 后台下载更新包
-- 提示用户重启安装
-
-更新配置在 `electron-builder.yml` 中：
+集成了 GitHub Releases 自动更新（`electron-updater`）：
 
 ```yaml
+# electron-builder.yml
 publish:
   provider: github
   owner: AIDotNet
   repo: OpenCowork
 ```
 
-## 环境变量 / Environment Variables
+- 应用启动时检查新版本
+- 后台下载更新包
+- 提示用户重启安装
 
-构建时可以通过环境变量配置：
+## 环境变量 / Environment Variables
 
 | 变量               | 说明                             |
 | ------------------ | -------------------------------- |
 | `VITE_APP_VERSION` | 应用版本号                       |
 | `GH_TOKEN`         | GitHub Token（用于发布 Release） |
+
+## 文档站点构建 / Docs Site Build
+
+文档站点是一个独立的 Fumadocs + Next.js 项目：
+
+```bash
+cd docs
+npm install
+npm run dev     # 本地开发
+npm run build   # 生产构建（output: standalone）
+```

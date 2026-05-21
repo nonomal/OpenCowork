@@ -21,7 +21,8 @@ import {
   Save,
   RefreshCw,
   Puzzle,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Terminal
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { AnimatePresence } from 'motion/react'
@@ -31,8 +32,11 @@ import {
   clampMaxParallelToolCalls,
   DEFAULT_THEME_MODE,
   DEFAULT_MAX_PARALLEL_TOOL_CALLS,
+  DEFAULT_SHELL_EXECUTION_ENDPOINT,
   MAX_MAX_PARALLEL_TOOL_CALLS,
   MIN_MAX_PARALLEL_TOOL_CALLS,
+  resolveShellExecutable,
+  type ShellExecutionEndpoint,
   useSettingsStore
 } from '@renderer/stores/settings-store'
 import { toast } from 'sonner'
@@ -281,6 +285,73 @@ function isNewerVersion(
   return compareVersions(normalizedCandidate, normalizedCurrent) > 0
 }
 
+interface ShellEndpointOption {
+  value: ShellExecutionEndpoint
+  labelKey: string
+  descKey: string
+}
+
+function getShellEndpointOptions(platform: string): ShellEndpointOption[] {
+  const normalizedPlatform = platform.toLowerCase()
+  const base: ShellEndpointOption[] = [
+    {
+      value: 'auto',
+      labelKey: 'system.shell.endpoint.options.auto.label',
+      descKey: 'system.shell.endpoint.options.auto.desc'
+    }
+  ]
+
+  if (normalizedPlatform === 'win32') {
+    return [
+      ...base,
+      {
+        value: 'powershell',
+        labelKey: 'system.shell.endpoint.options.powershell.label',
+        descKey: 'system.shell.endpoint.options.powershell.desc'
+      },
+      {
+        value: 'pwsh',
+        labelKey: 'system.shell.endpoint.options.pwsh.label',
+        descKey: 'system.shell.endpoint.options.pwsh.desc'
+      },
+      {
+        value: 'cmd',
+        labelKey: 'system.shell.endpoint.options.cmd.label',
+        descKey: 'system.shell.endpoint.options.cmd.desc'
+      },
+      {
+        value: 'custom',
+        labelKey: 'system.shell.endpoint.options.custom.label',
+        descKey: 'system.shell.endpoint.options.custom.desc'
+      }
+    ]
+  }
+
+  return [
+    ...base,
+    {
+      value: 'zsh',
+      labelKey: 'system.shell.endpoint.options.zsh.label',
+      descKey: 'system.shell.endpoint.options.zsh.desc'
+    },
+    {
+      value: 'bash',
+      labelKey: 'system.shell.endpoint.options.bash.label',
+      descKey: 'system.shell.endpoint.options.bash.desc'
+    },
+    {
+      value: 'sh',
+      labelKey: 'system.shell.endpoint.options.sh.label',
+      descKey: 'system.shell.endpoint.options.sh.desc'
+    },
+    {
+      value: 'custom',
+      labelKey: 'system.shell.endpoint.options.custom.label',
+      descKey: 'system.shell.endpoint.options.custom.desc'
+    }
+  ]
+}
+
 const menuGroupDefs: Array<{
   labelKey: string
   items: { id: SettingsTab; icon: React.ReactNode; labelKey: string; descKey: string }[]
@@ -311,6 +382,17 @@ const menuGroupDefs: Array<{
         icon: <ArrowRightLeft className="size-4" />,
         labelKey: 'migration.title',
         descKey: 'migration.subtitle'
+      }
+    ]
+  },
+  {
+    labelKey: 'page.groups.system',
+    items: [
+      {
+        id: 'system',
+        icon: <Terminal className="size-4" />,
+        labelKey: 'system.title',
+        descKey: 'system.subtitle'
       }
     ]
   },
@@ -678,34 +760,6 @@ function GeneralPanel(): React.JSX.Element {
           </p>
         )}
       </section>
-
-      {/* Network */}
-      <section className="space-y-3">
-        <div>
-          <label className="text-sm font-medium">{t('general.systemProxy')}</label>
-          <p className="text-xs text-muted-foreground">{t('general.systemProxyDesc')}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            type="text"
-            value={settings.systemProxyUrl}
-            onChange={(e) => settings.updateSettings({ systemProxyUrl: e.target.value })}
-            placeholder="http://127.0.0.1:7890"
-            className="max-w-lg text-xs"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-8 text-xs"
-            onClick={() => settings.updateSettings({ systemProxyUrl: '' })}
-          >
-            {t('general.appearance.reset')}
-          </Button>
-        </div>
-      </section>
-
-      <Separator />
 
       <GlobalThemePanel />
 
@@ -1299,6 +1353,8 @@ function GeneralPanel(): React.JSX.Element {
               theme: DEFAULT_THEME_MODE,
               themePreset: DEFAULT_APP_THEME_PRESET,
               sshTerminalThemePreset: DEFAULT_SSH_TERMINAL_THEME_PRESET,
+              shellExecutionEndpoint: DEFAULT_SHELL_EXECUTION_ENDPOINT,
+              customShellExecutable: '',
               backgroundColor: '',
               fontFamily: '',
               fontSize: 16,
@@ -1315,6 +1371,118 @@ function GeneralPanel(): React.JSX.Element {
         >
           {t('general.resetDefault')}
         </Button>
+      </section>
+    </div>
+  )
+}
+
+function SystemPanel(): React.JSX.Element {
+  const { t } = useTranslation('settings')
+  const settings = useSettingsStore()
+  const platform = window.electron.process.platform
+  const shellOptions = getShellEndpointOptions(platform)
+  const activeShellOption =
+    shellOptions.find((option) => option.value === settings.shellExecutionEndpoint) ??
+    shellOptions[0]
+  const selectedShellEndpoint = activeShellOption.value
+  const resolvedShell = resolveShellExecutable({
+    endpoint: selectedShellEndpoint,
+    customShellExecutable: settings.customShellExecutable,
+    platform
+  })
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-lg font-semibold">{t('system.title')}</h2>
+        <p className="text-sm text-muted-foreground">{t('system.subtitle')}</p>
+      </div>
+
+      <section className="space-y-4 rounded-xl border border-border/60 bg-muted/15 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <label className="text-sm font-medium">{t('system.shell.endpoint.title')}</label>
+            <p className="text-xs text-muted-foreground">{t('system.shell.endpoint.desc')}</p>
+          </div>
+          <Badge variant="secondary" className="text-[10px]">
+            {t('system.platform', { platform })}
+          </Badge>
+        </div>
+
+        <div className="space-y-2">
+          <Select
+            value={selectedShellEndpoint}
+            onValueChange={(value: ShellExecutionEndpoint) =>
+              settings.updateSettings({ shellExecutionEndpoint: value })
+            }
+          >
+            <SelectTrigger className="w-full max-w-lg text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>{t('system.shell.endpoint.selectLabel')}</SelectLabel>
+                {shellOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value} className="text-xs">
+                    {t(option.labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          {activeShellOption ? (
+            <p className="text-xs text-muted-foreground">{t(activeShellOption.descKey)}</p>
+          ) : null}
+        </div>
+
+        {selectedShellEndpoint === 'custom' ? (
+          <div className="space-y-2">
+            <label className="text-xs font-medium">{t('system.shell.customPath')}</label>
+            <Input
+              value={settings.customShellExecutable}
+              onChange={(event) =>
+                settings.updateSettings({ customShellExecutable: event.target.value })
+              }
+              placeholder={
+                platform === 'win32'
+                  ? t('system.shell.customPlaceholderWindows')
+                  : t('system.shell.customPlaceholderPosix')
+              }
+              className="max-w-lg font-mono text-xs"
+            />
+          </div>
+        ) : null}
+
+        <p className="rounded-lg border border-border/60 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
+          {resolvedShell
+            ? t('system.shell.resolvedShell', { shell: resolvedShell })
+            : t('system.shell.resolvedAuto')}
+        </p>
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <label className="text-sm font-medium">{t('general.systemProxy')}</label>
+          <p className="text-xs text-muted-foreground">{t('general.systemProxyDesc')}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="text"
+            value={settings.systemProxyUrl}
+            onChange={(e) => settings.updateSettings({ systemProxyUrl: e.target.value })}
+            placeholder="http://127.0.0.1:7890"
+            className="max-w-lg text-xs"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => settings.updateSettings({ systemProxyUrl: '' })}
+          >
+            {t('general.appearance.reset')}
+          </Button>
+        </div>
       </section>
     </div>
   )
@@ -2905,6 +3073,7 @@ function AboutPanel(): React.JSX.Element {
 
 const panelMap: Record<SettingsTab, () => React.JSX.Element> = {
   general: GeneralPanel,
+  system: SystemPanel,
   memory: MemoryPanel,
   analytics: AnalyticsPanel,
   migration: MigrationPanel,

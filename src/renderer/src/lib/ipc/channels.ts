@@ -294,6 +294,7 @@ export const IPC = {
 
   // Built-in Browser
   BROWSER_CLEAR_COOKIES: 'browser:clear-cookies',
+  BROWSER_EMULATION_STATUS: 'browser:emulation-status',
 
   // OAuth
   OAUTH_START: 'oauth:start',

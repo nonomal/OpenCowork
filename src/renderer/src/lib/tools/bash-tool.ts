@@ -4,6 +4,7 @@ import { DEFAULT_COMMAND_TIMEOUT_MS, selectCommandExecutor } from './command-exe
 import { encodeBashToolResult } from './bash-output'
 import type { ToolHandler } from './tool-types'
 import { useAgentStore } from '@renderer/stores/agent-store'
+import { resolveShellExecutable, useSettingsStore } from '@renderer/stores/settings-store'
 
 let execCounter = 0
 const LONG_RUNNING_COMMAND_PATTERNS: RegExp[] = [
@@ -51,6 +52,15 @@ function isLikelyLongRunningCommand(command: string): boolean {
   const normalized = command.trim()
   if (!normalized) return false
   return LONG_RUNNING_COMMAND_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
+function getConfiguredShellExecutable(): string | undefined {
+  const settings = useSettingsStore.getState()
+  return resolveShellExecutable({
+    endpoint: settings.shellExecutionEndpoint,
+    customShellExecutable: settings.customShellExecutable,
+    platform: window.electron.process.platform
+  })
 }
 
 function keepLastLines(
@@ -198,11 +208,13 @@ const bashHandler: ToolHandler = {
         : (explicitBackground ?? false)
     const execId = `exec-${Date.now()}-${++execCounter}`
     const toolUseId = ctx.currentToolUseId
+    const shell = getConfiguredShellExecutable()
 
     if (runInBackground) {
       const result = (await ctx.ipc.invoke(IPC.PROCESS_SPAWN, {
         command,
         cwd: ctx.workingFolder,
+        ...(shell ? { shell } : {}),
         metadata: {
           source: 'bash-tool',
           sessionId: ctx.sessionId,
@@ -264,14 +276,20 @@ const bashHandler: ToolHandler = {
     let outputTimer: ReturnType<typeof setTimeout> | null = null
     let lastOutputFlush = 0
     let foregroundResultMetadata: { processId?: string; terminalId?: string } | undefined
+    const updateLivePreview = (): void => {
+      if (!toolUseId) return
+      useAgentStore.getState().updateToolCall(
+        toolUseId,
+        {
+          output: buildLivePreviewPayload(preview, foregroundResultMetadata)
+        },
+        ctx.sessionId
+      )
+    }
     const flushOutput = (): void => {
       outputTimer = null
       lastOutputFlush = Date.now()
-      if (toolUseId) {
-        useAgentStore.getState().updateToolCall(toolUseId, {
-          output: buildLivePreviewPayload(preview, foregroundResultMetadata)
-        })
-      }
+      updateLivePreview()
     }
 
     const cleanupStarted = ctx.ipc.on(IPC.SHELL_STARTED, (...args: unknown[]) => {
@@ -317,7 +335,8 @@ const bashHandler: ToolHandler = {
         command,
         timeout: input.timeout ?? DEFAULT_COMMAND_TIMEOUT_MS,
         cwd: ctx.workingFolder,
-        execId
+        execId,
+        ...(shell ? { shell } : {})
       })) as { processId?: string; terminalId?: string }
       foregroundResultMetadata = {
         processId: result.processId,

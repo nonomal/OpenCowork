@@ -1,56 +1,71 @@
 ---
 title: 文件预览
-description: OpenCowork 内置的文件预览系统。
+description: OpenCowork 的预览面板、viewer registry 和支持的文件类型。
 ---
 
 # 文件预览 / File Preview
 
-OpenCowork 内置文件预览系统，Agent 可以通过 `Preview` 工具在侧边栏展示文件内容。
+OpenCowork 的文件预览不是一个独立 LLM 工具，而是一个**右侧面板的 viewer 系统**。它让你在对话之外查看文件、网页和开发预览。
 
-## 支持的格式 / Supported Formats
+## 预览系统在哪里 / Where it lives
 
-| 格式                            | 查看器          |
-| ------------------------------- | --------------- |
-| `.xlsx`, `.xls`, `.csv`         | 电子表格查看器  |
-| `.pdf`                          | PDF 查看器      |
-| `.png`, `.jpg`, `.gif`, `.webp` | 图片查看器      |
-| `.md`, `.mdx`                   | Markdown 渲染器 |
-| `.docx`                         | Word 文档查看器 |
+- `src/renderer/src/lib/preview/register-viewers.ts`
+- `src/renderer/src/lib/preview/viewer-registry.ts`
+- `src/renderer/src/lib/preview/viewers/`
 
-## 查看器注册 / Viewer Registry
+## 注册方式 / Registration
 
-查看器通过注册表模式管理，在应用启动时注册：
+启动时会调用 `registerAllViewers()`，把不同扩展名映射到不同 viewer。
 
-```typescript
-// src/renderer/src/lib/preview/register-viewers.ts
-registerViewer({
-  name: 'spreadsheet',
-  extensions: ['.xlsx', '.xls', '.csv'],
-  component: SpreadsheetViewer
+```ts
+viewerRegistry.register({
+  type: 'markdown',
+  extensions: ['.md', '.mdx'],
+  component: MarkdownViewer
 })
 ```
 
-## Preview 工具 / Preview Tool
+## 支持的 viewer / Supported viewers
 
-Agent 通过 `Preview` 工具触发预览：
+| 类型 | 典型扩展名 |
+| --- | --- |
+| `html` | `.html`, `.htm`, `.xhtml`, `.shtml` |
+| `spreadsheet` | `.csv`, `.tsv`, `.xlsx`, `.xls`, `.xlsm`, `.xlsb`, `.ods` |
+| `markdown` | `.md`, `.mdx`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn` |
+| `image` | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`, `.heic`, `.heif` 等 |
+| `svg` | `.svg` |
+| `video` | `.mp4`, `.webm`, `.mov`, `.mkv`, `.avi` 等 |
+| `audio` | `.mp3`, `.wav`, `.ogg`, `.m4a`, `.flac`, `.opus` 等 |
+| `font` | `.ttf`, `.otf`, `.woff`, `.woff2` |
+| `docx` | `.docx`, `.docm`, `.dotx`, `.dotm` |
+| `office-online` | `.doc`, `.ppt`, `.pptx`, `.odp`, `.odt`, `.rtf` |
+| `pdf` | `.pdf` |
+| `binary` | `.zip`, `.rar`, `.7z`, `.db`, `.sqlite`, `.exe`, `.dylib` 等 |
+| `fallback` | 兜底 |
 
-```json
-{
-  "path": "/path/to/report.xlsx",
-  "title": "销售报告"
-}
-```
+## 额外能力 / Extra capabilities
 
-预览面板会在聊天界面右侧展开，不影响对话流程。
+- Markdown 里支持 Mermaid 渲染
+- 本地 dev server 页面可以走专门 viewer
+- SVG 有独立 viewer
+- 二进制文件不会假装自己是文本
 
-## Mermaid 图表 / Mermaid Diagrams
+## 预览面板怎么用 / How to use it
 
-聊天消息中的 Mermaid 代码块会自动渲染为图表：
+预览通常从这些入口打开：
 
-````
-```mermaid
-flowchart TD
-    A[开始] --> B[处理]
-    B --> C[结束]
-```
-````
+- 文件列表
+- 右侧面板
+- 对话中的预览跳转
+- 代码/文档中的链接
+
+## 你在界面里会看到什么 / What you see in UI
+
+- 预览区标题
+- view mode（preview / code）
+- 文件类型识别
+- 对应的专用渲染器
+
+## 重要结论 / Important note
+
+以前文档里把它写成 `Preview` 工具，这是不准确的。当前实现里，它是 **viewer registry + right panel**，不是一个 LLM tool。

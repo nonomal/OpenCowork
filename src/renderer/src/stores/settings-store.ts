@@ -35,7 +35,17 @@ export type ClarifyPlanModeAutoSwitchTarget = 'off' | 'code' | 'acp'
 export type ProjectDefaultDirectoryMode = 'last-used' | 'custom'
 export type FileDiffViewMode = 'split' | 'inline'
 export type LiveOutputAnimationStyle = 'agile' | 'elegant'
+export type ShellExecutionEndpoint =
+  | 'auto'
+  | 'zsh'
+  | 'bash'
+  | 'sh'
+  | 'powershell'
+  | 'pwsh'
+  | 'cmd'
+  | 'custom'
 export const DEFAULT_THEME_MODE = 'dark' as const
+export const DEFAULT_SHELL_EXECUTION_ENDPOINT: ShellExecutionEndpoint = 'auto'
 const LEGACY_DEFAULT_THEME_MODE = 'system' as const
 const LEGACY_DEFAULT_APP_THEME_PRESET: AppThemePreset = 'studio'
 const LEGACY_DEFAULT_SSH_TERMINAL_THEME_PRESET: SshTerminalThemePreset = 'graphite'
@@ -124,6 +134,52 @@ export function clampMaxParallelToolCalls(value: number): number {
   )
 }
 
+export function normalizeShellExecutionEndpoint(value: unknown): ShellExecutionEndpoint {
+  if (
+    value === 'auto' ||
+    value === 'zsh' ||
+    value === 'bash' ||
+    value === 'sh' ||
+    value === 'powershell' ||
+    value === 'pwsh' ||
+    value === 'cmd' ||
+    value === 'custom'
+  ) {
+    return value
+  }
+  return DEFAULT_SHELL_EXECUTION_ENDPOINT
+}
+
+export function resolveShellExecutable({
+  endpoint,
+  customShellExecutable,
+  platform
+}: {
+  endpoint: ShellExecutionEndpoint
+  customShellExecutable?: string | null
+  platform?: string | null
+}): string | undefined {
+  const normalizedEndpoint = normalizeShellExecutionEndpoint(endpoint)
+  if (normalizedEndpoint === 'auto') return undefined
+  if (normalizedEndpoint === 'custom') {
+    const custom = customShellExecutable?.trim()
+    return custom || undefined
+  }
+
+  const normalizedPlatform = platform?.trim().toLowerCase()
+  if (normalizedPlatform === 'win32') {
+    if (normalizedEndpoint === 'powershell') return 'powershell.exe'
+    if (normalizedEndpoint === 'pwsh') return 'pwsh.exe'
+    if (normalizedEndpoint === 'cmd') return 'cmd.exe'
+    return undefined
+  }
+
+  if (normalizedEndpoint === 'zsh') return '/bin/zsh'
+  if (normalizedEndpoint === 'bash') return '/bin/bash'
+  if (normalizedEndpoint === 'sh') return '/bin/sh'
+  return undefined
+}
+
 export function getReasoningEffortKey(
   providerId?: string | null,
   modelId?: string | null
@@ -180,12 +236,15 @@ interface SettingsStore {
   reasoningEffortByModel: Record<string, ReasoningEffortLevel>
   teamToolsEnabled: boolean
   builtinBrowserEnabled: boolean
+  browserUserDataReuseEnabled: boolean
   contextCompressionEnabled: boolean
   editorWorkspaceEnabled: boolean
   editorRemoteLanguageServiceEnabled: boolean
   maxParallelToolCalls: number
   toolResultFormat: 'toon' | 'json'
   fileDiffViewMode: FileDiffViewMode
+  shellExecutionEndpoint: ShellExecutionEndpoint
+  customShellExecutable: string
   userName: string
   userAvatar: string
   conversationGuideSeen: boolean
@@ -271,12 +330,15 @@ export const useSettingsStore = create<SettingsStore>()(
       reasoningEffortByModel: {},
       teamToolsEnabled: false,
       builtinBrowserEnabled: true,
+      browserUserDataReuseEnabled: true,
       contextCompressionEnabled: true,
       editorWorkspaceEnabled: false,
       editorRemoteLanguageServiceEnabled: false,
       maxParallelToolCalls: DEFAULT_MAX_PARALLEL_TOOL_CALLS,
       toolResultFormat: 'toon',
       fileDiffViewMode: 'split',
+      shellExecutionEndpoint: DEFAULT_SHELL_EXECUTION_ENDPOINT,
+      customShellExecutable: '',
       userName: '',
       userAvatar: '',
       conversationGuideSeen: false,
@@ -342,7 +404,7 @@ export const useSettingsStore = create<SettingsStore>()(
     }),
     {
       name: 'opencowork-settings',
-      version: 19,
+      version: 20,
       storage: createJSONStorage(() => ipcStorage),
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Record<string, unknown>
@@ -500,6 +562,13 @@ export const useSettingsStore = create<SettingsStore>()(
         if (state.fileDiffViewMode === undefined) {
           state.fileDiffViewMode = 'split'
         }
+        if (state.browserUserDataReuseEnabled === undefined) {
+          state.browserUserDataReuseEnabled = true
+        }
+        state.shellExecutionEndpoint = normalizeShellExecutionEndpoint(state.shellExecutionEndpoint)
+        if (typeof state.customShellExecutable !== 'string') {
+          state.customShellExecutable = ''
+        }
         if (state.conversationGuideSeen === undefined) {
           state.conversationGuideSeen = false
         }
@@ -533,6 +602,8 @@ export const useSettingsStore = create<SettingsStore>()(
         maxParallelToolCalls: clampMaxParallelToolCalls(state.maxParallelToolCalls),
         toolResultFormat: state.toolResultFormat,
         fileDiffViewMode: state.fileDiffViewMode,
+        shellExecutionEndpoint: normalizeShellExecutionEndpoint(state.shellExecutionEndpoint),
+        customShellExecutable: state.customShellExecutable,
         userName: state.userName,
         userAvatar: state.userAvatar,
         conversationGuideSeen: state.conversationGuideSeen,
@@ -564,7 +635,8 @@ export const useSettingsStore = create<SettingsStore>()(
         projectDefaultDirectory: state.projectDefaultDirectory,
         lastProjectDirectory: state.lastProjectDirectory,
         recentWorkingTargets: state.recentWorkingTargets,
-        builtinBrowserEnabled: state.builtinBrowserEnabled
+        builtinBrowserEnabled: state.builtinBrowserEnabled,
+        browserUserDataReuseEnabled: state.browserUserDataReuseEnabled
         // NOTE: apiKey is intentionally excluded from localStorage persistence.
         // In production, it should be stored securely in the main process.
       })

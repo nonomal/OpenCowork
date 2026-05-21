@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Globe, Image, MonitorSmartphone, Puzzle, Trash2 } from 'lucide-react'
 import { Switch } from '@renderer/components/ui/switch'
@@ -19,6 +19,7 @@ import {
 } from '@renderer/stores/provider-store'
 import { useChatStore } from '@renderer/stores/chat-store'
 import { useAppPluginStore } from '@renderer/stores/app-plugin-store'
+import { useSettingsStore } from '@renderer/stores/settings-store'
 import { toast } from 'sonner'
 import { ipcClient } from '@renderer/lib/ipc/ipc-client'
 import { IPC } from '@renderer/lib/ipc/channels'
@@ -47,6 +48,15 @@ import {
   type AppPluginInstance,
   type AppPluginToolName
 } from '@renderer/lib/app-plugin/types'
+
+interface BrowserEmulationStatus {
+  reuseEnabled: boolean
+  browserName: string | null
+  browserProfilePath: string | null
+  usingDetectedBrowserProfile: boolean
+  userAgent: string
+  acceptLanguages: string
+}
 
 const TOOL_ARG_LABELS: Record<AppPluginToolName, string[]> = {
   [IMAGE_GENERATE_TOOL_NAME]: ['prompt', 'count'],
@@ -128,10 +138,14 @@ export function AppPluginPanel(): React.JSX.Element {
   const { t } = useTranslation('settings')
   const [selectedPluginId, setSelectedPluginId] = useState<AppPluginId>(IMAGE_PLUGIN_ID)
   const [clearingCookies, setClearingCookies] = useState(false)
+  const [browserEmulationStatus, setBrowserEmulationStatus] =
+    useState<BrowserEmulationStatus | null>(null)
   const activeProjectId = useChatStore((state) => state.activeProjectId)
   const pluginsByProject = useAppPluginStore((state) => state.pluginsByProject)
   const updatePlugin = useAppPluginStore((state) => state.updatePlugin)
   const togglePluginEnabled = useAppPluginStore((state) => state.togglePluginEnabled)
+  const browserUserDataReuseEnabled = useSettingsStore((state) => state.browserUserDataReuseEnabled)
+  const updateSettings = useSettingsStore((state) => state.updateSettings)
   const providers = useProviderStore((state) => state.providers)
   const activeImageProviderId = useProviderStore((state) => state.activeImageProviderId)
   const activeImageModelId = useProviderStore((state) => state.activeImageModelId)
@@ -191,6 +205,28 @@ export function AppPluginPanel(): React.JSX.Element {
   })
   const browserAllowedDomainText = (selectedPlugin.browserAllowedDomains ?? []).join('\n')
   const browserBlockedDomainText = (selectedPlugin.browserBlockedDomains ?? []).join('\n')
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadBrowserEmulationStatus(): Promise<void> {
+      try {
+        const result = (await ipcClient.invoke(IPC.BROWSER_EMULATION_STATUS)) as
+          | { success: true; status: BrowserEmulationStatus }
+          | { success: false; error?: string }
+        if (!cancelled && result.success) {
+          setBrowserEmulationStatus(result.status)
+        }
+      } catch {
+        if (!cancelled) setBrowserEmulationStatus(null)
+      }
+    }
+
+    void loadBrowserEmulationStatus()
+    return () => {
+      cancelled = true
+    }
+  }, [browserUserDataReuseEnabled])
 
   const handleClearBrowserCookies = async (): Promise<void> => {
     setClearingCookies(true)
@@ -455,6 +491,38 @@ export function AppPluginPanel(): React.JSX.Element {
                       ? t('plugin.browser.clearingCookies')
                       : t('plugin.browser.clearCookies')}
                   </Button>
+                </div>
+
+                <div className="rounded-lg border bg-muted/10 p-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium">{t('plugin.browser.userDataReuse')}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t('plugin.browser.userDataReuseDesc')}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={browserUserDataReuseEnabled}
+                      onCheckedChange={(checked) => {
+                        updateSettings({ browserUserDataReuseEnabled: checked })
+                        toast.info(t('plugin.browser.restartRequired'))
+                      }}
+                    />
+                  </div>
+
+                  <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                    {browserEmulationStatus?.usingDetectedBrowserProfile ? (
+                      <p>
+                        {t('plugin.browser.activeProfile', {
+                          browserName: browserEmulationStatus.browserName,
+                          path: browserEmulationStatus.browserProfilePath
+                        })}
+                      </p>
+                    ) : (
+                      <p>{t('plugin.browser.profileFallback')}</p>
+                    )}
+                    <p>{t('plugin.browser.restartRequired')}</p>
+                  </div>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">

@@ -4,7 +4,7 @@
   </a>
   <h1 align="center">OpenCowork</h1>
   <p align="center">
-    <strong>Open-source desktop platform for multi-agent collaboration</strong><br>
+    <strong>Open-source desktop platform for multi-agent AI collaboration</strong><br>
     Empowering AI agents with local tools, parallel teamwork, and seamless workplace integration.
   </p>
 </p>
@@ -19,7 +19,7 @@
   <a href="README.zh.md">中文文档</a> •
   <a href="#why-opencowork">Why OpenCowork</a> •
   <a href="#key-features">Features</a> •
-  <a href="#inspiration">Inspiration</a> •
+  <a href="#architecture">Architecture</a> •
   <a href="#quick-start">Quick Start</a>
 </p>
 
@@ -39,10 +39,10 @@ Traditional LLM interfaces are often "environment-isolated islands." Developers 
 
 **OpenCowork solves this by providing:**
 
-- **Local Agency:** Agents can directly read/write files and execute shell commands with your permission.
-- **Context Awareness:** No more manual context feeding. Agents explore your codebase and logs autonomously.
-- **Task Orchestration:** Complex tasks (like "Refactor this module and update tests") are broken down and handled by specialized sub-agents.
-- **Human-in-the-loop:** You stay in control with a transparent tool-call approval system.
+- **Local Agency** — Agents can directly read/write files and execute shell commands with your permission.
+- **Context Awareness** — No more manual context feeding. Agents explore your codebase and logs autonomously.
+- **Task Orchestration** — Complex tasks ("Refactor this module and update tests") are broken down and handled by specialized sub-agents.
+- **Human-in-the-loop** — You stay in control with a transparent tool-call approval system.
 
 ## 💡 Inspiration
 
@@ -50,15 +50,58 @@ OpenCowork is deeply inspired by **Claude CoWork**. We believe the future of pro
 
 ## ✨ Key Features
 
-- **Multi-Agent Loop:** A lead agent coordinates parallel teammates to tackle multi-dimensional problems.
-- **Native Toolbox:** Built-in tools for File I/O, PowerShell/Bash, Code Search, and UI Previews.
-- **Messaging Integration:** Bridge your local agents to Feishu/Lark, DingTalk, Discord, and more.
-- **Persistence:** Cron-based scheduling for automated daily reports or monitoring tasks.
-- **Extensible Skills:** Load custom logic via simple Markdown-defined skills and agents.
+### ⚙️ Core Runtime
+
+- **4-layer Electron architecture** — Main process, Preload bridge, Renderer UI, and Agent runtime running in main process.
+- **Provider-agnostic** — Works with any LLM provider; bring your own model.
+- **TypeScript throughout** — End-to-end type safety from database to UI.
+
+### 🔄 5 Session Modes
+
+Every conversation chooses the right mode for the task:
+
+- `chat` — Conversational Q&A, no tool access.
+- `clarify` — Ask questions to refine vague requirements before execution.
+- `cowork` — Full agent mode: code search, file I/O, shell, and sub-agent delegation.
+- `code` — Focused code generation and editing with Monaco Editor integration.
+- `acp` — Autonomous coding pipeline: plan, implement, review autonomously.
+
+### 🧰 Native Toolbox & Rich Skills
+
+- **Built-in tools** — File I/O, Shell (bash/powershell), Code Search (glob/grep), Web Scraping, OCR, Excel/Word/PDF processing.
+- **Extensible Skills** — Load domain-specific capabilities via Markdown-defined skills:
+  - **1RPA** — Supplier invoice upload for SRM systems.
+  - **CSV Pipeline** — Filter, join, aggregate, and transform tabular data.
+  - **Document Suite** — Create & edit DOCX, XLSX, PDF with tracked changes and formatting.
+  - **Web Scraper** — Extract structured content from live pages.
+  - **Image OCR** — Read text from screenshots and scanned documents.
+  - **Email Drafter** — Compose professional correspondence from templates.
+  - **WeChat UI Sender** — Send messages via desktop WeChat automation.
+
+### 💬 8 Workplace Messaging Plugins
+
+Bridge your local agents to any messaging platform:
+
+| Platform                  | Support |
+| ------------------------- | ------- |
+| Feishu / Lark             | ✅      |
+| DingTalk                  | ✅      |
+| Discord                   | ✅      |
+| QQ                        | ✅      |
+| Telegram                  | ✅      |
+| WeCom (WeChat Work)       | ✅      |
+| Weixin (Official Account) | ✅      |
+| WhatsApp                  | ✅      |
+
+### ⏰ Persistence & Cron Agent
+
+- **SQLite persistence** — Messages, sessions, projects, tasks, and plans survive restarts.
+- **Cron scheduling** — Schedule agents for daily reports, log monitoring, or any recurring task.
+- **Multi-channel delivery** — Results can be delivered via desktop notification or any messaging plugin.
 
 ## 🛠️ Quick Start
 
-Prerequisites:
+### Prerequisites
 
 - Node.js >= 18
 - npm >= 9
@@ -70,35 +113,73 @@ npm install
 npm run dev
 ```
 
-## 🏗️ Architecture Overview
+### Key Commands
 
-OpenCowork follows a three-process Electron architecture to ensure security and performance.
+| Command             | Description                           |
+| ------------------- | ------------------------------------- |
+| `npm run dev`       | Start Electron + Vite with hot reload |
+| `npm run build`     | Typecheck then build for production   |
+| `npm run build:win` | Build Windows installer               |
+| `npm run lint`      | ESLint with cache                     |
+| `npm run typecheck` | TypeScript check (main + renderer)    |
+| `npm run format`    | Prettier auto-format                  |
+
+> **Data directory:** `~/.open-cowork/` — contains SQLite database (`data.db`), config, agents, commands, and prompts.
+
+## 🏗️ Architecture
+
+OpenCowork follows a **4-layer Electron architecture** for security and performance.
 
 ```mermaid
 graph TB
-  subgraph "Renderer (Agent Logic)"
+  subgraph "Renderer — React 19 UI"
     A[React UI] --> B[Agent Loop]
     B --> C[Tool System]
+    C --> C1[File I/O]
+    C --> C2[Shell]
+    C --> C3[Code Search]
+    C --> C4[Sub-Agents]
   end
 
-  subgraph "Main (System Access)"
-    F[SQLite]
-    G[File System]
-    H[Shell]
-    J[Plugins]
+  subgraph "Preload — Secure Bridge"
+    D[contextBridge API]
   end
 
-  A -.->|IPC| F
-  A -.->|IPC| G
-  A -.->|IPC| H
-  A -.->|IPC| J
+  subgraph "Main Process — System Access"
+    E[IPC Handlers]
+    F[SQLite / File System]
+    G[Shell / SSH]
+    H[Messaging Plugins]
+    I[Cron Agent]
+  end
+
+  subgraph "Agent Runtime — Main Process"
+    J[js-agent-runtime.ts]
+    K[MCP Client]
+    L[LLM Provider Abstraction]
+  end
+
+  A -.->|ipcRenderer.invoke| D
+  D -.->|ipcMain.handle| E
+  E --> F
+  E --> G
+  E --> H
+  E --> I
+  A -.->|Direct Call| J
+  J --> K
+  J --> L
 ```
+
+- **Renderer** — React 19 UI, agent loop, and tool system.
+- **Preload** — Secure `contextBridge` with a narrow API surface.
+- **Main Process** — IPC handlers, SQLite, filesystem, shell, SSH, plugins.
+- **Agent Runtime** — Provider-agnostic runtime (`js-agent-runtime.ts`) with MCP client support.
 
 ## 🌟 Use Cases
 
-- **Autonomous Coding:** Let agents refactor code, fix bugs, and write tests directly in your workspace.
-- **Automated Ops:** Schedule agents to monitor logs or system status and report to Feishu/Slack.
-- **Data Research:** Agents can scrape web data, process local CSVs, and generate visual reports.
+- **Autonomous Coding** — Let agents refactor code, fix bugs, and write tests directly in your workspace.
+- **Automated Ops** — Schedule agents to monitor logs or system status and report to Feishu/Slack.
+- **Data Research** — Agents can scrape web data, process local CSVs, and generate visual reports.
 
 ## 🔗 Ecosystem Pairing
 

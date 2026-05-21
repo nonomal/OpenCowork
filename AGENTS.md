@@ -8,19 +8,19 @@ OpenCowork is an open-source desktop platform for multi-agent AI collaboration. 
 
 ## Tech Stack
 
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| Runtime | Electron | 36.9.5 |
-| Frontend | React | 19.2.4 |
-| Language | TypeScript | strict |
-| State | Zustand | - |
-| Styling | Tailwind CSS v4 | - |
-| Editor | Monaco Editor | - |
-| Terminal | xterm.js | 6.x |
-| Database | better-sqlite3 | - |
-| i18n | react-i18next | en/zh |
-| Build | electron-vite + electron-builder | - |
-| Node.js | >= 18 | - |
+| Layer    | Technology                       | Version |
+| -------- | -------------------------------- | ------- |
+| Runtime  | Electron                         | 36.9.5  |
+| Frontend | React                            | 19.2.4  |
+| Language | TypeScript                       | strict  |
+| State    | Zustand                          | -       |
+| Styling  | Tailwind CSS v4                  | -       |
+| Editor   | Monaco Editor                    | -       |
+| Terminal | xterm.js                         | 6.x     |
+| Database | better-sqlite3                   | -       |
+| i18n     | react-i18next                    | en/zh   |
+| Build    | electron-vite + electron-builder | -       |
+| Node.js  | >= 18                            | -       |
 
 ## Project Structure
 

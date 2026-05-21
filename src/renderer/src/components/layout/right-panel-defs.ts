@@ -18,6 +18,7 @@ export const BOTTOM_TERMINAL_DOCK_MIN_HEIGHT = 160
 export const BOTTOM_TERMINAL_DOCK_MAX_HEIGHT = 560
 
 export const RIGHT_PANEL_TAB_ORDER: RightPanelTabKind[] = [
+  'context',
   'review',
   'preview',
   'browser',

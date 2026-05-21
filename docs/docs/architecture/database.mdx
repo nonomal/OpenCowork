@@ -1,26 +1,25 @@
 ---
 title: 数据库设计
-description: OpenCowork SQLite 数据库的表结构与迁移策略。
+description: OpenCowork SQLite 数据库的表结构、业务域和迁移策略。
 ---
 
 # 数据库设计 / Database Design
 
-OpenCowork 使用 SQLite（`better-sqlite3`）作为本地持久化核心，数据库文件位于 `~/.open-cowork/data.db`，初始化入口为 `src/main/db/database.ts`。
+OpenCowork 使用 **SQLite + better-sqlite3** 作为本地持久化核心。数据库文件位于 `~/.open-cowork/data.db`，初始化入口在 `src/main/db/database.ts`。
 
-## 配置 / Configuration
+## 基础配置 / Database config
 
-- **引擎**：`better-sqlite3`
-- **位置**：`~/.open-cowork/data.db`
-- **模式**：WAL + `foreign_keys = ON`
-- **初始化方式**：应用启动时集中建表与幂等迁移
+| 项 | 值 |
+| --- | --- |
+| 引擎 | `better-sqlite3` |
+| 位置 | `~/.open-cowork/data.db` |
+| 模式 | WAL |
+| 外键 | `foreign_keys = ON` |
+| 迁移方式 | 集中建表 + 幂等列补齐 |
 
-## 当前数据模型 / Current Data Model
+## 主要数据域 / Main domains
 
-数据库已经不只是聊天记录，而是围绕项目化 Agent 工作台展开。
-
-### 1. 会话域 / Conversation Domain
-
-#### `sessions`
+### 1) 会话与消息 / Sessions & messages
 
 ```sql
 CREATE TABLE sessions (
@@ -35,18 +34,19 @@ CREATE TABLE sessions (
   icon TEXT,
   plugin_id TEXT,
   ssh_connection_id TEXT,
-  project_id TEXT
+  project_id TEXT,
+  provider_id TEXT,
+  model_id TEXT,
+  plan_id TEXT,
+  external_chat_id TEXT
 );
-```
 
-#### `messages`
-
-```sql
 CREATE TABLE messages (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
+  meta TEXT,
   created_at INTEGER NOT NULL,
   usage TEXT,
   sort_order INTEGER NOT NULL,
@@ -54,15 +54,7 @@ CREATE TABLE messages (
 );
 ```
 
-特点：
-
-- `content` 与 `usage` 使用 JSON 文本存储复杂结构。
-- `sort_order` 保证流式/插入场景下消息顺序稳定。
-- `sessions` 已携带 `project_id`，说明数据模型从单会话提升到了项目上下文。
-
-### 2. 项目与协作域 / Project & Collaboration Domain
-
-#### `projects`
+### 2) 项目、计划、任务 / Projects, plans, tasks
 
 ```sql
 CREATE TABLE projects (
@@ -75,11 +67,7 @@ CREATE TABLE projects (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
-```
 
-#### `plans`
-
-```sql
 CREATE TABLE plans (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -92,11 +80,7 @@ CREATE TABLE plans (
   updated_at INTEGER NOT NULL,
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
-```
 
-#### `tasks`
-
-```sql
 CREATE TABLE tasks (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -117,97 +101,85 @@ CREATE TABLE tasks (
 );
 ```
 
-这里的 `tasks` 已经绑定 `session_id`，不再只是 plan 附属表。
-
-### 3. 调度与执行域 / Scheduling Domain
-
-#### `cron_jobs`
+### 3) 计划与目标 / Goals
 
 ```sql
-CREATE TABLE cron_jobs (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  schedule_kind TEXT NOT NULL,
-  schedule_at INTEGER,
-  schedule_every INTEGER,
-  schedule_expr TEXT,
-  schedule_tz TEXT DEFAULT 'UTC',
-  prompt TEXT NOT NULL,
-  agent_id TEXT,
-  model TEXT,
-  working_folder TEXT,
-  session_id TEXT,
-  source_project_id TEXT,
-  delivery_mode TEXT DEFAULT 'desktop',
-  enabled INTEGER DEFAULT 1,
-  delete_after_run INTEGER DEFAULT 0,
-  max_iterations INTEGER DEFAULT 15,
-  last_fired_at INTEGER,
-  fire_count INTEGER DEFAULT 0,
+CREATE TABLE session_goals (
+  session_id TEXT PRIMARY KEY NOT NULL,
+  goal_id TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'budget_limited', 'complete')),
+  token_budget INTEGER,
+  tokens_used INTEGER NOT NULL DEFAULT 0,
+  time_used_seconds INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE session_goal_events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  goal_id TEXT,
+  event_type TEXT NOT NULL,
+  message TEXT,
+  metadata_json TEXT,
+  created_at INTEGER NOT NULL
+);
 ```
 
-#### `cron_runs` / `cron_run_messages` / `cron_run_logs`
+### 4) Cron / Scheduling
 
-当前实现会把每次定时任务运行拆成：
-
-- 运行记录 `cron_runs`
-- 消息快照 `cron_run_messages`
-- 日志流水 `cron_run_logs`
-
-这比旧版只有 `cron_runs.output` 的模型更适合排障与审计。
-
-### 4. 连接与知识域 / Connection & Knowledge Domain
-
-#### `ssh_groups` / `ssh_connections`
-
-用于保存远程连接分组、认证方式、默认目录、proxy jump、keep alive 等配置。
-
-#### Wiki 相关表
-
-当前数据库还包含完整 Wiki 体系：
-
-- `wiki_documents`
-- `wiki_sections`
-- `wiki_section_sources`
-- `wiki_project_state`
-- `wiki_generation_runs`
-
-说明项目已经支持围绕代码仓库生成和维护结构化知识库。
-
-### 5. 可观测性与附加域 / Observability & Auxiliary Domain
-
-#### `usage_events`
-
-记录模型调用的 token、价格、耗时、TTFT、TPS、provider/model 元信息，用于成本分析与性能观测。
-
-#### `draw_runs`
-
-记录绘图/图像生成任务历史、结果与错误信息。
-
-## 迁移策略 / Migration Strategy
-
-当前 schema 采用“集中建表 + 幂等列补齐 + 渐进数据迁移”模式：
-
-```typescript
-ensureColumn(db, 'sessions', 'message_count', 'INTEGER NOT NULL DEFAULT 0')
-try {
-  db.exec(`ALTER TABLE sessions ADD COLUMN project_id TEXT`)
-} catch {
-  // 已存在则忽略
-}
+```sql
+cron_jobs
+cron_runs
+cron_run_messages
+cron_run_logs
 ```
 
-除了简单 `ALTER TABLE`，还包含业务迁移逻辑，例如：
+`cron_jobs` 保存调度定义，`cron_runs` 保存每次运行快照，`cron_run_messages` / `cron_run_logs` 保存过程记录。
 
-- 将旧 `sessions` 自动归并到 `projects`
-- 为缺失 project 的历史 session 分配默认本地项目
-- 根据 `working_folder + ssh_connection_id` 去重生成项目记录
+### 5) SSH / Remote access
 
-## 设计结论 / Design Takeaways
+```sql
+ssh_groups
+ssh_connections
+```
 
-- 数据库已经从“聊天应用 schema”演进为“本地 Agent IDE / 工作台 schema”。
-- 核心主线是 **project -> session -> messages / plans / tasks**。
-- Cron、SSH、Wiki、Usage Analytics 都已是一级持久化对象，而非临时运行时状态。
+SSH 不只是连接配置，还承载远程目录、身份认证、默认目录、代理跳转、保活间隔等信息。
+
+### 6) Wiki / Knowledge base
+
+```sql
+wiki_documents
+wiki_sections
+wiki_section_sources
+wiki_project_state
+wiki_generation_runs
+```
+
+### 7) 可观测性 / Observability
+
+```sql
+usage_events
+draw_runs
+agent_change_sets
+agent_file_changes
+qq_wakeup_windows
+```
+
+## 迁移策略 / Migration strategy
+
+OpenCowork 采用的是“**加列不删列**”的演进策略：
+
+- 先集中 `CREATE TABLE IF NOT EXISTS`
+- 再通过 `ensureColumn()` 或 `ALTER TABLE ... ADD COLUMN` 补齐旧列
+- 再做少量回填，例如把旧 sessions 迁移到 projects
+
+这种策略简单、稳定，也适合桌面应用的本地数据库。
+
+## 设计结论 / Design takeaways
+
+- 数据库已经从“聊天记录仓库”演进成“本地 Agent 工作台的核心存储层”
+- 主线关系是：`project -> session -> messages / plans / tasks`
+- Cron、SSH、Wiki、Goal、Usage 都是一级对象，不是附属功能
+- 文档里如果看到旧 schema，应该以 `src/main/db/database.ts` 为准

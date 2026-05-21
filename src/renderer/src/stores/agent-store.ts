@@ -92,7 +92,13 @@ function limitToolResultContent(
     | { type: 'text'; text: string }
     | {
         type: 'image'
-        source: { type: 'base64' | 'url'; mediaType?: string; data?: string; url?: string }
+        source: {
+          type: 'base64' | 'url'
+          mediaType?: string
+          data?: string
+          url?: string
+          filePath?: string
+        }
       }
   > = []
   let totalChars = 0
@@ -117,6 +123,16 @@ function limitToolResultContent(
       block.source.data &&
       block.source.data.length > MAX_IMAGE_BASE64_CHARS
     ) {
+      const sourceWithoutData = { ...block.source }
+      delete sourceWithoutData.data
+      if (sourceWithoutData.filePath || sourceWithoutData.url) {
+        normalized.push({
+          type: 'image',
+          source: sourceWithoutData
+        })
+        continue
+      }
+
       normalized.push({
         type: 'text',
         text: `[image data omitted, ${block.source.data.length} base64 chars]`

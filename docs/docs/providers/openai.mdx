@@ -1,40 +1,63 @@
 ---
 title: OpenAI
-description: 配置 OpenAI GPT 系列模型及 Azure OpenAI。
+description: 配置 OpenAI、Azure OpenAI、Responses API 和图像模型。
 ---
 
 # OpenAI / Azure OpenAI
 
-OpenCowork 支持 OpenAI 的两种 API 协议：Chat Completions 和 Responses API。
+OpenCowork 对 OpenAI 系列提供了三条主线：
 
-## 获取 API Key
+- **openai-chat**：Chat Completions 风格接口
+- **openai-responses**：Responses API
+- **openai-images**：图像生成
 
-1. 访问 [platform.openai.com](https://platform.openai.com/)
-2. 进入 **API Keys** 页面
-3. 点击 **Create new secret key**
+## 配置入口 / Setup
 
-## 在 OpenCowork 中配置
+进入 **设置 → AI 提供商 → OpenAI**，填入 API Key。默认 Base URL 是：
 
-进入 **设置 → AI 提供商 → OpenAI**，填入 API Key。
-
-## 支持的模型 / Supported Models
-
-| 模型          | 协议               | 特性       |
-| ------------- | ------------------ | ---------- |
-| `gpt-4o`      | `openai-chat`      | 视觉、快速 |
-| `gpt-4o-mini` | `openai-chat`      | 低成本     |
-| `o1`          | `openai-responses` | 推理模型   |
-| `o3-mini`     | `openai-responses` | 快速推理   |
-
-## Azure OpenAI
-
-使用 Azure OpenAI 时，设置自定义 Base URL：
-
+```text
+https://api.openai.com/v1
 ```
-Base URL: https://your-resource.openai.azure.com/openai/deployments/your-deployment
-API Key: your-azure-api-key
-```
+
+如果你用的是 Azure OpenAI，可以把 Base URL 指向你的 Azure deployment 路径。
+
+## 常见模型 / Common model examples
+
+| 协议 | 典型用途 | 示例 |
+| --- | --- | --- |
+| `openai-chat` | 通用对话、视觉、图像相关能力 | `gpt-4o`、`gpt-4o-mini`、`gpt-4.1` |
+| `openai-responses` | reasoning / 新版 Responses API | `o1`、`o3-mini` |
+| `openai-chat` + image category | 图像生成 | `dall-e-3`、Flux 类图像模型 |
+
+> 模型名称会随 OpenAI / Azure / 代理网关的配置而变化，文档中以“常见示例”为准。
 
 ## Responses API
 
-`openai-responses` 协议使用 OpenAI 的新版 Responses API，支持推理模型（o1、o3）的流式输出。
+Responses API 适合需要：
+
+- reasoning 流式输出
+- 更统一的 response id 续接
+- 新版工具调用语义
+
+OpenCowork 会把 Responses 事件转换成统一的 stream events，再交给 Agent Loop。
+
+## Azure OpenAI
+
+Azure OpenAI 本质上也是 OpenAI-compatible，只是 Base URL 和 deployment 方式不同。配置时通常需要：
+
+- Azure resource base URL
+- 对应的 deployment 名称
+- Azure API key
+
+## 图像生成 / Image generation
+
+如果模型被标记为 `category = image`，就可以被图像插件识别，并通过 `ImageGenerate` 工具调用。
+
+## 你在代码里会看到什么 / What to look for
+
+- `src/renderer/src/lib/api/openai-chat.ts`
+- `src/renderer/src/lib/api/openai-responses.ts`
+- `src/renderer/src/lib/api/openai-images.ts`
+- `src/renderer/src/lib/api/openai-images-provider.ts`
+- `src/renderer/src/stores/providers/openai.ts`
+- `src/renderer/src/stores/providers/azure-openai.ts`

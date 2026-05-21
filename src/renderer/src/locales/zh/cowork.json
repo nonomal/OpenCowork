@@ -12,6 +12,23 @@
     "runningCommands": "{{count}} 个运行中命令",
     "openSession": "进入会话",
     "stopCommand": "停止命令",
+    "backgroundShellsTitle": "后台任务",
+    "backgroundShellsEmpty": "暂无后台 Shell 任务",
+    "backgroundShellsSummary": "{{running}} 个运行中 · 共 {{total}} 个",
+    "clearFinishedShells": "清除已结束的 Shell 任务",
+    "currentSession": "当前会话",
+    "otherSession": "其他会话",
+    "globalShell": "全局 Shell",
+    "stopShell": "停止 Shell 任务",
+    "removeShell": "移除 Shell 任务",
+    "moreBackgroundShells": "还有 {{count}} 个后台 Shell 任务",
+    "shellOutputLines": "{{count}} 行输出",
+    "shellStatus": {
+      "running": "运行中",
+      "exited": "已退出",
+      "stopped": "已停止",
+      "error": "错误"
+    },
     "autoApproved": "自动批准：{{count}}",
     "noContext": "未加载上下文",
     "noContextDesc": "选择工作目录以允许助手访问你的项目"

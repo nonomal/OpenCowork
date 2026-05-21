@@ -770,9 +770,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
 
         const titleInput = buildSmartRenameInput(session)
         if (!titleInput) {
-          toast.error(
-            t('sidebar_toast.smartRenameNoContent')
-          )
+          toast.error(t('sidebar_toast.smartRenameNoContent'))
           return
         }
 
@@ -780,9 +778,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
         const nextTitle = result?.title.trim()
         const nextIcon = result?.icon.trim()
         if (!nextTitle) {
-          toast.error(
-            t('sidebar_toast.smartRenameFailed')
-          )
+          toast.error(t('sidebar_toast.smartRenameFailed'))
           return
         }
 
@@ -790,16 +786,11 @@ export function WorkspaceSidebar(): React.JSX.Element {
         if (nextIcon) {
           updateSessionIcon(sessionId, nextIcon)
         }
-        toast.success(
-          t('sidebar_toast.smartRenameSuccess')
-        )
+        toast.success(t('sidebar_toast.smartRenameSuccess'))
       } catch (error) {
-        toast.error(
-          t('sidebar_toast.smartRenameFailed'),
-          {
-            description: error instanceof Error ? error.message : String(error)
-          }
-        )
+        toast.error(t('sidebar_toast.smartRenameFailed'), {
+          description: error instanceof Error ? error.message : String(error)
+        })
       } finally {
         setAutoRenamingSessionId((current) => (current === sessionId ? null : current))
       }
@@ -1405,7 +1396,9 @@ export function WorkspaceSidebar(): React.JSX.Element {
                                   <Pin className="size-3.5 text-amber-500" />
                                 ) : null}
                                 <span className="text-muted-foreground/80">
-                                  {project.sshConnectionId ? t('sidebar.sshLabel') : t('sidebar.localLabel')}
+                                  {project.sshConnectionId
+                                    ? t('sidebar.sshLabel')
+                                    : t('sidebar.localLabel')}
                                 </span>
                                 <span>{group.sessions.length}</span>
                                 <ChevronRight

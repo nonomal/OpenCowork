@@ -1,41 +1,94 @@
 ---
 title: 基础配置
-description: API Key、语言、主题等基础配置说明。
+description: 解释 OpenCowork 的设置项、持久化文件与常见配置路径。
 ---
 
 # 基础配置 / Configuration
 
-## 设置面板 / Settings Panel
+## 设置面板 / Settings panel
 
-通过右上角设置图标打开设置面板，包含以下配置项：
+通过右上角的设置按钮打开设置面板。常见的标签页包括：
 
-### API Key 配置
+- General / General
+- Memory / Memory
+- Analytics / Analytics
+- Migration / Migration
+- Provider / Provider
+- Model management / Model management
+- Model / Model
+- Plugin / Plugin
+- Channel / Channel
+- MCP / MCP
+- Web search / Web search
+- Skills market / Skills market
+- About / About
 
-每个 AI 提供商需要单独配置 API Key：
+## 主要配置项 / Main configuration areas
 
-| 提供商    | 配置项                                    |
-| --------- | ----------------------------------------- |
-| Anthropic | `ANTHROPIC_API_KEY`                       |
-| OpenAI    | `OPENAI_API_KEY` + 可选 Base URL          |
-| DeepSeek  | API Key + Base URL                        |
-| Ollama    | Base URL（默认 `http://localhost:11434`） |
+### AI 提供商
 
-### 语言设置
+在 **AI 提供商** 中添加 provider 和 model。每个模型可配置：
 
-支持中文（简体）和英文界面切换，设置后立即生效。
+- 名称
+- Base URL
+- API Key
+- category：`chat` / `image`
+- `vision`
+- `thinking`
+- `reasoning`
+- 价格信息（可选）
 
-### 主题设置
-
-支持亮色、暗色、跟随系统三种主题模式。
+> 图像模型必须标记为 `image`，这样图像插件才会把它识别为可用输入源。
 
 ### 工作目录
 
-设置 Agent 的默认工作目录，影响文件读写和 Shell 命令的执行路径。
+工作目录决定文件工具和 Shell 工具默认作用的路径。你可以：
 
-### 模型默认值
+- 为全局设置默认目录
+- 为某个项目单独指定目录
+- 在会话中覆盖当前目录
 
-可以为每个会话设置默认模型，也可以在会话中临时切换。
+### 代理
 
-## 数据持久化 / Data Persistence
+`systemProxyUrl` 会直接应用到 Electron 的默认 session 代理设置。
 
-所有配置通过 Zustand persist 中间件持久化到本地存储（`localStorage`），数据库内容存储在 `~/.open-cowork/data.db`。
+### Web 搜索
+
+可配置 Web 搜索提供商、API Key、超时参数等，让 `WebSearch` / `WebFetch` 工具可用。
+
+### 消息平台 / Channels
+
+聊天频道在 **设置 → 聊天频道** 中配置，配置会保存到 `plugins.json`。
+
+### MCP
+
+MCP 服务器配置保存在 `mcp-servers.json`，并可按项目绑定。
+
+## 持久化文件 / Persistence files
+
+| 文件 | 作用 |
+| --- | --- |
+| `~/.open-cowork/data.db` | 会话、消息、计划、任务、Cron、SSH、Wiki、Goal、Usage 等主要业务数据 |
+| `~/.open-cowork/settings.json` | 设置面板中的通用偏好 |
+| `~/.open-cowork/config.json` | 需要安全保存的配置片段 |
+| `~/.open-cowork/mcp-servers.json` | MCP 服务器配置 |
+| `~/.open-cowork/plugins.json` | 消息平台插件实例 |
+| `~/.open-cowork/teams/` | Team Runtime 状态 |
+| `~/.open-cowork/agents/` | 用户自定义 sub-agent |
+| `~/.open-cowork/commands/` | 用户自定义 slash commands |
+| `~/.open-cowork/prompts/` | 用户自定义 prompt 模板 |
+| `~/.agents/skills/` | Skills 存放目录（内置内容首次运行后同步到这里） |
+
+## 常见问题 / Common questions
+
+### 为什么改了 provider 配置后立刻生效？
+
+因为 provider 配置会通过本地持久化存储和 store 同步，不需要重新安装应用。
+
+### 为什么系统代理会影响整个应用？
+
+因为代理直接配置到了 Electron 的 `defaultSession`。
+
+### 为什么我找不到 skills 目录？
+
+Skills 不在 `~/.open-cowork/skills/`，而是在 `~/.agents/skills/`。

@@ -1,103 +1,152 @@
 ---
 title: 工具系统
-description: OpenCowork 工具系统的架构与内置工具详解。
+description: OpenCowork 工具注册、调用、审批和完整工具分类。
 ---
 
 # 工具系统 / Tool System
 
-工具系统让 Agent 能够与外部世界交互，位于 `src/renderer/src/lib/tools/`。
+工具系统是 OpenCowork 把“聊天”变成“执行”的关键。入口位于 `src/renderer/src/lib/tools/`，统一通过 `toolRegistry` 注册。
 
-## ToolHandler 接口 / Interface
+## ToolHandler 结构 / ToolHandler shape
 
-每个工具实现 `ToolHandler` 接口：
-
-```typescript
+```ts
 interface ToolHandler {
-  // JSON Schema 工具定义（传给 LLM）
   definition: Tool
-
-  // 执行工具，返回结果
   execute(input: unknown, ctx: ToolContext): Promise<ToolResultContent>
-
-  // 可选：是否需要用户审批
   requiresApproval?(input: unknown, ctx: ToolContext): boolean
 }
 ```
 
-## 工具注册 / Registration
+## 注册顺序 / Registration order
 
-工具通过全局 `toolRegistry` 注册：
+`src/renderer/src/lib/tools/index.ts` 的注册顺序大致是：
 
-```typescript
-import { toolRegistry } from '@renderer/lib/agent/tool-registry'
+1. 基础任务与文件工具
+2. 搜索与 Shell 工具
+3. Widget / AskUser / Plan / Cron / Notify / Goal
+4. 动态目录刷新（skills / sub-agents）
+5. Team 工具
+6. Web Search 动态注册
+7. 应用插件工具动态注册
+8. MCP 工具运行时发现
 
-toolRegistry.register(myTool)
-toolRegistry.unregister('tool-name')
-```
+## 工具分类 / Tool categories
 
-插件工具在插件启用/禁用时动态注册/注销。
+### 1) 文件系统
 
-## 内置工具 / Built-in Tools
+- `Read`
+- `Write`
+- `Edit`
 
-### 文件系统
+### 2) 搜索
 
-| 工具    | 描述                     |
-| ------- | ------------------------ |
-| `Read`  | 读取文件内容，支持行范围 |
-| `Write` | 写入文件（覆盖）         |
-| `Edit`  | 精确字符串替换编辑       |
+- `Glob`
+- `Grep`
 
-### 搜索
+### 3) Shell
 
-| 工具   | 描述                         |
-| ------ | ---------------------------- |
-| `Glob` | 文件名模式匹配               |
-| `Grep` | 内容正则搜索（基于 ripgrep） |
+- `Bash`
 
-### Shell
+### 4) 计划与任务
 
-| 工具   | 描述                      |
-| ------ | ------------------------- |
-| `Bash` | 执行 Shell 命令，支持超时 |
+- `EnterPlanMode`
+- `ExitPlanMode`
+- `TaskCreate`
+- `TaskGet`
+- `TaskUpdate`
+- `TaskList`
 
-### 任务管理
+### 5) 子代理与团队
 
-| 工具         | 描述         |
-| ------------ | ------------ |
-| `TaskCreate` | 创建任务     |
-| `TaskUpdate` | 更新任务状态 |
-| `TaskGet`    | 获取任务详情 |
-| `TaskList`   | 列出所有任务 |
+- `Task`（统一子代理入口）
+- `TeamCreate`
+- `SendMessage`
+- `TeamStatus`
+- `TeamDelete`
 
-### 应用插件工具
+### 6) 目标与审批/提问
 
-| 工具                                                             | 描述                                                                       |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `ImageGenerate`                                                  | 根据提示词生成图片（1–4 张），需启用[图像插件](/docs/features/app-plugins) |
-| `DesktopScreenshot`                                              | 截取当前屏幕，属于隐藏的桌面控制插件能力                                   |
-| `DesktopClick` / `DesktopType` / `DesktopScroll` / `DesktopWait` | 桌面交互工具，和图像工具一起由应用插件层动态注册                           |
+- `get_goal`
+- `create_goal`
+- `update_goal`
+- `AskUserQuestion`
+- `Notify`
+- `visualize_show_widget`
 
-### 其他
+### 7) Cron
 
-| 工具              | 描述                   |
-| ----------------- | ---------------------- |
-| `AskUserQuestion` | 向用户提问（支持选项） |
-| `Preview`         | 在侧边栏预览文件       |
-| `Notify`          | 发送系统通知           |
-| `Skill`           | 执行预定义技能/工作流  |
-| `Plan` 系列       | 计划模式工具           |
-| `Cron` 系列       | 定时任务工具           |
+- `CronAdd`
+- `CronUpdate`
+- `CronRemove`
+- `CronList`
 
-## 工具审批 / Approval
+### 8) Web / Browser
 
-危险操作（如 Shell 命令、文件写入）会触发用户审批：
+- `WebSearch`
+- `WebFetch`
+- `BrowserNavigate`
+- `BrowserGetContent`
+- `BrowserScreenshot`
+- `BrowserSnapshot`
+- `BrowserClick`
+- `BrowserType`
+- `BrowserScroll`
 
-```typescript
-requiresApproval(input, ctx) {
-  // forceApproval 模式下跳过审批（插件自动回复）
-  if (ctx.forceApproval) return false;
-  return true;
-}
-```
+### 9) App plugins
 
-审批结果会缓存，相同操作不会重复询问。
+- `ImageGenerate`
+- `DesktopScreenshot`
+- `DesktopClick`
+- `DesktopType`
+- `DesktopScroll`
+- `DesktopWait`
+
+### 10) 消息平台插件
+
+- `PluginSendMessage`
+- `PluginReplyMessage`
+- `PluginGetGroupMessages`
+- `PluginListGroups`
+- `PluginSummarizeGroup`
+- `PluginGetCurrentChatMessages`
+- Feishu / Weixin 专属工具（如 `FeishuSendImage`、`WeixinSendFile`）
+
+### 11) MCP
+
+MCP 工具不是预先写死的，它们由已连接 server 的能力发现动态注入。
+
+## 审批 / Approval
+
+并不是所有工具都会无条件执行。高风险工具通常会：
+
+- 需要用户审批
+- 或者在 `forceApproval` 场景下由插件自动回复流程接管
+
+常见需要审批的操作包括：
+
+- 文件写入 / 编辑
+- Shell 命令
+- 发消息到外部平台
+- 桌面点击 / 输入 / 滚动
+- Cron 创建或修改
+
+## 动态目录 / Dynamic catalogs
+
+`Skill` 和 `Task` 并不是两个割裂的系统：
+
+- `Skill` 从 `~/.agents/skills/` 加载
+- `Task` 从 `~/.open-cowork/agents/` 加载子代理定义
+
+这意味着工具系统可以根据用户本地安装的内容动态扩展。
+
+## 你在代码里会看到什么 / What to look for in code
+
+- `toolRegistry.register(...)`
+- `registerAllTools()`
+- `registerImagePluginTools()` / `registerBrowserTool()` / `registerDesktopControlTools()`
+- `refreshSkillTools()` / `refreshSubAgentTools()`
+- `isWebSearchToolRegistered()`
+
+## 结论 / Conclusion
+
+OpenCowork 的工具系统本质上是一个**可注册、可动态扩展、带审批策略的能力总线**。Agent 不是“猜怎么做”，而是“拿工具去做”。

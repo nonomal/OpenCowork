@@ -5,6 +5,7 @@
     "poweredBy": "Powered by OpenCowork",
     "groups": {
       "foundation": "基础",
+      "system": "系统",
       "ai": "AI 能力",
       "extensions": "扩展与集成",
       "about": "关于"
@@ -174,6 +175,57 @@
       "clearConfirm": "确定删除全部 {{count}} 个会话？该操作不可撤销。",
       "cleared": "已删除 {{count}} 个会话",
       "noSessions": "没有可用的会话"
+    }
+  },
+  "system": {
+    "title": "系统设置",
+    "subtitle": "Shell 运行时、代理与系统级执行偏好",
+    "platform": "当前系统：{{platform}}",
+    "shell": {
+      "endpoint": {
+        "title": "Shell 执行端",
+        "desc": "选择 OpenCowork 在 Bash 工具调用中使用哪个 shell。可选项会根据当前操作系统过滤。",
+        "selectLabel": "可用 Shell",
+        "options": {
+          "auto": {
+            "label": "自动（系统默认）",
+            "desc": "使用应用默认解析：macOS/Linux 优先 SHELL/zsh/bash/sh，Windows 使用系统命令 shell。"
+          },
+          "zsh": {
+            "label": "zsh（/bin/zsh）",
+            "desc": "前台和后台 Bash 工具执行都使用 zsh。"
+          },
+          "bash": {
+            "label": "bash（/bin/bash）",
+            "desc": "前台和后台 Bash 工具执行都使用 bash。"
+          },
+          "sh": {
+            "label": "sh（/bin/sh）",
+            "desc": "前台和后台 Bash 工具执行都使用 POSIX sh。"
+          },
+          "powershell": {
+            "label": "Windows PowerShell",
+            "desc": "在 Windows 上前台和后台 Bash 工具执行都使用 powershell.exe。"
+          },
+          "pwsh": {
+            "label": "PowerShell 7",
+            "desc": "在 Windows 上前台和后台 Bash 工具执行都使用 pwsh.exe。"
+          },
+          "cmd": {
+            "label": "命令提示符",
+            "desc": "在 Windows 上前台和后台 Bash 工具执行都使用 cmd.exe。"
+          },
+          "custom": {
+            "label": "自定义可执行文件",
+            "desc": "使用自定义 shell 可执行文件路径或命令名。"
+          }
+        }
+      },
+      "customPath": "自定义 Shell 可执行文件",
+      "customPlaceholderPosix": "/opt/homebrew/bin/zsh",
+      "customPlaceholderWindows": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "resolvedShell": "当前解析：{{shell}}",
+      "resolvedAuto": "当前解析：自动，将在执行时选择"
     }
   },
   "memory": {
@@ -367,6 +419,11 @@
       "clearingCookies": "清理中...",
       "cookiesCleared": "浏览器 Cookie 已清理",
       "cookiesClearFailed": "清理浏览器 Cookie 失败",
+      "userDataReuse": "复用本机浏览器 Profile",
+      "userDataReuseDesc": "默认开启。内置浏览器会使用接近 Chrome 的身份，并在检测到支持的浏览器 Profile 时复用该 Profile 的存储。",
+      "activeProfile": "当前 Profile：{{browserName}} — {{path}}",
+      "profileFallback": "未检测到支持的浏览器 Profile，当前使用 OpenCowork 自己的浏览器 Profile。",
+      "restartRequired": "重启 OpenCowork 后，此浏览器 Profile 模式才会完全生效。",
       "blockedDomains": "禁止访问域名",
       "blockedDomainsDesc": "命中的域名及其子域名会被拒绝导航。",
       "allowedDomains": "允许访问域名",

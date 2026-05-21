@@ -1,42 +1,42 @@
 ---
 title: DeepSeek
-description: 配置 DeepSeek 模型，包括推理模型 R1。
+description: 配置 DeepSeek 模型，尤其是推理模型 DeepSeek-R1。
 ---
 
 # DeepSeek
 
-DeepSeek 提供高性价比的大语言模型，包括强大的推理模型 DeepSeek-R1。
+DeepSeek 是 OpenCowork 里非常常用的 OpenAI-compatible 提供商之一，适合中文任务、代码任务和推理任务。
 
-## 获取 API Key
+## 配置入口 / Setup
 
-1. 访问 [platform.deepseek.com](https://platform.deepseek.com/)
-2. 注册账号并充值
-3. 在 **API Keys** 页面创建密钥
+进入 **设置 → AI 提供商 → DeepSeek**，通常需要：
 
-## 在 OpenCowork 中配置
-
-进入 **设置 → AI 提供商**，添加新提供商：
-
-| 配置项   | 值                            |
-| -------- | ----------------------------- |
-| 协议     | `openai-chat`                 |
+| 配置项 | 值 |
+| --- | --- |
+| 协议 | `openai-chat` |
 | Base URL | `https://api.deepseek.com/v1` |
-| API Key  | 你的 DeepSeek API Key         |
+| API Key | 你的 DeepSeek key |
 
-## 支持的模型 / Supported Models
+## 常见模型 / Common model examples
 
-| 模型                | 特性                         |
-| ------------------- | ---------------------------- |
-| `deepseek-chat`     | 通用对话，高性价比           |
-| `deepseek-reasoner` | 推理模型（R1），复杂问题求解 |
+| 模型 | 作用 |
+| --- | --- |
+| `deepseek-chat` | 通用对话 |
+| `deepseek-reasoner` | 推理任务 / R1 风格 |
 
-## 推理模式 / Reasoning Mode
+## 特点 / Characteristics
 
-`deepseek-reasoner` 支持推理模式，会在回答前输出思考过程（`<think>` 标签）。OpenCowork 会自动解析并在 UI 中展示思考内容。
+- 通过 OpenAI-compatible 接口接入
+- 适合中文场景
+- 适合复杂推理和代码辅助
+- 对 token 成本比较敏感的场景很常用
 
-## 定价参考 / Pricing
+## 推理模式 / Reasoning mode
 
-| 模型              | Input   | Output  |
-| ----------------- | ------- | ------- |
-| deepseek-chat     | $0.14/M | $0.28/M |
-| deepseek-reasoner | $0.55/M | $2.19/M |
+如果模型返回 reasoning-style 内容，OpenCowork 会把它转换成统一的 thinking 流，然后在 UI 中显示。
+
+## 什么时候选 DeepSeek？ / When to choose it?
+
+- 你需要一个成本更友好的主力模型
+- 你经常处理中文内容
+- 你想把推理模型当作默认协作模型

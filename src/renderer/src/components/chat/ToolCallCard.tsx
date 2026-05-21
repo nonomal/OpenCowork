@@ -21,11 +21,13 @@ import { AnimatePresence, motion } from 'motion/react'
 import { toast } from 'sonner'
 import { cn } from '@renderer/lib/utils'
 import type { ToolCallStatus } from '@renderer/lib/agent/types'
-import type { ToolResultContent } from '@renderer/lib/api/types'
+import type { ImageBlock, TextBlock, ToolResultContent } from '@renderer/lib/api/types'
 import { decodeStructuredToolResult } from '@renderer/lib/tools/tool-result-format'
 import { MONO_FONT } from '@renderer/lib/constants'
 import { estimateTokens, formatTokens } from '@renderer/lib/format-tokens'
 import { writeSvgStringToClipboard } from '@renderer/lib/utils/image-clipboard'
+import { ipcClient } from '@renderer/lib/ipc/ipc-client'
+import { IPC } from '@renderer/lib/ipc/channels'
 import { useAgentStore } from '@renderer/stores/agent-store'
 import { useUIStore } from '@renderer/stores/ui-store'
 import { Button } from '@renderer/components/ui/button'
@@ -33,6 +35,7 @@ import { LazySyntaxHighlighter } from './LazySyntaxHighlighter'
 import { inputSummary } from './tool-call-summary'
 import { useChatActions } from '@renderer/hooks/use-chat-actions'
 import { LocalTerminal } from '@renderer/components/terminal/LocalTerminal'
+import { ImagePreview } from './ImagePreview'
 
 interface ToolCallCardProps {
   toolUseId?: string
@@ -140,6 +143,50 @@ function deriveOutputError(output: string | undefined): string | null {
   return trimmed
 }
 
+function compactWhitespace(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function getStringInput(input: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = input[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function compactPath(value: string, depth = 2): string {
+  const parts = value.split(/[\\/]/).filter(Boolean)
+  if (parts.length === 0) return value
+  return parts.slice(-depth).join('/')
+}
+
+function pathFileName(value: string): string {
+  return compactPath(value, 1)
+}
+
+function pathParent(value: string, depth = 3): string {
+  const parts = value.split(/[\\/]/).filter(Boolean)
+  if (parts.length <= 1) return ''
+  return parts.slice(Math.max(0, parts.length - depth - 1), -1).join('/')
+}
+
+function stripReadLineNumbers(output: string): string {
+  return /^\s*\d+\t/.test(output)
+    ? output
+        .split('\n')
+        .map((line) => line.replace(/^\s*\d+\t/, ''))
+        .join('\n')
+    : output
+}
+
+function getReadOutputLineCount(output: string | undefined): number | null {
+  if (!output?.trim()) return null
+  const decoded = decodeStructuredToolResult(output)
+  if (decoded && !Array.isArray(decoded) && typeof decoded.error === 'string') return null
+  return stripReadLineNumbers(output).split('\n').length
+}
+
 function isErrorOnlyOutput(output: string | undefined): boolean {
   if (!output) return false
   const trimmed = output.trim()
@@ -174,6 +221,13 @@ function hasImageBlocks(output: ToolResultContent | undefined): boolean {
   return Array.isArray(output) && output.some((b) => b.type === 'image')
 }
 
+function getImageBlockPreviewSrc(image: ImageBlock): string {
+  if (image.source.type === 'base64' && image.source.data) {
+    return `data:${image.source.mediaType || 'image/png'};base64,${image.source.data}`
+  }
+  return image.source.url ?? ''
+}
+
 function CopyBtn({ text, title }: { text: string; title?: string }): React.JSX.Element {
   const [copied, setCopied] = React.useState(false)
   return (
@@ -194,28 +248,38 @@ function CopyBtn({ text, title }: { text: string; title?: string }): React.JSX.E
 function ImageOutputBlock({ output }: { output: ToolResultContent }): React.JSX.Element | null {
   const { t } = useTranslation('chat')
   if (!Array.isArray(output)) return null
-  const images = output.filter((b) => b.type === 'image')
+  const images = output.filter((b): b is ImageBlock => b.type === 'image')
+  const notes = output.filter((b): b is TextBlock => b.type === 'text' && b.text.trim().length > 0)
   if (images.length === 0) return null
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {images.map((img, i) => {
-        if (img.type !== 'image') return null
-        const src =
-          img.source.url || `data:${img.source.mediaType || 'image/png'};base64,${img.source.data}`
+        const src = getImageBlockPreviewSrc(img)
+        if (!src && !img.source.filePath) return null
         return (
-          <div key={i}>
+          <div
+            key={`${img.source.filePath ?? img.source.url ?? img.source.data?.slice(0, 48) ?? i}-${i}`}
+          >
             <div className="mb-1 flex items-center gap-1.5">
               <p className="text-xs font-medium text-muted-foreground">{t('toolCall.image')}</p>
               <span className="text-[9px] text-muted-foreground/55">{img.source.mediaType}</span>
             </div>
-            <img
-              src={src}
-              alt="Tool output"
-              className="max-h-72 max-w-full rounded-md border object-contain bg-muted/30 dark:bg-zinc-950"
-            />
+            <ImagePreview src={src} alt="Tool output" filePath={img.source.filePath} />
           </div>
         )
       })}
+      {notes.length > 0 && (
+        <div className="space-y-1">
+          {notes.map((note, index) => (
+            <p
+              key={`${note.text}-${index}`}
+              className="rounded-md bg-muted/20 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap break-words"
+            >
+              {note.text}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -228,7 +292,6 @@ interface WidgetToolPayload {
 }
 
 const WIDGET_BRIDGE_SOURCE = 'open_cowork_widget'
-const DEFAULT_WIDGET_LOADING_MESSAGES = ['Rendering widget...']
 
 function normalizeWidgetPayload(input: Record<string, unknown>): WidgetToolPayload | null {
   const title = typeof input.title === 'string' ? input.title.trim() : ''
@@ -252,7 +315,7 @@ function normalizeWidgetPayload(input: Record<string, unknown>): WidgetToolPaylo
 
   return {
     title: title || 'widget',
-    loadingMessages: loadingMessages.length > 0 ? loadingMessages : DEFAULT_WIDGET_LOADING_MESSAGES,
+    loadingMessages,
     widgetCode,
     kind: explicitKind ?? (/^<svg[\s>]/i.test(widgetCode) ? 'svg' : 'html')
   }
@@ -377,6 +440,7 @@ function buildWidgetDocument(payload: WidgetToolPayload): string {
 }
 
 function SvgWidgetCopyButton({ svg }: { svg: string }): React.JSX.Element {
+  const { t } = useTranslation('chat')
   const [copied, setCopied] = React.useState(false)
   const [copying, setCopying] = React.useState(false)
   const resetTimerRef = React.useRef<number | null>(null)
@@ -396,7 +460,7 @@ function SvgWidgetCopyButton({ svg }: { svg: string }): React.JSX.Element {
       setCopying(true)
       await writeSvgStringToClipboard(svg)
       setCopied(true)
-      toast.success('Image copied to clipboard')
+      toast.success(t('toolCall.widget.imageCopied'))
 
       if (resetTimerRef.current != null) {
         window.clearTimeout(resetTimerRef.current)
@@ -407,11 +471,11 @@ function SvgWidgetCopyButton({ svg }: { svg: string }): React.JSX.Element {
       }, 1500)
     } catch (error) {
       console.error('[Widget] Copy SVG image failed:', error)
-      toast.error('Failed to copy image')
+      toast.error(t('toolCall.widget.copyImageFailed'))
     } finally {
       setCopying(false)
     }
-  }, [copying, svg])
+  }, [copying, svg, t])
 
   return (
     <Button
@@ -421,8 +485,8 @@ function SvgWidgetCopyButton({ svg }: { svg: string }): React.JSX.Element {
       className="absolute right-2 top-2 z-20 size-8 border border-border/60 bg-background/85 text-muted-foreground shadow-sm backdrop-blur hover:bg-background hover:text-foreground disabled:opacity-60"
       onClick={() => void handleCopy()}
       disabled={copying || !svg.trim()}
-      title={copied ? 'Copied' : 'Copy image to clipboard'}
-      aria-label={copied ? 'Copied' : 'Copy image to clipboard'}
+      title={copied ? t('toolCall.widget.copied') : t('toolCall.widget.copyImage')}
+      aria-label={copied ? t('toolCall.widget.copied') : t('toolCall.widget.copyImage')}
     >
       {copied ? <Check className="size-3.5 text-green-500" /> : <Copy className="size-3.5" />}
     </Button>
@@ -436,10 +500,15 @@ export function WidgetOutputBlock({
   input: Record<string, unknown>
   status: ToolCallStatus | 'completed'
 }): React.JSX.Element | null {
+  const { t } = useTranslation('chat')
   const isExecuting = status === 'streaming' || status === 'running'
   const payload = normalizeWidgetPayload(input)
   const hasPayload = Boolean(payload)
-  const loadingMessages = payload?.loadingMessages ?? DEFAULT_WIDGET_LOADING_MESSAGES
+  const defaultLoadingMessage = t('toolCall.widget.rendering')
+  const loadingMessages =
+    payload?.loadingMessages && payload.loadingMessages.length > 0
+      ? payload.loadingMessages
+      : [defaultLoadingMessage]
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
   const resizeRafRef = React.useRef<number | null>(null)
   const lastAppliedHeightRef = React.useRef<number>(0)
@@ -550,7 +619,9 @@ export function WidgetOutputBlock({
       <div className="my-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
         <div className="font-medium text-foreground/75">{title}</div>
         <div className="mt-0.5 text-[11px]">
-          Rendering widget{chars !== null ? ` (${chars} chars)` : ''}...
+          {chars !== null
+            ? t('toolCall.widget.renderingWithChars', { chars })
+            : t('toolCall.widget.rendering')}
         </div>
       </div>
     )
@@ -559,7 +630,7 @@ export function WidgetOutputBlock({
   if (!payload) return null
 
   const isPending = isExecuting && !loaded && !payload.widgetCode
-  const loadingMessage = loadingMessages[loadingIndex] ?? DEFAULT_WIDGET_LOADING_MESSAGES[0]
+  const loadingMessage = loadingMessages[loadingIndex] ?? defaultLoadingMessage
 
   return (
     <div className="my-2 space-y-2">
@@ -592,7 +663,7 @@ export function WidgetOutputBlock({
           </div>
         ) : (
           <div className="flex h-48 items-center justify-center text-xs text-muted-foreground/60">
-            Waiting for widget code...
+            {t('toolCall.widget.waitingCode')}
           </div>
         )}
         {isPending && (
@@ -647,14 +718,8 @@ function ReadOutputBlock({
 }): React.JSX.Element {
   const { t } = useTranslation('chat')
   const [expanded, setExpanded] = React.useState(false)
-  // Detect line-number prefixed content (e.g. "1\tcode") from fs:read-file with offset/limit
-  const hasLineNums = /^\d+\t/.test(output)
-  const rawContent = hasLineNums
-    ? output
-        .split('\n')
-        .map((l) => l.replace(/^\d+\t/, ''))
-        .join('\n')
-    : output
+  // fs:read-file may prefix each line as "1\tcode"; the visible preview should stay copyable.
+  const rawContent = stripReadLineNumbers(output)
   const lines = rawContent.split('\n')
   const isLong = lines.length > 40
   const displayed = isLong && !expanded ? lines.slice(0, 40).join('\n') : rawContent
@@ -676,7 +741,7 @@ function ReadOutputBlock({
           {filePath.split(/[\\/]/).slice(-2).join('/')}
         </span>
         <span className="text-[9px] text-muted-foreground/55 font-mono">
-          {lang} · {lines.length} lines
+          {lang} · {t('toolCall.lineCount', { count: lines.length })}
         </span>
         <CopyBtn text={rawContent} />
       </div>
@@ -729,6 +794,54 @@ interface ShellOutputSummary {
   aborted?: boolean
 }
 
+type LiveShellStream = 'stdout' | 'stderr'
+
+interface LiveShellOutputState {
+  execId: string | null
+  stdout: string
+  stderr: string
+}
+
+const LIVE_SHELL_OUTPUT_MAX_CHARS = 12_000
+const ANSI_ESCAPE_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, 'g')
+
+function normalizeLiveShellChunk(chunk: string): string {
+  return chunk.replace(ANSI_ESCAPE_RE, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
+function clampLiveShellText(text: string): string {
+  if (text.length <= LIVE_SHELL_OUTPUT_MAX_CHARS) return text
+  return text.slice(-LIVE_SHELL_OUTPUT_MAX_CHARS)
+}
+
+function appendLiveShellOutput(
+  state: LiveShellOutputState,
+  execId: string,
+  stream: LiveShellStream,
+  chunk: string
+): LiveShellOutputState {
+  const base =
+    state.execId === execId
+      ? state
+      : {
+          execId,
+          stdout: '',
+          stderr: ''
+        }
+  const text = normalizeLiveShellChunk(chunk)
+  if (!text) return base
+  if (stream === 'stderr') {
+    return {
+      ...base,
+      stderr: clampLiveShellText(`${base.stderr}${text}`)
+    }
+  }
+  return {
+    ...base,
+    stdout: clampLiveShellText(`${base.stdout}${text}`)
+  }
+}
+
 function ShellTextPane({
   title,
   text,
@@ -740,6 +853,7 @@ function ShellTextPane({
   expanded: boolean
   tone?: 'default' | 'error'
 }): React.JSX.Element | null {
+  const { t } = useTranslation('chat')
   if (!text) return null
   const isLong = text.length > 1000
   const displayed = isLong && !expanded ? `...\n${text.slice(-1000)}` : text
@@ -769,7 +883,7 @@ function ShellTextPane({
           {title}
         </span>
         <span className="text-[10px] tabular-nums text-muted-foreground/60">
-          {lineCount(text)} lines
+          {t('toolCall.lineCount', { count: lineCount(text) })}
         </span>
       </div>
       <pre
@@ -801,9 +915,38 @@ function BashOutputBlock({
   const sendBackgroundProcessInput = useAgentStore((s) => s.sendBackgroundProcessInput)
   const stopBackgroundProcess = useAgentStore((s) => s.stopBackgroundProcess)
   const abortForegroundShellExec = useAgentStore((s) => s.abortForegroundShellExec)
-  const hasForegroundExec = useAgentStore((s) =>
-    toolUseId ? Boolean(s.foregroundShellExecByToolUseId[toolUseId]) : false
+  const foregroundExecId = useAgentStore((s) =>
+    toolUseId ? s.foregroundShellExecByToolUseId[toolUseId] : undefined
   )
+  const [liveShellOutput, setLiveShellOutput] = React.useState<LiveShellOutputState>({
+    execId: null,
+    stdout: '',
+    stderr: ''
+  })
+
+  React.useEffect(() => {
+    if (!foregroundExecId || status !== 'running') {
+      setLiveShellOutput((current) =>
+        current.execId === null ? current : { execId: null, stdout: '', stderr: '' }
+      )
+      return
+    }
+
+    setLiveShellOutput({ execId: foregroundExecId, stdout: '', stderr: '' })
+    return ipcClient.on(IPC.SHELL_OUTPUT, (payload) => {
+      const data = payload as { execId?: unknown; chunk?: unknown; stream?: unknown }
+      const chunk = data.chunk
+      if (data.execId !== foregroundExecId || typeof chunk !== 'string') return
+      setLiveShellOutput((current) =>
+        appendLiveShellOutput(
+          current,
+          foregroundExecId,
+          data.stream === 'stderr' ? 'stderr' : 'stdout',
+          chunk
+        )
+      )
+    })
+  }, [foregroundExecId, status])
 
   const parsed = React.useMemo(() => {
     const obj = decodeStructuredToolResult(output)
@@ -832,10 +975,23 @@ function BashOutputBlock({
   const isProcessRunning = process?.status === 'running'
   const exitCode = process?.exitCode ?? parsed?.exitCode
   const statusText = process ? t(`toolCall.processStatus.${process.status}`) : null
-  const canStopForegroundExec = !process && status === 'running' && !!toolUseId && hasForegroundExec
+  const canStopForegroundExec =
+    !process && status === 'running' && !!toolUseId && !!foregroundExecId
 
-  const stdoutText = process ? process.output : (parsed?.stdout ?? parsed?.output ?? '')
-  const stderrText = process ? '' : (parsed?.stderr ?? '')
+  const liveStdoutText = liveShellOutput.execId === foregroundExecId ? liveShellOutput.stdout : ''
+  const liveStderrText = liveShellOutput.execId === foregroundExecId ? liveShellOutput.stderr : ''
+  const storedStdoutText = parsed?.stdout ?? parsed?.output ?? ''
+  const storedStderrText = parsed?.stderr ?? ''
+  const stdoutText = process
+    ? process.output
+    : liveStdoutText.length > storedStdoutText.length
+      ? liveStdoutText
+      : storedStdoutText
+  const stderrText = process
+    ? ''
+    : liveStderrText.length > storedStderrText.length
+      ? liveStderrText
+      : storedStderrText
   const text = process ? process.output : [stderrText, stdoutText].filter(Boolean).join('\n\n')
   const lineCount = text ? text.split('\n').length : 0
   const tokenCount = React.useMemo(() => estimateTokens(text), [text])
@@ -895,7 +1051,8 @@ function BashOutputBlock({
         {(statusText || exitCode !== undefined || lineCount > 0) && (
           <div className="activity-card-divider flex items-center justify-between gap-2 px-3 py-2">
             <span className="text-[10px] text-muted-foreground">
-              {lineCount} lines · {formatTokens(tokenCount)} tokens
+              {t('toolCall.lineCount', { count: lineCount })} ·{' '}
+              {t('toolCall.tokenCount', { value: formatTokens(tokenCount) })}
             </span>
             <div className="flex items-center gap-2 text-[11px]">
               {statusText && exitCode === undefined ? (
@@ -1343,7 +1500,7 @@ function GrepOutputBlock({
             <div key={file} className="px-2 py-1.5">
               <div
                 className="text-sky-600 truncate mb-0.5 cursor-pointer hover:text-sky-700 transition-colors dark:text-blue-400/70 dark:hover:text-blue-300"
-                title={`Click to insert: ${file}`}
+                title={t('toolCall.clickToInsert', { path: file })}
                 onClick={() => {
                   const short = file.split(/[\\/]/).slice(-2).join('/')
                   import('@renderer/stores/ui-store').then(({ useUIStore }) =>
@@ -1411,7 +1568,7 @@ function GlobOutputBlock({ output }: { output: string }): React.JSX.Element {
             <div
               key={i}
               className="truncate cursor-pointer text-sky-600 transition-colors hover:text-sky-700 dark:text-sky-300 dark:hover:text-sky-200"
-              title={`Click to insert: ${p}`}
+              title={t('toolCall.clickToInsert', { path: p })}
               onClick={() => {
                 const short = p.split(/[\\/]/).slice(-2).join('/')
                 import('@renderer/stores/ui-store').then(({ useUIStore }) =>
@@ -1433,14 +1590,29 @@ function GlobOutputBlock({ output }: { output: string }): React.JSX.Element {
   )
 }
 
+type LsEntry = { name: string; type: string; path?: string }
+
+function parseLsEntries(output: string | undefined): LsEntry[] | null {
+  if (!output?.trim()) return null
+  const decoded = decodeStructuredToolResult(output)
+  if (!Array.isArray(decoded)) return null
+  return decoded
+    .map((entry): LsEntry | null => {
+      if (!isRecord(entry) || typeof entry.name !== 'string' || typeof entry.type !== 'string') {
+        return null
+      }
+      return {
+        name: entry.name,
+        type: entry.type,
+        path: typeof entry.path === 'string' ? entry.path : undefined
+      }
+    })
+    .filter((entry): entry is LsEntry => !!entry)
+}
+
 function LSOutputBlock({ output }: { output: string }): React.JSX.Element {
   const { t } = useTranslation('chat')
-  const parsed = React.useMemo(() => {
-    const decoded = decodeStructuredToolResult(output)
-    return Array.isArray(decoded)
-      ? (decoded as Array<{ name: string; type: string; path: string }>)
-      : null
-  }, [output])
+  const parsed = React.useMemo(() => parseLsEntries(output), [output])
   if (!parsed || !Array.isArray(parsed)) return <OutputBlock output={output} />
 
   const dirs = parsed.filter((e) => e.type === 'directory')
@@ -1475,7 +1647,7 @@ function LSOutputBlock({ output }: { output: string }): React.JSX.Element {
           <div
             key={e.name}
             className="flex cursor-pointer items-center gap-1.5 text-foreground/70 transition-colors hover:text-sky-600 dark:text-zinc-400 dark:hover:text-blue-400"
-            title={`Click to insert: ${e.path || e.name}`}
+            title={t('toolCall.clickToInsert', { path: e.path || e.name })}
             onClick={() => {
               const short = (e.path || e.name).split(/[\\/]/).slice(-2).join('/')
               import('@renderer/stores/ui-store').then(({ useUIStore }) =>
@@ -1576,16 +1748,21 @@ function EditPayloadPane({
       : tone === 'new'
         ? 'text-green-400/80'
         : 'text-muted-foreground/60'
+  const { t } = useTranslation('chat')
 
   return (
     <div className={cn('rounded-md border bg-muted/20 dark:bg-zinc-950/70', borderTone)}>
       <div className="flex items-center gap-1.5 border-b border-border/50 px-2.5 py-1.5 text-[10px] uppercase tracking-wide">
         <span className={headerTone}>{label}</span>
-        <span className="text-muted-foreground/55">{lineCount(value)} lines</span>
-        <span className="text-muted-foreground/55">{value.length} chars</span>
+        <span className="text-muted-foreground/55">
+          {t('toolCall.lineCount', { count: lineCount(value) })}
+        </span>
+        <span className="text-muted-foreground/55">
+          {t('toolCall.charCount', { count: value.length })}
+        </span>
         {truncated && (
           <span className="rounded bg-muted px-1 py-0.5 text-[9px] normal-case text-muted-foreground/60">
-            preview
+            {t('toolCall.preview')}
           </span>
         )}
         <CopyBtn text={value} />
@@ -1682,6 +1859,7 @@ function SubmitReportInputBlock({
   input: Record<string, unknown>
   status?: ToolCallCardProps['status']
 }): React.JSX.Element {
+  const { t } = useTranslation('chat')
   const report = getSubmitReportText(input)
   const isLive = status === 'streaming' || status === 'running'
   const isComplete = status === 'completed'
@@ -1706,17 +1884,19 @@ function SubmitReportInputBlock({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="text-[12px] font-semibold text-foreground/90">
-                {isComplete ? 'Report submitted' : 'Submitting report'}
+                {isComplete
+                  ? t('toolCall.submitReport.submitted')
+                  : t('toolCall.submitReport.submitting')}
               </span>
               {isLive ? (
                 <span className="inline-flex items-center gap-1 rounded-full border border-violet-400/25 bg-violet-400/10 px-1.5 py-0.5 text-[9px] text-violet-200">
                   <span className="size-1.5 rounded-full bg-violet-300 animate-pulse" />
-                  live
+                  {t('toolCall.submitReport.live')}
                 </span>
               ) : null}
               {report.truncated ? (
                 <span className="rounded-full border border-border/60 bg-background/60 px-1.5 py-0.5 text-[9px] text-muted-foreground/70">
-                  preview
+                  {t('toolCall.submitReport.preview')}
                 </span>
               ) : null}
             </div>
@@ -1727,14 +1907,14 @@ function SubmitReportInputBlock({
               />
             </div>
           </div>
-          {copyText ? <CopyBtn text={copyText} title="Copy report" /> : null}
+          {copyText ? <CopyBtn text={copyText} title={t('toolCall.submitReport.copy')} /> : null}
         </div>
 
         <div className="mt-2 grid grid-cols-3 gap-1.5">
           {[
-            ['chars', report.chars.toLocaleString()],
-            ['lines', report.lines.toLocaleString()],
-            ['blocks', blockCount.toLocaleString()]
+            [t('toolCall.submitReport.chars'), report.chars.toLocaleString()],
+            [t('toolCall.submitReport.lines'), report.lines.toLocaleString()],
+            [t('toolCall.submitReport.blocks'), blockCount.toLocaleString()]
           ].map(([label, value]) => (
             <div
               key={label}
@@ -1772,14 +1952,14 @@ function SubmitReportInputBlock({
             ))}
             {(report.truncated || report.text.split('\n').length > visibleLines.length) && (
               <div className="pt-1 text-[10px] text-muted-foreground/60">
-                Preview continues as the report streams in...
+                {t('toolCall.submitReport.previewContinues')}
               </div>
             )}
           </div>
         ) : (
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground/65">
             <span className="size-1.5 rounded-full bg-violet-300 animate-pulse" />
-            Waiting for report text...
+            {t('toolCall.submitReport.waiting')}
           </div>
         )}
       </div>
@@ -1914,7 +2094,9 @@ function StructuredInput({
           <div className="flex flex-wrap items-center gap-2 pl-[18px]">
             {description && <p className="text-[10px] text-muted-foreground/60">{description}</p>}
             {timeout && (
-              <span className="text-[10px] text-muted-foreground/55">timeout: {timeout}ms</span>
+              <span className="text-[10px] text-muted-foreground/55">
+                {t('toolCall.timeoutMs', { value: timeout })}
+              </span>
             )}
           </div>
         )}
@@ -1998,15 +2180,17 @@ function StructuredInput({
           oldCharTotal !== null ||
           newCharTotal !== null) && (
           <div className="pl-[18px] text-[10px] text-muted-foreground/55">
-            {oldLineTotal !== null ? `-${oldLineTotal} lines` : '-? lines'}
-            {' / '}
-            {newLineTotal !== null ? `+${newLineTotal} lines` : '+? lines'}
+            {t('toolCall.lineDelta', {
+              old: oldLineTotal !== null ? oldLineTotal : '?',
+              next: newLineTotal !== null ? newLineTotal : '?'
+            })}
             {(oldCharTotal !== null || newCharTotal !== null) && (
               <>
                 {' · '}
-                {oldCharTotal !== null ? `-${oldCharTotal} chars` : '-? chars'}
-                {' / '}
-                {newCharTotal !== null ? `+${newCharTotal} chars` : '+? chars'}
+                {t('toolCall.charDelta', {
+                  old: oldCharTotal !== null ? oldCharTotal : '?',
+                  next: newCharTotal !== null ? newCharTotal : '?'
+                })}
               </>
             )}
           </div>
@@ -2067,9 +2251,9 @@ function StructuredInput({
           )}
           {(lineTotal !== null || charTotal !== null) && (
             <div className="pl-[18px] text-[10px] text-muted-foreground/55">
-              {lineTotal !== null ? `${lineTotal} lines` : ''}
+              {lineTotal !== null ? t('toolCall.lineCount', { count: lineTotal }) : ''}
               {lineTotal !== null && charTotal !== null ? ' · ' : ''}
-              {charTotal !== null ? `${charTotal} chars` : ''}
+              {charTotal !== null ? t('toolCall.charCount', { count: charTotal }) : ''}
             </div>
           )}
           {visiblePreview && (
@@ -2173,7 +2357,7 @@ function StructuredInput({
                 className="text-[10px] text-muted-foreground/55 font-mono"
                 style={{ fontFamily: MONO_FONT }}
               >
-                in {path}
+                {t('toolCall.searchInPath', { path })}
               </span>
             )}
             {include && (
@@ -2181,7 +2365,7 @@ function StructuredInput({
                 className="text-[10px] text-muted-foreground/55 font-mono"
                 style={{ fontFamily: MONO_FONT }}
               >
-                include: {include}
+                {t('toolCall.includeGlob', { include })}
               </span>
             )}
           </div>
@@ -2408,55 +2592,245 @@ export function ToolStatusDot({
   }
 }
 
-function compactToolPrimaryText(
-  name: string,
-  input: Record<string, unknown>,
-  fallback?: string
-): string {
-  if (name === 'Bash') {
-    const command =
-      typeof input.command === 'string' ? input.command.replace(/\s+/g, ' ').trim() : ''
-    return command || fallback || ''
-  }
+const COMPACT_BUILTIN_TOOL_NAMES = new Set(['Bash', 'Read', 'Grep', 'Glob', 'LS'])
 
-  if (name === 'Glob') {
-    const pattern = typeof input.pattern === 'string' ? input.pattern.trim() : ''
-    const path = typeof input.path === 'string' ? input.path.trim() : ''
-    return pattern || path || fallback || ''
-  }
+type CompactBadgeTone = 'default' | 'blue' | 'amber' | 'green' | 'red'
 
-  return fallback || ''
+interface CompactToolHeaderBadge {
+  label: string
+  tone?: CompactBadgeTone
 }
 
-function compactToolTitle(name: string, input: Record<string, unknown>, fallback?: string): string {
-  if (name === 'Bash') {
-    const command = typeof input.command === 'string' ? input.command : ''
-    return command || fallback || name
-  }
-
-  if (name === 'Glob') {
-    const pattern = typeof input.pattern === 'string' ? input.pattern : ''
-    const path = typeof input.path === 'string' ? input.path : ''
-    return [pattern, path].filter(Boolean).join('\n') || fallback || name
-  }
-
-  return fallback || name
+interface CompactToolHeaderModel {
+  icon: React.ReactNode
+  accentClassName: string
+  label: string
+  primary: string
+  secondary?: string
+  badges: CompactToolHeaderBadge[]
+  searchState?: SearchVisualState
+  title: string
 }
 
-function compactToolPrefixKey(name: string): string | null {
-  switch (name) {
-    case 'Bash':
-      return 'toolCall.compactPrefix.bash'
-    case 'Read':
-      return 'toolCall.compactPrefix.read'
-    case 'Grep':
-      return 'toolCall.compactPrefix.grep'
-    case 'Glob':
-      return 'toolCall.compactPrefix.glob'
-    case 'LS':
-      return 'toolCall.compactPrefix.ls'
+function compactBadgeClassName(tone: CompactBadgeTone = 'default'): string {
+  switch (tone) {
+    case 'blue':
+      return 'border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-300'
+    case 'amber':
+      return 'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-300'
+    case 'green':
+      return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+    case 'red':
+      return 'border-destructive/25 bg-destructive/10 text-destructive'
     default:
-      return null
+      return 'border-border/60 bg-muted/45 text-muted-foreground'
+  }
+}
+
+function compactStatusBadgeClassName(status: ToolCallCardProps['status']): string {
+  if (status === 'error') return compactBadgeClassName('red')
+  if (status === 'pending_approval') return compactBadgeClassName('amber')
+  if (status === 'running') return compactBadgeClassName('blue')
+  if (status === 'streaming') return compactBadgeClassName('default')
+  return compactBadgeClassName('green')
+}
+
+function compactStatusLabel(
+  status: ToolCallCardProps['status'],
+  t: (key: string, options?: Record<string, unknown>) => string
+): string | null {
+  if (status === 'streaming') return t('toolCall.receivingArgs')
+  if (status === 'running') return t('toolCall.executing')
+  if (status === 'pending_approval') return t('permission.title')
+  if (status === 'error') return t('error.label')
+  return null
+}
+
+function lineRangeBadge(
+  input: Record<string, unknown>,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string | null {
+  const rawOffset = input.offset
+  const rawLimit = input.limit
+  const offset = typeof rawOffset === 'number' && Number.isFinite(rawOffset) ? rawOffset : null
+  const limit = typeof rawLimit === 'number' && Number.isFinite(rawLimit) ? rawLimit : null
+  if (offset === null) return null
+  if (limit === null || limit <= 0) return t('toolCall.lineRangeFrom', { start: offset })
+  return t('toolCall.lineRange', { start: offset, end: offset + limit - 1 })
+}
+
+function searchScopeText(
+  input: Record<string, unknown>,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
+  const path = getStringInput(input, ['path'])
+  const include = getStringInput(input, ['include'])
+  const exclude = getStringInput(input, ['exclude'])
+  return [
+    path ? t('toolCall.searchInPath', { path: compactPath(path, 3) }) : null,
+    include ? t('toolCall.includeGlob', { include }) : null,
+    exclude ? t('toolCall.excludeGlob', { exclude }) : null
+  ]
+    .filter((item): item is string => !!item)
+    .join(' · ')
+}
+
+function bashOutputStats(outputText: string | undefined): {
+  lines: number | null
+  exitCode: number | null
+} {
+  if (!outputText?.trim()) return { lines: null, exitCode: null }
+  const decoded = decodeStructuredToolResult(outputText)
+  if (decoded && !Array.isArray(decoded)) {
+    const stdout =
+      typeof decoded.stdout === 'string'
+        ? decoded.stdout
+        : typeof decoded.output === 'string'
+          ? decoded.output
+          : ''
+    const stderr = typeof decoded.stderr === 'string' ? decoded.stderr : ''
+    const text = [stderr, stdout].filter(Boolean).join('\n\n')
+    return {
+      lines: text ? lineCount(text) : null,
+      exitCode: typeof decoded.exitCode === 'number' ? decoded.exitCode : null
+    }
+  }
+  return { lines: lineCount(outputText), exitCode: null }
+}
+
+function buildCompactToolHeaderModel({
+  name,
+  input,
+  output,
+  outputText,
+  displayName,
+  summary,
+  t
+}: {
+  name: string
+  input: Record<string, unknown>
+  output?: ToolResultContent
+  outputText?: string
+  displayName: string
+  summary?: string | null
+  t: (key: string, options?: Record<string, unknown>) => string
+}): CompactToolHeaderModel {
+  if (name === 'Bash') {
+    const command = compactWhitespace(getStringInput(input, ['command']))
+    const description = getStringInput(input, ['description'])
+    const stats = bashOutputStats(outputText)
+    const badges: CompactToolHeaderBadge[] = []
+    if (stats.exitCode !== null)
+      badges.push({ label: t('toolCall.exitCode', { code: stats.exitCode }) })
+    if (stats.lines !== null) {
+      badges.push({ label: t('toolCall.outputLineCount', { count: stats.lines }), tone: 'blue' })
+    }
+    return {
+      icon: <span className="font-mono text-[12px] leading-none">$</span>,
+      accentClassName: 'border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-300',
+      label: displayName,
+      primary: command || summary || t('toolCall.receivingArgs'),
+      secondary: description || undefined,
+      badges,
+      title: command || summary || displayName
+    }
+  }
+
+  if (name === 'Read') {
+    const filePath = getStringInput(input, ['file_path', 'path'])
+    const lines = getReadOutputLineCount(outputText)
+    const range = lineRangeBadge(input, t)
+    const badges: CompactToolHeaderBadge[] = []
+    if (lines !== null)
+      badges.push({ label: t('toolCall.lineCount', { count: lines }), tone: 'blue' })
+    if (range) badges.push({ label: range })
+    if (hasImageBlocks(output)) badges.push({ label: t('toolCall.imageFile'), tone: 'blue' })
+    return {
+      icon: <FileCode className="size-3.5" />,
+      accentClassName: 'border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-300',
+      label: displayName,
+      primary: pathFileName(filePath) || summary || t('toolCall.receivingArgs'),
+      secondary: filePath ? pathParent(filePath) || compactPath(filePath, 2) : undefined,
+      badges,
+      title: filePath || summary || displayName
+    }
+  }
+
+  if (name === 'Grep') {
+    const pattern = getStringInput(input, ['pattern'])
+    const parsed = outputText ? parseGrepOutput(outputText) : null
+    const matchCount = parsed?.matches.length ?? null
+    const fileCount = parsed ? new Set(parsed.matches.map((match) => match.file)).size : null
+    const badges: CompactToolHeaderBadge[] = []
+    if (matchCount !== null && fileCount !== null) {
+      badges.push({
+        label: t('toolCall.matchesInFiles', { matches: matchCount, files: fileCount }),
+        tone: matchCount > 0 ? 'amber' : 'default'
+      })
+    }
+    return {
+      icon: <Search className="size-3.5" />,
+      accentClassName: 'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-300',
+      label: displayName,
+      primary: pattern ? `/${pattern}/` : summary || t('toolCall.receivingArgs'),
+      secondary: searchScopeText(input, t) || undefined,
+      badges,
+      searchState: parsed ? getSearchVisualState(parsed.meta, parsed.matches.length) : undefined,
+      title: [pattern ? `/${pattern}/` : '', searchScopeText(input, t)].filter(Boolean).join('\n')
+    }
+  }
+
+  if (name === 'Glob') {
+    const pattern = getStringInput(input, ['pattern'])
+    const path = getStringInput(input, ['path'])
+    const parsed = outputText ? parseGlobOutput(outputText) : null
+    const badges: CompactToolHeaderBadge[] = []
+    if (parsed) {
+      badges.push({
+        label: t('toolCall.pathCount', { count: parsed.matches.length }),
+        tone: parsed.matches.length > 0 ? 'green' : 'default'
+      })
+    }
+    return {
+      icon: <Search className="size-3.5" />,
+      accentClassName:
+        'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
+      label: displayName,
+      primary: pattern || summary || t('toolCall.receivingArgs'),
+      secondary: path ? t('toolCall.searchInPath', { path: compactPath(path, 3) }) : undefined,
+      badges,
+      searchState: parsed ? getSearchVisualState(parsed.meta, parsed.matches.length) : undefined,
+      title: [pattern, path].filter(Boolean).join('\n') || summary || displayName
+    }
+  }
+
+  if (name === 'LS') {
+    const path = getStringInput(input, ['path'])
+    const parsed = parseLsEntries(outputText)
+    const dirs = parsed?.filter((entry) => entry.type === 'directory').length ?? null
+    const files = parsed?.filter((entry) => entry.type === 'file').length ?? null
+    const badges: CompactToolHeaderBadge[] = []
+    if (dirs !== null && files !== null) {
+      badges.push({ label: t('toolCall.foldersAndFiles', { folders: dirs, files }) })
+    }
+    return {
+      icon: <FolderTree className="size-3.5" />,
+      accentClassName: 'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-300',
+      label: displayName,
+      primary: compactPath(path, 3) || summary || t('toolCall.receivingArgs'),
+      secondary: path && compactPath(path, 3) !== path ? path : undefined,
+      badges,
+      title: path || summary || displayName
+    }
+  }
+
+  return {
+    icon: <FileText className="size-3.5" />,
+    accentClassName: 'border-border/60 bg-muted text-muted-foreground',
+    label: displayName,
+    primary: summary || displayName,
+    badges: [],
+    title: summary || displayName
   }
 }
 
@@ -2483,14 +2857,20 @@ function ToolCallCardInner({
   const { t } = useTranslation('chat')
   const isProcessing = status === 'streaming' || status === 'running'
   const isActive = isProcessing || status === 'pending_approval'
-  const [open, setOpen] = React.useState(isActive)
+  const hasVisualOutput = hasImageBlocks(output)
+  const [open, setOpen] = React.useState(isActive || hasVisualOutput)
   const prevIsActiveRef = React.useRef(isActive)
   React.useEffect(() => {
+    if (hasVisualOutput) {
+      setOpen(true)
+      prevIsActiveRef.current = isActive
+      return
+    }
     if (prevIsActiveRef.current && !isActive) {
       setOpen(false)
     }
     prevIsActiveRef.current = isActive
-  }, [isActive])
+  }, [hasVisualOutput, isActive])
   const outputText = React.useMemo(() => outputAsString(output), [output])
   const summary = React.useMemo(
     () => inputSummary(name, input, outputText),
@@ -2531,25 +2911,29 @@ function ToolCallCardInner({
     !!(input.content || input.content_preview)
   const elapsed =
     startedAt && completedAt ? ((completedAt - startedAt) / 1000).toFixed(1) + 's' : null
-  const useCompactToolHeader = !isActive && ['Bash', 'Read', 'Grep', 'Glob', 'LS'].includes(name)
-  const compactPrimary = React.useMemo(
-    () => compactToolPrimaryText(name, input, summary ?? undefined),
-    [input, name, summary]
+  const useCompactToolHeader = COMPACT_BUILTIN_TOOL_NAMES.has(name)
+  const compactHeader = React.useMemo(
+    () =>
+      buildCompactToolHeaderModel({
+        name,
+        input,
+        output,
+        outputText,
+        displayName,
+        summary,
+        t
+      }),
+    [displayName, input, name, output, outputText, summary, t]
   )
-  const compactTitle = React.useMemo(
-    () => compactToolTitle(name, input, summary ?? undefined),
-    [input, name, summary]
-  )
-  const compactPrefixKey = compactToolPrefixKey(name)
+  const compactStatus = compactStatusLabel(status, t)
   const compactHeaderError = Boolean(displayError) || (status === 'error' && !!outputError)
-  const settledBashHasFocusedOutput =
+  const bashHasFocusedOutput =
     shouldRenderOutputPanels &&
     name === 'Bash' &&
-    !isActive &&
-    Boolean(outputText || getBashInputTerminalId(input))
+    Boolean(status === 'running' || outputText || getBashInputTerminalId(input))
   const hasFocusedOutput =
     shouldRenderOutputPanels &&
-    (hasFocusedExpandedOutput(name, output, outputText) || settledBashHasFocusedOutput)
+    (hasFocusedExpandedOutput(name, output, outputText) || bashHasFocusedOutput)
   const shouldShowStructuredInput = !(showSettledWriteContent || hasFocusedOutput)
 
   if (name === 'Skill') {
@@ -2602,21 +2986,55 @@ function ToolCallCardInner({
       >
         {useCompactToolHeader ? (
           <div
-            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground transition-colors group-hover:text-foreground"
-            title={compactTitle}
+            className="flex min-w-0 items-center gap-2 rounded-md px-1 py-1 text-muted-foreground transition-colors group-hover:text-foreground"
+            title={compactHeader.title}
           >
-            {compactPrefixKey ? (
-              <span className="shrink-0 text-[11px] font-medium text-muted-foreground/85">
-                {t(compactPrefixKey)}
-              </span>
-            ) : (
-              <span className="shrink-0 text-[10px] font-medium text-muted-foreground/85">
-                {displayName}
-              </span>
-            )}
-            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground/80 transition-colors group-hover:text-foreground">
-              {compactPrimary || t('toolCall.receivingArgs')}
+            <ToolStatusDot status={status} />
+            <span
+              className={cn(
+                'flex size-6 shrink-0 items-center justify-center rounded-md border',
+                compactHeader.accentClassName
+              )}
+            >
+              {compactHeader.icon}
             </span>
+            <span className="shrink-0 text-[10px] font-medium text-muted-foreground/75">
+              {compactHeader.label}
+            </span>
+            <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+              <span className="min-w-0 truncate text-[12px] font-semibold text-foreground/85 transition-colors group-hover:text-foreground">
+                {compactHeader.primary}
+              </span>
+              {compactHeader.secondary ? (
+                <span className="hidden min-w-0 truncate text-[10px] text-muted-foreground/60 sm:inline">
+                  {compactHeader.secondary}
+                </span>
+              ) : null}
+            </span>
+            {compactStatus ? (
+              <span
+                className={cn(
+                  'shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium',
+                  compactStatusBadgeClassName(status)
+                )}
+              >
+                {compactStatus}
+              </span>
+            ) : null}
+            {compactHeader.searchState ? (
+              <SearchStateBadge state={compactHeader.searchState} />
+            ) : null}
+            {compactHeader.badges.slice(0, 2).map((badge) => (
+              <span
+                key={badge.label}
+                className={cn(
+                  'hidden shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium md:inline-flex',
+                  compactBadgeClassName(badge.tone)
+                )}
+              >
+                {badge.label}
+              </span>
+            ))}
             {compactHeaderError ? (
               <span
                 className="size-1.5 shrink-0 rounded-full bg-red-500 dark:bg-red-400"
@@ -2648,7 +3066,7 @@ function ToolCallCardInner({
                       .slice(-2)
                       .join('/')}
                     {typeof input.content_lines === 'number'
-                      ? ` (${input.content_lines} lines)`
+                      ? ` (${t('toolCall.lineCount', { count: input.content_lines })})`
                       : ''}
                   </span>
                 ) : name === 'Edit' && (input.file_path || input.path) ? (
@@ -2709,7 +3127,7 @@ function ToolCallCardInner({
                 <div className="space-y-2">
                   <StructuredInput name={name} input={input} status={status} />
                   <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground/70">
-                    Detailed Write/Edit content stays hidden until the tool finishes.
+                    {t('toolCall.hiddenLivePayload')}
                   </div>
                 </div>
               ) : (
@@ -2746,11 +3164,13 @@ function ToolCallCardInner({
                             </p>
                             <span className="text-[9px] text-muted-foreground/55 font-mono">
                               {detectLang(String(input.file_path ?? input.path ?? ''))}
-                              {totalLines !== null ? ` · ${totalLines} lines` : ''}
+                              {totalLines !== null
+                                ? ` · ${t('toolCall.lineCount', { count: totalLines })}`
+                                : ''}
                             </span>
                             {isOmitted && (
                               <span className="rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground/60">
-                                preview
+                                {t('toolCall.preview')}
                               </span>
                             )}
                             {writeContent && <CopyBtn text={writeContent} />}

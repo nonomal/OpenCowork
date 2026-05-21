@@ -1,36 +1,36 @@
 ---
 title: Telegram 集成
-description: 配置 Telegram Bot 实现 AI 自动回复。
+description: OpenCowork 的 Telegram Bot 集成与 relay 配置。
 ---
 
 # Telegram 集成 / Telegram Integration
 
-OpenCowork 通过 Telegram Bot API 实现消息自动回复。
+Telegram 插件是一个标准 bot 接入。某些部署场景下需要配合 WebSocket relay。
 
-## 创建 Bot / Create Bot
+## 配置字段 / Required fields
 
-1. 在 Telegram 中找到 [@BotFather](https://t.me/BotFather)
-2. 发送 `/newbot` 创建新机器人
-3. 按提示设置机器人名称和用户名
-4. 获取 **Bot Token**（格式：`123456789:ABCdefGHI...`）
+| 字段 | 作用 |
+| --- | --- |
+| `botToken` | Telegram bot token |
+| `wsUrl` | 可选的 relay 地址 |
 
-## 在 OpenCowork 中配置 / Configure
+## 支持的工具 / Tool set
 
-进入 **设置 → 插件 → Telegram**，填入：
+- `PluginSendMessage`
+- `PluginReplyMessage`
+- `PluginGetGroupMessages`
+- `PluginListGroups`
+- `PluginSummarizeGroup`
+- `PluginGetCurrentChatMessages`
 
-| 配置项    | 说明                   |
-| --------- | ---------------------- |
-| Bot Token | BotFather 提供的 Token |
+## 说明 / Notes
 
-点击开关启用插件。
+- 适合把 OpenCowork 接入海外聊天环境
+- 和其他平台一样，消息最终都走统一 plugin tools
+- 若部署环境无法直连 bot 端，就配置 relay
 
-## 使用方式 / Usage
+## 适合什么场景？ / When to use it
 
-- **私聊**：直接向机器人发送消息
-- **群组**：将机器人添加到群组，@ 机器人触发回复
-
-## 注意事项 / Notes
-
-<Callout type="info">
-  Telegram 使用长轮询（Long Polling）接收消息，无需公网 IP 或 webhook 配置。
-</Callout>
+- 跨时区通知
+- 社区机器人
+- 远程消息自动回复

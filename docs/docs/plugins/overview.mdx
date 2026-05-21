@@ -1,76 +1,91 @@
 ---
 title: 插件系统概述
-description: OpenCowork 消息平台插件架构与自动回复机制。
+description: OpenCowork 消息平台插件的架构、自动回复机制和工具层。
 ---
 
 # 插件系统概述 / Plugin System Overview
 
-消息平台插件让 OpenCowork 能够连接主流聊天平台，把外部消息流接入本地 Agent。
+消息平台插件让 OpenCowork 能把外部聊天流接到本地 Agent。它们不是 app plugin；它们是**真正的消息接入层**。
 
 ## 架构 / Architecture
 
 ```mermaid
 flowchart TD
-    A[消息平台] -->|WebSocket / SDK| B[MessagingChannelService]
-    B --> C[WsMessageParser]
-    C -->|过滤 & 解析| D[ChannelManager]
-    D -->|触发| E[Agent Loop\nforceApproval=true]
-    E -->|回复| A
+  A[External chat platform] --> B[Channel service]
+  B --> C[Ws / SDK / Polling parser]
+  C --> D[ChannelManager]
+  D --> E[Auto-reply pipeline]
+  E --> F[Agent Loop / JS Agent Runtime]
+  F --> G[Reply back to platform]
 ```
 
-## 管理方式 / Channel Registry
+## 核心组件 / Core components
 
-`ChannelManager` 使用工厂模式管理各个平台服务：
+| 组件 | 作用 |
+| --- | --- |
+| `ChannelManager` | 管理插件生命周期 |
+| `BasePluginService` | 插件服务基类 |
+| `ChannelProviderDescriptor` | 描述某个平台需要什么配置和工具 |
+| `plugin-tools.ts` | 给 Agent 暴露统一的消息平台工具 |
+| `auto-reply.ts` | 收到消息后的自动回复流水线 |
 
-```typescript
-channelManager.registerFactory('feishu-bot', createFeishuService)
-channelManager.registerFactory('dingtalk-bot', createDingTalkService)
-channelManager.registerFactory('telegram-bot', createTelegramService)
-channelManager.registerParser('telegram-bot', parseTelegramWsMessage)
+## 当前支持的平台 / Supported platforms
+
+| 平台 | 描述 |
+| --- | --- |
+| Feishu Bot | Lark / 飞书，支持流式卡片 |
+| DingTalk Bot | 钉钉 Stream API |
+| WeCom Bot | 企业微信 |
+| QQ Bot | QQ 官方 Gateway WS |
+| Weixin Official | 个人微信扫码绑定 / 官方网关接入 |
+| Telegram Bot | Telegram bot + relay |
+| Discord Bot | Discord gateway WS |
+| WhatsApp Bot | WhatsApp Cloud API + relay |
+
+## 插件工具 / Plugin tools
+
+所有平台共享一组统一工具：
+
+- `PluginSendMessage`
+- `PluginReplyMessage`
+- `PluginGetGroupMessages`
+- `PluginListGroups`
+- `PluginSummarizeGroup`
+- `PluginGetCurrentChatMessages`
+
+Feishu 和 Weixin 还有专属媒体工具，例如图片、文件、成员列表、@成员、紧急消息等。
+
+## 持久化 / Persistence
+
+插件实例会保存在：
+
+```text
+~/.open-cowork/plugins.json
 ```
 
-- 工厂负责创建平台服务实例
-- Parser 负责把原始 WebSocket 帧转换成标准消息
-- `ChannelManager` 统一负责 start / stop / restart / status
+每个实例会记录：
 
-## 传输层 / Transport
+- 类型
+- 是否启用
+- 是否自动启动
+- 工具开关
+- 连接配置
 
-大多数平台服务基于 `BasePluginService` 或 SDK 封装实现：
+## 自动回复 / Auto reply
 
-- 自动重连（指数退避）
-- 心跳保活
-- 断线缓存与恢复
-- 平台级消息标准化
+当消息进来时，插件会把事件交给自动回复管线。然后：
 
-飞书使用官方 Lark SDK；钉钉使用 `dingtalk-stream`；其余平台按各自协议适配。
+1. 把消息转成统一格式
+2. 生成或恢复 session
+3. 让 Agent Loop 处理
+4. 把结果发回平台
 
-## 自动回复机制 / Auto-Reply
+## 安全提醒 / Safety note
 
-收到消息后，服务会把事件送入自动回复流水线，再由 Agent 生成回复：
+插件能把 Agent 接到真实聊天环境里，所以它们通常比本地 UI 更危险：
 
-```typescript
-await runAgentLoop({
-  messages: [userMessage],
-  forceApproval: true,
-  sessionId: pluginSessionId
-})
-```
+- 它们会直接暴露外部用户消息
+- 它们会用到 forceApproval / 自动回复逻辑
+- 它们的工具开关要谨慎配置
 
-`forceApproval` 模式下，Agent 可以无需用户确认地执行工具操作，因此插件配置需要保持可信。
-
-## 插件工具 / Plugin Tools
-
-平台启用时会动态注册专属工具，例如发送消息、获取群组信息、登录授权等。插件禁用时自动注销这些工具。
-
-## 支持的平台 / Supported Platforms
-
-| 平台     | 文档                                          |
-| -------- | --------------------------------------------- |
-| 飞书     | [飞书集成](/docs/plugins/feishu)              |
-| 钉钉     | [钉钉集成](/docs/plugins/dingtalk)            |
-| QQ       | [QQ 机器人集成](/docs/plugins/qq)             |
-| 个人微信 | [个人微信接入](/docs/plugins/weixin-personal) |
-| Telegram | [Telegram 集成](/docs/plugins/telegram)       |
-| Discord  | [Discord 集成](/docs/plugins/discord)         |
-| WhatsApp | [WhatsApp 集成](/docs/plugins/whatsapp)       |
-| 企业微信 | [企业微信集成](/docs/plugins/wecom)           |
+如果你只想增强本地 Agent 能力，请看 [应用插件](/docs/features/app-plugins)。

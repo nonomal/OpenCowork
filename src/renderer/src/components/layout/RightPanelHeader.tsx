@@ -1,4 +1,14 @@
-import { Bot, FileCode, FolderOpen, Globe, PanelRightClose, Plus, Terminal, X } from 'lucide-react'
+import {
+  Bot,
+  FileCode,
+  FolderOpen,
+  Globe,
+  Info,
+  PanelRightClose,
+  Plus,
+  Terminal,
+  X
+} from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import {
   DropdownMenu,
@@ -22,6 +32,7 @@ interface RightPanelHeaderProps {
 }
 
 function TabIcon({ tab }: { tab: RightPanelTabInstance }): React.JSX.Element {
+  if (tab.kind === 'context') return <Info className="size-3.5" />
   if (tab.kind === 'browser') return <Globe className="size-3.5" />
   if (tab.kind === 'subagent') return <Bot className="size-3.5" />
   if (tab.kind === 'terminal') return <Terminal className="size-3.5" />

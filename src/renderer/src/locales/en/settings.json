@@ -5,6 +5,7 @@
     "poweredBy": "Powered by OpenCowork",
     "groups": {
       "foundation": "Foundation",
+      "system": "System",
       "ai": "AI Capabilities",
       "extensions": "Extensions & Integrations",
       "about": "About"
@@ -174,6 +175,57 @@
       "clearConfirm": "Delete all {{count}} sessions? This cannot be undone.",
       "cleared": "Deleted {{count}} sessions",
       "noSessions": "No sessions available"
+    }
+  },
+  "system": {
+    "title": "System Settings",
+    "subtitle": "Shell runtime, proxy, and OS-level execution preferences",
+    "platform": "Platform: {{platform}}",
+    "shell": {
+      "endpoint": {
+        "title": "Shell execution endpoint",
+        "desc": "Choose which shell OpenCowork uses for Bash tool calls. The options are filtered by the current operating system.",
+        "selectLabel": "Available shells",
+        "options": {
+          "auto": {
+            "label": "Auto (system default)",
+            "desc": "Use the app's default resolver: SHELL/zsh/bash/sh on macOS and Linux, or the system command shell on Windows."
+          },
+          "zsh": {
+            "label": "zsh (/bin/zsh)",
+            "desc": "Use zsh for foreground and background Bash tool execution."
+          },
+          "bash": {
+            "label": "bash (/bin/bash)",
+            "desc": "Use bash for foreground and background Bash tool execution."
+          },
+          "sh": {
+            "label": "sh (/bin/sh)",
+            "desc": "Use the POSIX sh shell for foreground and background Bash tool execution."
+          },
+          "powershell": {
+            "label": "Windows PowerShell",
+            "desc": "Use powershell.exe for foreground and background Bash tool execution on Windows."
+          },
+          "pwsh": {
+            "label": "PowerShell 7",
+            "desc": "Use pwsh.exe for foreground and background Bash tool execution on Windows."
+          },
+          "cmd": {
+            "label": "Command Prompt",
+            "desc": "Use cmd.exe for foreground and background Bash tool execution on Windows."
+          },
+          "custom": {
+            "label": "Custom executable",
+            "desc": "Use a custom shell executable path or command name."
+          }
+        }
+      },
+      "customPath": "Custom shell executable",
+      "customPlaceholderPosix": "/opt/homebrew/bin/zsh",
+      "customPlaceholderWindows": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "resolvedShell": "Resolved shell: {{shell}}",
+      "resolvedAuto": "Resolved shell: Auto, selected at runtime"
     }
   },
   "memory": {
@@ -367,6 +419,11 @@
       "clearingCookies": "Clearing...",
       "cookiesCleared": "Browser cookies cleared",
       "cookiesClearFailed": "Failed to clear browser cookies",
+      "userDataReuse": "Reuse local browser profile",
+      "userDataReuseDesc": "Default on. The built-in browser uses a Chrome-like identity and, when a supported profile is found, reuses that browser profile storage.",
+      "activeProfile": "Active profile: {{browserName}} — {{path}}",
+      "profileFallback": "No supported browser profile was detected, so OpenCowork is using its own browser profile.",
+      "restartRequired": "Restart OpenCowork for this browser profile mode to fully take effect.",
       "blockedDomains": "Blocked domains",
       "blockedDomainsDesc": "Navigation to these domains and subdomains is denied.",
       "allowedDomains": "Allowed domains",

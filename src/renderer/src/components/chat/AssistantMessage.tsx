@@ -1530,7 +1530,7 @@ export function AssistantMessage({
       (typeof content === 'string' && content.length === 0) ||
       (Array.isArray(normalizedContent) && normalizedContent.length === 0)
     const generatingImagePreviewSrc =
-      generatingImagePreview?.source.type === 'base64'
+      generatingImagePreview?.source.type === 'base64' && generatingImagePreview.source.data
         ? `data:${generatingImagePreview.source.mediaType || 'image/png'};base64,${generatingImagePreview.source.data}`
         : (generatingImagePreview?.source.url ?? '')
 
@@ -1948,10 +1948,10 @@ export function AssistantMessage({
               case 'image': {
                 const imgBlock = block as Extract<ContentBlock, { type: 'image' }>
                 const imgSrc =
-                  imgBlock.source.type === 'base64'
+                  imgBlock.source.type === 'base64' && imgBlock.source.data
                     ? `data:${imgBlock.source.mediaType || 'image/png'};base64,${imgBlock.source.data}`
                     : (imgBlock.source.url ?? '')
-                if (!imgSrc) return null
+                if (!imgSrc && !imgBlock.source.filePath) return null
                 const editableImage = imageBlockToAttachment(imgBlock)
                 const actions =
                   canEditGeneratedImages && sessionId && editableImage

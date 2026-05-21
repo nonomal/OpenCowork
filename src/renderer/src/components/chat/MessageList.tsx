@@ -21,7 +21,8 @@ import { SessionChangeSummaryCard } from './SessionChangeSummaryCard'
 import {
   buildChatRenderableMessageMetaFromAnalysis,
   buildTranscriptStaticAnalysis,
-  type ChatRenderableMessageMeta
+  type ChatRenderableMessageMeta,
+  type TailToolExecutionState
 } from './transcript-utils'
 import { buildOrchestrationRuns } from '@renderer/lib/orchestration/build-runs'
 import { type EditableUserMessageDraft } from '@renderer/lib/image-attachments'
@@ -90,6 +91,12 @@ function getMessageToolUseIds(message: UnifiedMessage): string[] {
     })
     .map((block) => block.id)
     .filter(Boolean)
+}
+
+function hasCompleteTailToolExecutionResults(state: TailToolExecutionState | null): boolean {
+  if (!state || state.toolUseBlocks.length === 0) return false
+
+  return state.toolUseBlocks.every((toolUse) => state.toolResultMap.has(toolUse.id))
 }
 
 interface UserMessageLocatorItem {
@@ -874,6 +881,7 @@ function MessageListInner(props: MessageListProps): React.JSX.Element {
 
   const continueAssistantMessageId = React.useMemo(() => {
     if (streamingMessageId || isSessionRunning) return null
+    if (!hasCompleteTailToolExecutionResults(tailToolExecutionState)) return null
     return tailToolExecutionState?.assistantMessageId ?? null
   }, [isSessionRunning, streamingMessageId, tailToolExecutionState])
   const showPendingAssistantRow = (isPrimarySessionRunning || isTeamRunning) && !streamingMessageId

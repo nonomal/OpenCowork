@@ -170,7 +170,10 @@ import {
   GOAL_TOOL_NAMES,
   validateGoalObjective
 } from '@renderer/lib/agent/goal-context'
-import { getTailToolExecutionState } from '@renderer/components/chat/transcript-utils'
+import {
+  getTailToolExecutionState,
+  type TailToolExecutionState
+} from '@renderer/components/chat/transcript-utils'
 import type { AutoModelSelectionStatus } from '@renderer/stores/ui-store'
 import {
   agentBridge,
@@ -1981,6 +1984,34 @@ function getStoredToolCallResult(
   }
 
   return null
+}
+
+function collectAvailableContinuationToolResults(
+  sessionId: string,
+  tailToolExecution: TailToolExecutionState
+): {
+  toolResultsById: Map<string, { content: ToolResultContent; isError?: boolean }>
+  missingToolUses: TailToolExecutionState['toolUseBlocks']
+} {
+  const toolResultsById = new Map(tailToolExecution.toolResultMap)
+  const missingToolUses: TailToolExecutionState['toolUseBlocks'] = []
+
+  for (const toolUse of tailToolExecution.toolUseBlocks) {
+    if (toolResultsById.has(toolUse.id)) continue
+
+    const cachedResult = getStoredToolCallResult(sessionId, toolUse.id)
+    if (cachedResult) {
+      toolResultsById.set(toolUse.id, {
+        content: cachedResult.content,
+        isError: cachedResult.isError
+      })
+      continue
+    }
+
+    missingToolUses.push(toolUse)
+  }
+
+  return { toolResultsById, missingToolUses }
 }
 
 // ── Team lead auto-trigger: teammate messages → new agent turn ──
@@ -5235,7 +5266,7 @@ export function useChatActions(): {
     continuingToolExecutionSessions.add(sessionId)
 
     try {
-      await chatStore.loadRecentSessionMessages(sessionId)
+      await chatStore.loadSessionMessages(sessionId, true)
     } catch (error) {
       continuingToolExecutionSessions.delete(sessionId)
       throw error
@@ -5247,12 +5278,6 @@ export function useChatActions(): {
       return
     }
 
-    const session = chatStore.sessions.find((item) => item.id === sessionId)
-    if (!session) {
-      continuingToolExecutionSessions.delete(sessionId)
-      return
-    }
-
     const resumedAssistantMessageId = tailToolExecution.assistantMessageId
     let handedOffToSendMessage = false
 
@@ -5260,132 +5285,23 @@ export function useChatActions(): {
     agentStore.setRunning(true)
 
     try {
-      const toolResultsById = new Map(tailToolExecution.toolResultMap)
-      const pendingToolUses = tailToolExecution.toolUseBlocks.filter(
-        (toolUse) => !toolResultsById.has(toolUse.id)
+      const { toolResultsById, missingToolUses } = collectAvailableContinuationToolResults(
+        sessionId,
+        tailToolExecution
       )
 
-      if (pendingToolUses.length > 0) {
-        const abortController = new AbortController()
-        sessionAbortControllers.set(sessionId, abortController)
-        clearRequestRetryState(sessionId)
-        agentStore.setSessionStatus(sessionId, 'running')
-
-        try {
-          for (const toolUse of pendingToolUses) {
-            if (abortController.signal.aborted) return
-
-            const cachedResult = getStoredToolCallResult(sessionId, toolUse.id)
-            if (cachedResult) {
-              toolResultsById.set(toolUse.id, {
-                content: cachedResult.content,
-                isError: cachedResult.isError
-              })
-              continue
-            }
-
-            const pluginChatId = extractPluginChatId(session.externalChatId)
-            const toolCtx: ToolContext = {
-              sessionId,
-              workingFolder: resolveSessionWorkingFolder(session),
-              sshConnectionId: session.sshConnectionId,
-              signal: abortController.signal,
-              ipc: ipcClient,
-              currentToolUseId: toolUse.id,
-              agentRunId: resumedAssistantMessageId,
-              ...(session.pluginId ? { pluginId: session.pluginId } : {}),
-              ...(pluginChatId ? { pluginChatId } : {}),
-              ...(session.pluginChatType ? { pluginChatType: session.pluginChatType } : {}),
-              ...(session.pluginSenderId ? { pluginSenderId: session.pluginSenderId } : {}),
-              ...(session.pluginSenderName ? { pluginSenderName: session.pluginSenderName } : {}),
-              sharedState: {}
-            }
-
-            const requiresApproval = toolRegistry.checkRequiresApproval(
-              toolUse.name,
-              toolUse.input,
-              toolCtx
-            )
-
-            if (requiresApproval) {
-              agentStore.addToolCall(
-                {
-                  id: toolUse.id,
-                  name: toolUse.name,
-                  input: toolUse.input,
-                  status: 'pending_approval',
-                  requiresApproval: true
-                },
-                sessionId
-              )
-
-              const approved = await agentStore.requestApproval(toolUse.id)
-              if (approved) {
-                agentStore.addApprovedTool(toolUse.name)
-              } else {
-                const deniedOutput = encodeToolError('User denied permission')
-                agentStore.updateToolCall(
-                  toolUse.id,
-                  {
-                    status: 'error',
-                    output: deniedOutput,
-                    error: 'User denied permission',
-                    completedAt: Date.now()
-                  },
-                  sessionId
-                )
-                toolResultsById.set(toolUse.id, { content: deniedOutput, isError: true })
-                continue
-              }
-            }
-
-            const startedAt = Date.now()
-            agentStore.addToolCall(
-              {
-                id: toolUse.id,
-                name: toolUse.name,
-                input: toolUse.input,
-                status: 'running',
-                requiresApproval,
-                startedAt
-              },
-              sessionId
-            )
-
-            const output = await toolRegistry.execute(toolUse.name, toolUse.input, toolCtx)
-            const isError = typeof output === 'string' && isStructuredToolErrorText(output)
-            const errorMessage = extractToolErrorMessage(output)
-
-            agentStore.updateToolCall(
-              toolUse.id,
-              {
-                status: isError ? 'error' : 'completed',
-                output,
-                ...(errorMessage ? { error: errorMessage } : {}),
-                completedAt: Date.now()
-              },
-              sessionId
-            )
-
-            if (
-              resumedAssistantMessageId &&
-              (toolUse.name === 'Write' || toolUse.name === 'Edit')
-            ) {
-              void agentStore.refreshRunChanges(resumedAssistantMessageId, {
-                sessionId
-              })
-            }
-
-            toolResultsById.set(toolUse.id, { content: output, isError })
-          }
-        } finally {
-          const activeController = sessionAbortControllers.get(sessionId)
-          if (activeController === abortController) {
-            sessionAbortControllers.delete(sessionId)
-          }
-          clearRequestRetryState(sessionId)
-          agentStore.setSessionStatus(sessionId, null)
-        }
+      // Continue must only bridge saved tool results back to the model; replaying historical
+      // tool_use blocks can repeat writes, shell commands, or other side effects.
+      if (missingToolUses.length > 0) {
+        const names = Array.from(new Set(missingToolUses.map((toolUse) => toolUse.name)))
+          .slice(0, 3)
+          .join(', ')
+        toast.error('Cannot continue safely', {
+          description: `Missing saved results for ${missingToolUses.length} previous tool call${
+            missingToolUses.length === 1 ? '' : 's'
+          }${names ? ` (${names})` : ''}. Retry the turn instead of replaying tools.`
+        })
+        return
       }
 
       const consolidatedToolResults = tailToolExecution.toolUseBlocks.map((toolUse) => {

@@ -1,62 +1,66 @@
 ---
 title: 提供商配置概述
-description: OpenCowork 支持的 AI 提供商列表与配置方式。
+description: OpenCowork 的 provider 体系、运行时 adapter 和内置 preset。
 ---
 
 # 提供商配置概述 / Providers Overview
 
-OpenCowork 支持 18+ AI 提供商，通过统一的 `APIProvider` 接口抽象差异。
+OpenCowork 的提供商体系分两层：
 
-## 支持的提供商 / Supported Providers
+1. **运行时 adapter**：真正负责发请求、收流、处理 image / thinking / reasoning 的底层实现
+2. **provider preset**：给用户配置页面和模型列表使用的预设项
 
-| 提供商                                        | 协议                               | 特性                       |
-| --------------------------------------------- | ---------------------------------- | -------------------------- |
-| [Anthropic](/docs/providers/anthropic)        | `anthropic`                        | 扩展思考、视觉             |
-| [OpenAI](/docs/providers/openai)              | `openai-chat` / `openai-responses` | 视觉、推理                 |
-| [DeepSeek](/docs/providers/deepseek)          | `openai-chat`                      | 推理模式                   |
-| [Google Gemini](/docs/providers/google)       | `openai-chat`                      | 视觉、长上下文             |
-| [Ollama](/docs/providers/ollama)              | `openai-chat`                      | 本地运行，无需 API Key     |
-| [其他提供商](/docs/providers/other-providers) | `openai-chat`                      | Qwen、Moonshot、MiniMax 等 |
+## 当前实现 / Current implementation
 
-补充说明：
+| 层 | 数量 | 说明 |
+| --- | --- | --- |
+| 运行时 adapter | 5 | `anthropic`、`openai-chat`、`openai-responses`、`openai-images`、`gemini` |
+| 内置 provider preset | 24 | 覆盖 Anthropic、OpenAI、Google、Ollama、DeepSeek、Qwen、Moonshot、MiniMax、Baidu、SiliconFlow 等 |
 
-- Gitee AI 仅支持 API Key 登录方式。
-- Codex 支持 OAuth 登录（授权后直接调用 OpenAI 兼容接口）。
+## 支持的主要提供商 / Main provider families
 
-## 添加提供商 / Add Provider
+| 提供商 | 入口 | 说明 |
+| --- | --- | --- |
+| [Anthropic](/docs/providers/anthropic) | native | Claude、thinking、vision |
+| [OpenAI / Azure OpenAI](/docs/providers/openai) | `openai-chat` / `openai-responses` | Chat、reasoning、image generation |
+| [Google Gemini](/docs/providers/google) | `openai-chat` | 超长上下文、多模态 |
+| [DeepSeek](/docs/providers/deepseek) | `openai-chat` | 性价比和推理模型 |
+| [Ollama](/docs/providers/ollama) | `openai-chat` | 本地运行、无需云 API Key |
+| [其他提供商](/docs/providers/other-providers) | mostly `openai-chat` | Qwen、Moonshot、MiniMax、Baidu、SiliconFlow、OAuth preset 等 |
 
-1. 进入 **设置 → AI 提供商**
-2. 点击 **添加提供商**
-3. 选择提供商类型
-4. 填入 API Key 和可选的 Base URL
-5. 选择默认模型
+## 统一配置 / Unified config
 
-## 自定义 Base URL
+每个提供商页都可以理解成同一套字段：
 
-所有 OpenAI 兼容的提供商都支持自定义 Base URL，可以接入任何兼容 OpenAI API 的服务：
+- provider type
+- Base URL
+- API Key / OAuth
+- model list
+- category（chat / image）
+- vision / thinking / reasoning flags
 
-```
-Base URL: https://your-proxy.example.com/v1
-```
+## 什么时候选哪类？ / Which one should I choose?
 
-## 图像模型 / Image Models
+- 想要原生思考和最稳的 Claude 体验：选 Anthropic
+- 想要最通用的 API 兼容：选 OpenAI-compatible preset
+- 想要本地离线：选 Ollama
+- 想要超长上下文：选 Gemini
+- 想要便宜且适合中文：看 DeepSeek / Qwen / SiliconFlow / Baidu 等 preset
 
-部分提供商支持图像生成模型（如 OpenAI 的 DALL·E 系列）。配置图像模型时，需要将模型的 `category` 设为 `image`：
+## 图像模型 / Image models
 
-1. 进入 **设置 → AI 提供商**
-2. 在模型列表中找到或添加图像生成模型
-3. 确保模型分类为 `image`
-4. 启用模型
+图像模型通常会被标成 `category = image`。这样图像插件才会把它识别成可用的生成源。
 
-启用后，可以在 **设置 → 插件** 中开启[图像生成插件](/docs/features/app-plugins)，让 Agent 获得图片生成能力。
+## 配置入口 / Where to configure
 
-## 模型定价 / Pricing
+在应用里：
 
-每个模型配置包含定价信息，用于在 UI 中显示预估费用：
+- `Settings → AI Provider`
+- `Settings → Model management`
+- `Settings → Model`
 
-```typescript
-{
-  inputPrice: 3.0,   // 每百万 input tokens 的美元价格
-  outputPrice: 15.0, // 每百万 output tokens 的美元价格
-}
+不同 preset 的文件都放在：
+
+```text
+src/renderer/src/stores/providers/
 ```

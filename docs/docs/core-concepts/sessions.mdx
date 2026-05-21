@@ -1,68 +1,115 @@
 ---
 title: 会话与消息管理
-description: OpenCowork 的会话和消息存储机制。
+description: OpenCowork 的 project/session/message 模型和持久化结构。
 ---
 
 # 会话与消息管理 / Sessions & Messages
 
-## 数据模型 / Data Model
+OpenCowork 使用的是 **project → session** 的结构，而不是单纯的“聊天列表”。这样做是为了把工作目录、SSH、插件和模型绑定到真实工作上下文里。
 
-```typescript
-interface Session {
+## 业务模型 / Data model
+
+### Project
+
+```ts
+interface Project {
   id: string
-  title: string
-  model: string
-  provider: string
+  name: string
+  workingFolder?: string
+  sshConnectionId?: string
+  pluginId?: string
+  pinned: boolean
   createdAt: number
   updatedAt: number
 }
+```
 
+### Session
+
+```ts
+interface Session {
+  id: string
+  title: string
+  mode: 'chat' | 'clarify' | 'cowork' | 'code' | 'acp'
+  projectId: string
+  workingFolder?: string
+  messageCount: number
+  pluginId?: string
+  sshConnectionId?: string
+  providerId?: string
+  modelId?: string
+  planId?: string
+  pinned: boolean
+  createdAt: number
+  updatedAt: number
+}
+```
+
+### Message
+
+```ts
 interface Message {
   id: string
   sessionId: string
   role: 'user' | 'assistant' | 'tool'
-  content: MessageContent[]
+  content: string | ContentBlock[]
+  usage?: string
+  sortOrder: number
   createdAt: number
 }
 ```
 
+## 模式 / Modes
+
+| 模式 | 含义 |
+| --- | --- |
+| `chat` | 轻量对话 |
+| `clarify` | 先问清楚，再进入计划 |
+| `cowork` | 通用协作 |
+| `code` | 代码修改与本地执行 |
+| `acp` | 架构控制与委派执行 |
+
+## 消息内容 / Message content
+
+消息内容不是只有纯文本，`content` 可以是一个 block 数组：
+
+- `text`
+- `thinking`
+- `tool_use`
+- `tool_result`
+- `image`
+- `image_error`
+- `agent_error`
+
+这就是为什么聊天窗口能同时展示文本、思考、工具调用和图片。
+
 ## 持久化 / Persistence
 
-会话和消息通过 IPC 调用持久化到 SQLite：
+会话和消息最终落在 SQLite 中：
 
-```typescript
-// 保存消息（fire-and-forget）
-window.electron.ipc.invoke('db:saveMessage', message)
+- `sessions`
+- `messages`
 
-// 加载会话历史
-const messages = await window.electron.ipc.invoke('db:getMessages', sessionId)
-```
+其中 `messages.meta` 会保存压缩边界、摘要等辅助信息，`messages.sort_order` 保证流式写入顺序稳定。
 
-## chat-store
+## UI store 的作用 / UI store responsibilities
 
-`chat-store` 是会话管理的核心 Zustand store：
+`chat-store` 负责：
 
-```typescript
-interface ChatStore {
-  sessions: Session[]
-  activeSessionId: string | null
-  messages: Record<string, Message[]>
+- 项目和会话列表
+- 当前活动会话
+- 会话模式切换
+- 工作目录与 SSH 上下文
+- 从数据库加载历史消息
 
-  createSession(): Session
-  deleteSession(id: string): void
-  addMessage(sessionId: string, message: Message): void
-  updateMessage(sessionId: string, messageId: string, updates: Partial<Message>): void
-}
-```
+## project 为什么重要 / Why projects matter
 
-## 消息内容类型 / Content Types
+Project 不只是“分组”标签，它实际上承载了：
 
-消息内容支持多种类型：
+- 工作目录
+- SSH 目标
+- 消息平台上下文
+- 关联会话集合
+- pinned 状态
 
-| 类型          | 描述                  |
-| ------------- | --------------------- |
-| `text`        | 纯文本                |
-| `thinking`    | 扩展思考内容          |
-| `tool_use`    | 工具调用              |
-| `tool_result` | 工具结果              |
-| `image`       | 图片（base64 或 URL） |
+这让 OpenCowork 能把“一个代码仓库 / 一个远程主机 / 一个插件聊天空间”当成真正的工作单元。

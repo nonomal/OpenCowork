@@ -289,13 +289,13 @@ export function ImagePluginToolCard({
                   <div className="grid gap-3 md:grid-cols-2">
                     {images.map((image, index) => {
                       const src =
-                        image.source.type === 'base64'
+                        image.source.type === 'base64' && image.source.data
                           ? `data:${image.source.mediaType || 'image/png'};base64,${image.source.data}`
                           : (image.source.url ?? '')
-                      if (!src) return null
+                      if (!src && !image.source.filePath) return null
                       return (
                         <motion.div
-                          key={`${src}-${index}`}
+                          key={`${image.source.filePath ?? src}-${index}`}
                           initial={{ opacity: 0, y: 10, scale: 0.98 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           transition={{ ...ITEM_TRANSITION, delay: index * 0.06 }}

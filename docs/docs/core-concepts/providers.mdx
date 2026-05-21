@@ -1,73 +1,101 @@
 ---
 title: AI 提供商体系
-description: OpenCowork 的 API 提供商抽象层与协议支持。
+description: OpenCowork 的 provider 抽象、协议支持和内置预设。
 ---
 
 # AI 提供商体系 / API Providers
 
-提供商层位于 `src/renderer/src/lib/api/`，抽象了不同 LLM API 的差异。
+OpenCowork 的 provider 层位于 `src/renderer/src/lib/api/`，它把不同供应商的 API 差异收敛到统一的调用模型里。
 
-## APIProvider 接口
+## 运行时适配器 / Runtime adapters
 
-```typescript
-interface APIProvider {
-  sendMessage(
-    messages: Message[],
-    config: ProviderConfig,
-    signal?: AbortSignal
-  ): AsyncIterable<StreamEvent>
-}
-```
+应用启动时会注册 5 个运行时 adapter：
 
-## 支持的协议 / Protocols
+- `anthropic`
+- `openai-chat`
+- `openai-responses`
+- `openai-images`
+- `gemini`
 
-| 协议               | 文件                  | 适用提供商                  |
-| ------------------ | --------------------- | --------------------------- |
-| `anthropic`        | `anthropic.ts`        | Claude 系列                 |
-| `openai-chat`      | `openai-chat.ts`      | OpenAI、DeepSeek、Ollama 等 |
-| `openai-responses` | `openai-responses.ts` | OpenAI Responses API        |
+这 5 个 adapter 负责真正的请求、流式输出和图像生成事件。
 
-## StreamEvent 类型
+## 内置预设 / Built-in presets
 
-```typescript
-type StreamEvent =
-  | { type: 'text_delta'; delta: string }
-  | { type: 'thinking_delta'; delta: string }
-  | { type: 'tool_use_start'; id: string; name: string }
-  | { type: 'tool_use_delta'; id: string; delta: string }
-  | { type: 'tool_use_end'; id: string }
-  | { type: 'image_generated'; imageBlock: ImageBlock }
-  | { type: 'image_error'; imageError: { code: ImageErrorCode; message: string } }
-  | { type: 'message_stop'; usage: Usage }
-```
+`src/renderer/src/stores/providers/` 下维护了 24 个内置 provider preset，覆盖：
 
-### 图像生成事件 / Image Events
+- Anthropic / Claude
+- OpenAI / Azure OpenAI
+- Google / Gemini
+- Ollama
+- DeepSeek
+- Qwen
+- Moonshot
+- MiniMax
+- Baidu / ERNIE
+- SiliconFlow
+- Gitee AI
+- Codex OAuth
+- Copilot OAuth
+- Xiaomi
+- BigModel
+- LongCat
+- Routin AI
+- OpenRouter
 
-当使用图像生成模型（如 DALL·E）时，流事件中会包含图像相关事件：
+> 其中很多 preset 本质上是 OpenAI-compatible，只是默认 Base URL、认证方式或模型集合不同。
 
-- `image_generated`：图像生成成功，包含 `ImageBlock`（base64 或 URL 格式）
-- `image_error`：图像生成失败，错误码包括 `timeout`、`network`、`request_aborted`、`api_error`、`unknown`
+## 统一模型 / Unified model config
 
-## 模型分类 / Model Categories
+模型配置通常包含这些信息：
 
-每个模型可以通过 `category` 字段标注用途：
+| 字段 | 作用 |
+| --- | --- |
+| `id` / `name` | 模型标识和显示名 |
+| `category` | `chat` 或 `image` |
+| `vision` | 是否支持图片输入 |
+| `thinking` | 是否支持思考流 |
+| `reasoning` | 是否支持推理模型 |
+| `baseUrl` | 自定义 API 地址 |
+| `apiKey` | 认证凭据 |
+| `input/output price` | 费用估算 |
 
-| 分类        | 说明                            |
-| ----------- | ------------------------------- |
-| `chat`      | 聊天/对话模型（默认）           |
-| `image`     | 图像生成模型（如 DALL·E、Flux） |
-| `speech`    | 语音模型                        |
-| `embedding` | 向量嵌入模型                    |
+## 流式事件 / Stream events
 
-图像模型需将 `category` 设置为 `image`，才能被[图像生成插件](/docs/features/app-plugins)识别和使用。
+provider 层会把 API 响应转成统一的流事件，例如：
 
-## 提供商特性 / Features
+- `text_delta`
+- `thinking_delta`
+- `thinking_encrypted`
+- `tool_call_start`
+- `tool_call_delta`
+- `tool_call_end`
+- `image_generated`
+- `image_error`
+- `message_end`
+- `request_debug`
 
-每个提供商配置支持以下特性标志：
+这些事件再被 Agent Loop 消费，最终驱动 UI。
 
-- `vision`：是否支持图片输入
-- `thinking`：是否支持扩展思考（Extended Thinking）
-- `reasoning`：是否支持推理模式
-- `pricing`：每百万 token 的输入/输出价格
+## 图像生成 / Image generation
 
-详见各提供商配置页面：[Anthropic](/docs/providers/anthropic)、[OpenAI](/docs/providers/openai)、[DeepSeek](/docs/providers/deepseek)。
+图像模型只有在 `category = image` 时才会被图像插件识别。换句话说：
+
+- provider 负责提供模型
+- app plugin 决定是否把这个模型暴露成 `ImageGenerate`
+
+## OpenAI-compatible 规则 / Compatibility rule
+
+只要一个服务兼容 OpenAI Chat Completions API，就可以通过 `openai-chat` 协议接入。必要时只改：
+
+- Base URL
+- API Key
+- 模型名
+
+这也是为什么很多第三方模型都能直接进入 OpenCowork。
+
+## 你在代码里会看到什么 / What to look for in code
+
+- `src/renderer/src/lib/api/index.ts`：运行时 adapter 注册入口
+- `src/renderer/src/stores/providers/`：内置 provider preset
+- `src/renderer/src/lib/api/types.ts`：统一消息、流事件、usage 类型
+- `src/renderer/src/lib/api/provider.ts`：具体 provider 创建与发送逻辑

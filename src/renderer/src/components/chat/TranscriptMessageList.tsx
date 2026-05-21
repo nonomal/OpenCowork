@@ -89,7 +89,7 @@ function TranscriptMessageListInner({
 
         return (
           <TranscriptMessageRow
-            key={`${meta.messageId}:${message._revision ?? 0}`}
+            key={meta.messageId}
             message={message}
             isStreaming={streamingMessageId === message.id}
             isLastUserMessage={meta.isLastUserMessage}

@@ -24,6 +24,7 @@ interface ManagedProcess {
   process: ChildProcess
   cwd: string
   command: string
+  shell?: string
   createdAt: number
   metadata?: ProcessMetadata
   port?: number
@@ -43,11 +44,15 @@ function detectPort(line: string): number | undefined {
 export function registerProcessManagerHandlers(): void {
   ipcMain.handle(
     'process:spawn',
-    async (_event, args: { command: string; cwd?: string; metadata?: ProcessMetadata }) => {
+    async (
+      _event,
+      args: { command: string; cwd?: string; shell?: string; metadata?: ProcessMetadata }
+    ) => {
       const id = `proc-${nextId++}`
+      const configuredShell = args.shell?.trim() || undefined
       const child = spawn(args.command, {
         cwd: args.cwd || process.cwd(),
-        shell: true,
+        shell: configuredShell ?? true,
         stdio: ['pipe', 'pipe', 'pipe'],
         ...(process.platform === 'win32' ? {} : { detached: true })
       })
@@ -60,6 +65,7 @@ export function registerProcessManagerHandlers(): void {
         process: child,
         cwd: args.cwd || process.cwd(),
         command: args.command,
+        shell: configuredShell,
         createdAt: Date.now(),
         metadata: args.metadata,
         output: []

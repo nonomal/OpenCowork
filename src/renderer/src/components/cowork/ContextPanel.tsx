@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useTranslation } from 'react-i18next'
 import {
@@ -16,13 +16,16 @@ import {
   Wrench,
   Brain,
   ShieldCheck,
-  Archive
+  Archive,
+  Square,
+  Terminal,
+  Trash2
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Separator } from '@renderer/components/ui/separator'
 import { useChatStore } from '@renderer/stores/chat-store'
 import { useSettingsStore } from '@renderer/stores/settings-store'
-import { useAgentStore } from '@renderer/stores/agent-store'
+import { useAgentStore, type BackgroundProcessState } from '@renderer/stores/agent-store'
 import { useProviderStore } from '@renderer/stores/provider-store'
 import { useTeamStore } from '@renderer/stores/team-store'
 import { useUIStore } from '@renderer/stores/ui-store'
@@ -45,6 +48,190 @@ import {
   resolveCompressionReservedOutputBudget,
   resolveCompressionThreshold
 } from '@renderer/lib/agent/context-compression'
+
+const BACKGROUND_SHELL_DISPLAY_LIMIT = 8
+
+function compactShellCommand(command: string): string {
+  return command.replace(/\s+/g, ' ').trim()
+}
+
+function compactShellPath(path: string | undefined): string {
+  if (!path) return ''
+  const parts = path.split(/[\\/]/).filter(Boolean)
+  if (parts.length <= 3) return path
+  return `.../${parts.slice(-3).join('/')}`
+}
+
+function getProcessStatusTone(process: BackgroundProcessState): string {
+  if (process.status === 'running') return 'bg-emerald-500'
+  if (process.status === 'error') return 'bg-destructive'
+  if (process.status === 'stopped') return 'bg-amber-500'
+  return 'bg-muted-foreground/45'
+}
+
+function getProcessRowTone(process: BackgroundProcessState): string {
+  if (process.status === 'running') {
+    return 'border-emerald-500/20 bg-emerald-500/10 hover:bg-emerald-500/20'
+  }
+  if (process.status === 'error') {
+    return 'border-destructive/20 bg-destructive/10 hover:bg-destructive/20'
+  }
+  return 'border-border/55 bg-muted/35 hover:bg-muted/55'
+}
+
+function processOutputLineCount(process: BackgroundProcessState): number {
+  if (!process.output.trim()) return 0
+  return process.output.split('\n').length
+}
+
+function BackgroundShellsSection({
+  processes,
+  activeSessionId
+}: {
+  processes: BackgroundProcessState[]
+  activeSessionId: string | null
+}): React.JSX.Element {
+  const { t } = useTranslation('cowork')
+  const sessions = useChatStore((s) => s.sessions)
+  const ensureTerminalTab = useUIStore((s) => s.ensureTerminalTab)
+  const stopBackgroundProcess = useAgentStore((s) => s.stopBackgroundProcess)
+  const removeBackgroundProcess = useAgentStore((s) => s.removeBackgroundProcess)
+  const sessionsById = useMemo(
+    () => new Map(sessions.map((session) => [session.id, session])),
+    [sessions]
+  )
+  const runningCount = processes.filter((process) => process.status === 'running').length
+  const finishedProcesses = processes.filter((process) => process.status !== 'running')
+  const visibleProcesses = processes.slice(0, BACKGROUND_SHELL_DISPLAY_LIMIT)
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          {t('context.backgroundShellsTitle')}
+        </h4>
+        {finishedProcesses.length > 0 ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground/65 hover:text-foreground"
+            title={t('context.clearFinishedShells')}
+            aria-label={t('context.clearFinishedShells')}
+            onClick={() =>
+              finishedProcesses.forEach((process) => removeBackgroundProcess(process.id))
+            }
+          >
+            <Trash2 className="size-3" />
+          </Button>
+        ) : null}
+      </div>
+
+      {processes.length === 0 ? (
+        <div className="rounded-md border border-dashed border-border/60 px-3 py-2 text-[11px] text-muted-foreground/65">
+          {t('context.backgroundShellsEmpty')}
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground/60">
+            <span>
+              {t('context.backgroundShellsSummary', {
+                running: runningCount,
+                total: processes.length
+              })}
+            </span>
+          </div>
+          {visibleProcesses.map((process) => {
+            const isRunning = process.status === 'running'
+            const command = compactShellCommand(process.command) || process.id
+            const session = process.sessionId ? sessionsById.get(process.sessionId) : null
+            const sessionLabel = !process.sessionId
+              ? t('context.globalShell')
+              : process.sessionId === activeSessionId
+                ? t('context.currentSession')
+                : (session?.title ?? t('context.otherSession'))
+            const outputLines = processOutputLineCount(process)
+            const metaParts = [
+              t(`context.shellStatus.${process.status}`),
+              process.port ? `:${process.port}` : null,
+              outputLines > 0 ? t('context.shellOutputLines', { count: outputLines }) : null
+            ].filter((part): part is string => !!part)
+            return (
+              <div
+                key={process.id}
+                className={`group flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1.5 transition-colors ${getProcessRowTone(process)}`}
+              >
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  title={`${command}${process.cwd ? `\n${process.cwd}` : ''}`}
+                  onClick={() => ensureTerminalTab(process.id, command)}
+                >
+                  <span className="relative flex size-5 shrink-0 items-center justify-center rounded border border-border/60 bg-background/55 text-muted-foreground">
+                    <Terminal className="size-3" />
+                    <span
+                      className={`absolute -right-0.5 -top-0.5 size-1.5 rounded-full ${getProcessStatusTone(process)}`}
+                    />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono text-[11px] text-foreground/88">
+                      {command}
+                    </span>
+                    <span className="block truncate text-[10px] text-muted-foreground/60">
+                      {sessionLabel}
+                      {process.cwd ? ` · ${compactShellPath(process.cwd)}` : ''}
+                    </span>
+                  </span>
+                </button>
+                <span className="hidden max-w-24 truncate text-[9px] text-muted-foreground/55 lg:inline">
+                  {metaParts.join(' · ')}
+                </span>
+                {isRunning ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="size-6 text-muted-foreground/70 hover:text-destructive"
+                    title={t('context.stopShell')}
+                    aria-label={t('context.stopShell')}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void stopBackgroundProcess(process.id)
+                    }}
+                  >
+                    <Square className="size-3" />
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="size-6 text-muted-foreground/60 hover:text-foreground"
+                    title={t('context.removeShell')}
+                    aria-label={t('context.removeShell')}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      removeBackgroundProcess(process.id)
+                    }}
+                  >
+                    <Trash2 className="size-3" />
+                  </Button>
+                )}
+              </div>
+            )
+          })}
+          {processes.length > visibleProcesses.length ? (
+            <div className="px-1 text-[10px] text-muted-foreground/55">
+              {t('context.moreBackgroundShells', {
+                count: processes.length - visibleProcesses.length
+              })}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function ContextPanel(): React.JSX.Element {
   const { t } = useTranslation('cowork')
@@ -80,20 +267,17 @@ export function ContextPanel(): React.JSX.Element {
   )
   const workingFolder = activeProject?.workingFolder
   const chatView = useUIStore((s) => s.chatView)
-  const runningCommandIdsSig = useAgentStore((s) =>
-    Object.values(s.backgroundProcesses)
-      .filter(
-        (p) =>
-          p.source === 'bash-tool' &&
-          p.status === 'running' &&
-          (!activeSessionId || p.sessionId === activeSessionId)
-      )
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map((p) => p.id)
-      .join('\u0000')
+  const backgroundShells = useAgentStore(
+    useShallow((s) =>
+      Object.values(s.backgroundProcesses)
+        .filter((process) => process.source === 'bash-tool')
+        .sort((a, b) => {
+          if (a.status === 'running' && b.status !== 'running') return -1
+          if (a.status !== 'running' && b.status === 'running') return 1
+          return b.updatedAt - a.updatedAt
+        })
+    )
   )
-  const stopBackgroundProcess = useAgentStore((s) => s.stopBackgroundProcess)
-  const openDetailPanel = useUIStore((s) => s.openDetailPanel)
   const providerState = useProviderStore(
     useShallow((s) => ({
       providers: s.providers,
@@ -127,16 +311,6 @@ export function ContextPanel(): React.JSX.Element {
   const autoCompressionTrigger = compressionConfig
     ? getCompressionTriggerTokens(compressionConfig)
     : null
-  const runningCommands = runningCommandIdsSig
-    ? runningCommandIdsSig.split('\u0000').reduce(
-        (list, id) => {
-          const process = useAgentStore.getState().backgroundProcesses[id]
-          if (process) list.push(process)
-          return list
-        },
-        [] as Array<ReturnType<typeof useAgentStore.getState>['backgroundProcesses'][string]>
-      )
-    : []
   const projectScopedSession = isProjectSession({
     chatView,
     session: activeSession,
@@ -219,6 +393,8 @@ export function ContextPanel(): React.JSX.Element {
           )}
         </div>
       )}
+
+      <BackgroundShellsSection processes={backgroundShells} activeSessionId={activeSessionId} />
 
       {/* Session Info */}
       {activeSession && (
@@ -306,44 +482,6 @@ export function ContextPanel(): React.JSX.Element {
                   {model} ({provider})
                 </span>
               </div>
-              {runningCommands.length > 0 && (
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Wrench className="size-3 shrink-0" />
-                    <span>{t('context.runningCommands', { count: runningCommands.length })}</span>
-                  </div>
-                  <div className="space-y-1">
-                    {runningCommands.map((proc) => (
-                      <div key={proc.id} className="rounded-md border px-2 py-1.5 text-[11px]">
-                        <div className="truncate font-mono text-foreground/85">{proc.command}</div>
-                        {proc.cwd && (
-                          <div className="truncate text-muted-foreground/50">{proc.cwd}</div>
-                        )}
-                        <div className="mt-1 flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground"
-                            onClick={() =>
-                              openDetailPanel({ type: 'terminal', processId: proc.id })
-                            }
-                          >
-                            {t('context.openSession')}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 gap-1 px-1.5 text-[10px] text-destructive/80"
-                            onClick={() => void stopBackgroundProcess(proc.id)}
-                          >
-                            {t('context.stopCommand')}
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
               {(() => {
                 const totals = activeSession.messages.reduce(
                   (acc, m) => {
@@ -461,7 +599,9 @@ export function ContextPanel(): React.JSX.Element {
                     {pct !== null && (
                       <div className="mt-1 space-y-0.5">
                         <div className="flex items-center justify-between text-[9px] text-muted-foreground/40">
-                          <span>{t('compressionBudget', { defaultValue: 'Compression budget' })}</span>
+                          <span>
+                            {t('compressionBudget', { defaultValue: 'Compression budget' })}
+                          </span>
                           <span>
                             {formatTokens(ctxUsed)} / {formatTokens(ctxGaugeLimit!)} (
                             {pct.toFixed(0)}%)
@@ -510,7 +650,8 @@ export function ContextPanel(): React.JSX.Element {
                         {manualCompressionTrigger && ctxUsed < manualCompressionTrigger ? (
                           <p className="mt-1 text-[10px] text-muted-foreground/60">
                             {t('manualCompressionHint', {
-                              defaultValue: 'Current {{used}}, recommend compressing after reaching {{threshold}}',
+                              defaultValue:
+                                'Current {{used}}, recommend compressing after reaching {{threshold}}',
                               used: formatTokens(ctxUsed),
                               threshold: formatTokens(manualCompressionTrigger)
                             })}

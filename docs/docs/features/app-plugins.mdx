@@ -1,81 +1,99 @@
 ---
 title: 应用插件
-description: OpenCowork 内置应用插件系统，提供图像生成与桌面控制等扩展能力。
+description: OpenCowork 的 image / browser / desktop control 三个内置应用插件。
 ---
 
 # 应用插件 / App Plugins
 
-应用插件是 OpenCowork 的内置能力扩展层，用来给 Agent 动态注入额外工具。它和消息平台插件不同：应用插件不连接外部聊天平台，而是直接增强本地 Agent 的能力。
+应用插件是 OpenCowork 的“本地能力扩展层”。它们不是消息平台插件，而是直接增强 Agent 的本地执行能力。
 
-当前内置能力有两类：
+## 当前内置插件 / Built-in plugins
 
-- **图像生成插件**：公开可用，为 Agent 提供 `ImageGenerate`
-- **桌面控制插件**：内置但隐藏，提供截图 / 点击 / 输入 / 滚动 / 等待等工具
+| 插件 | ID | 默认状态 | 作用 |
+| --- | --- | --- | --- |
+| Image | `image` | 开启 | 图像生成 |
+| Browser | `browser` | 开启 | 内置浏览器控制 |
+| Desktop Control | `desktop-control` | 关闭 / 隐藏 | 截图、点击、输入、滚动、等待 |
 
-## 运行方式 / How It Works
+## 1) Image plugin
 
-```mermaid
-flowchart LR
-    A[App Plugin Store] --> B[能力可用性判断]
-    B --> C[toolRegistry 注册 / 注销]
-    C --> D[Agent Loop 调用工具]
-    D --> E[返回文本 / 图片 / 桌面操作结果]
-```
+### 工具
 
-`src/renderer/src/lib/app-plugin/index.ts` 会根据 `useAppPluginStore` 的状态动态注册工具：
+- `ImageGenerate`
 
-- 图像插件可用时，注册 `ImageGenerate`
-- 桌面控制插件可用时，注册 `DesktopScreenshot`、`DesktopClick`、`DesktopType`、`DesktopScroll`、`DesktopWait`
+### 依赖
 
-## 图像生成插件 / Image Plugin
+Image plugin 需要一个 **category = image** 的可用模型。
 
-图像生成插件为 Agent 提供 `ImageGenerate` 工具，允许 Agent 根据用户请求生成图片。
+### 行为
 
-### 配置步骤
+- 生成图片后会被保存到 `~/.open-cowork/images/YYYY-MM-DD/`
+- 结果会同时回到聊天流里
+- 工具会尽量把 generated image 重新转成可展示的 image block
 
-1. 进入 **设置 → AI 提供商**
-2. 启用一个 `category = image` 的模型
-3. 进入 **设置 → 应用插件**，启用图像生成插件
-4. 如需单独配置，可为插件选择独立的 provider / model
+### 常见配置
 
-### ImageGenerate 工具
+- 使用全局 image provider
+- 或在插件里单独指定 provider / model
 
-| 参数     | 类型   | 必填 | 说明                     |
-| -------- | ------ | ---- | ------------------------ |
-| `prompt` | string | ✅   | 图像生成提示词           |
-| `count`  | number | ❌   | 生成数量，默认 1，最多 4 |
+## 2) Browser plugin
 
-### 使用示例
+### 工具
 
-- `帮我画一只在月光下奔跑的狼`
-- `生成一张现代简约风格的 Logo`
-- `创建 4 张不同风格的头像`
+- `BrowserNavigate`
+- `BrowserGetContent`
+- `BrowserScreenshot`
+- `BrowserSnapshot`
+- `BrowserClick`
+- `BrowserType`
+- `BrowserScroll`
 
-Agent 会把用户意图整理成更完整的视觉描述，再调用图像模型返回结果。
+### 特点
 
-## 桌面控制插件 / Desktop Control
+- 直接在右侧面板打开 webview
+- 支持导航、回退、刷新和页面读取
+- 支持按 URL 访问本地 dev server
 
-桌面控制插件是一个 `hidden` 内置插件，主要用于让 Agent 在桌面环境中执行交互动作。
+### 安全规则
 
-### 工具列表
+Browser plugin 会检查域名规则：
 
-| 工具                | 作用         |
-| ------------------- | ------------ |
-| `DesktopScreenshot` | 截取当前屏幕 |
-| `DesktopClick`      | 点击指定坐标 |
-| `DesktopType`       | 输入文本     |
-| `DesktopScroll`     | 执行滚动     |
-| `DesktopWait`       | 等待指定时间 |
+- `browserAllowedDomains`
+- `browserBlockedDomains`
 
-### 状态说明
+如果地址不在允许列表中，导航会被拦截。
 
-- 插件配置会保存在 `app-plugin-store`
-- 工具注册由 `updateAppPluginToolRegistration()` 控制
-- 桌面控制能力在代码中已实现，但默认隐藏，不作为首页公开能力展示
+## 3) Desktop Control plugin
 
-## 关键实现 / Implementation Notes
+### 工具
 
-- `app-plugin-store` 负责持久化插件状态
-- `isImageToolAvailable()` 依据 provider / model 可用性判断图像工具是否可用
-- `isDesktopControlToolAvailable()` 对桌面控制工具做开关判断
-- `toolRegistry` 负责运行时注册 / 注销工具
+- `DesktopScreenshot`
+- `DesktopClick`
+- `DesktopType`
+- `DesktopScroll`
+- `DesktopWait`
+
+### 特点
+
+- 依赖系统级输入模拟
+- 默认隐藏
+- 通常只在可信场景下开启
+- 点击、输入、滚动这些动作默认需要审批
+
+## 插件配置在哪里？ / Where is the config?
+
+插件状态存放在 `app-plugin-store`，并按 project 维度持久化。
+
+## 它和消息平台插件的区别 / Difference from channel plugins
+
+- **App plugin**：增强本地 Agent 能力
+- **Channel plugin**：把 Agent 接到外部消息平台
+
+二者经常一起出现，但职责完全不同。
+
+## 适合的使用场景 / When to use
+
+- 需要生成图片
+- 需要控制浏览器页面
+- 需要做桌面自动化
+- 需要在工作台内部完成“看网页 -> 摘要 -> 执行”的闭环

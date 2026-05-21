@@ -1,68 +1,72 @@
 ---
 title: 安装指南
-description: 在 Windows、macOS、Linux 上安装 OpenCowork。
+description: 在 Windows、macOS、Linux 上安装 OpenCowork，并理解本地数据目录。
 ---
 
 # 安装指南 / Installation
 
-## 下载预构建包 / Download Pre-built Package
+## 系统要求 / System requirements
+
+| 平台 | 要求 |
+| --- | --- |
+| Windows | Windows 10+，建议 4GB 以上内存 |
+| macOS | macOS 12+，建议 4GB 以上内存 |
+| Linux | 现代桌面发行版，建议 4GB 以上内存 |
+
+## 方式一：下载预构建包 / Prebuilt package
 
 从 [GitHub Releases](https://github.com/AIDotNet/OpenCowork/releases) 下载对应平台的安装包：
 
-| 平台    | 文件格式             |
-| ------- | -------------------- |
-| Windows | `.exe` 安装程序      |
-| macOS   | `.dmg` 磁盘镜像      |
-| Linux   | `.AppImage` / `.deb` |
+| 平台 | 产物 |
+| --- | --- |
+| Windows | `.exe` 安装程序 |
+| macOS | `.dmg` 磁盘镜像 |
+| Linux | `.AppImage` / `.deb` |
 
-## 从源码构建 / Build from Source
-
-### 前置要求
-
-- Node.js 18+
-- npm 9+
-- Git
-
-### 步骤
+## 方式二：从源码启动 / Run from source
 
 ```bash
-# 克隆仓库
 git clone https://github.com/AIDotNet/OpenCowork.git
 cd OpenCowork
-
-# 安装依赖
 npm install
-
-# 启动开发模式（Electron + HMR）
+npm run postinstall
 npm run dev
 ```
 
-### 生产构建
+> `postinstall` 会为 Electron 重建原生模块。首次启动会比后续启动慢一些。
+
+## 方式三：本地打包 / Build locally
 
 ```bash
-# 构建所有平台
-npm run build
-
-# 仅构建 Windows
-npm run build:win
-
-# 仅构建 macOS
-npm run build:mac
-
-# 仅构建 Linux
-npm run build:linux
+npm run build        # 类型检查 + 构建
+npm run build:win    # Windows 安装包
+npm run build:mac    # macOS 安装包
+npm run build:linux  # Linux 安装包
 ```
 
-## 数据目录 / Data Directory
+## 本地数据目录 / Data directory
 
-OpenCowork 的数据存储在用户主目录下：
+应用首次启动后会在用户主目录下创建本地数据目录：
 
-```
+```text
 ~/.open-cowork/
-├── data.db          # SQLite 数据库（会话、消息、任务、Cron）
-├── agents/          # 自定义 Agent 定义（.md 文件）
-├── workflows/       # 工作流配置
-└── plugins/         # 插件配置
+├── data.db            # SQLite 主数据库
+├── settings.json      # 设置面板配置
+├── config.json        # 安全配置 / secrets-ish config
+├── mcp-servers.json   # MCP 服务器配置
+├── plugins.json       # 消息平台插件配置
+├── teams/             # Team Runtime 持久化目录
+├── agents/            # 用户子代理定义（.md）
+├── commands/          # 用户自定义 slash commands
+└── prompts/           # 用户自定义 prompts
 ```
 
-<Callout type="info">首次启动时会自动创建数据目录和数据库文件。</Callout>
+Skills 的默认目录是 `~/.agents/skills/`，首次运行会从 `resources/skills/` 同步内置内容。
+
+## 你安装完之后可以做什么 / What to do next
+
+1. 打开应用。
+2. 进入 **设置 → AI 提供商** 配置模型。
+3. 选择一个会话模式，最好先从 **Cowork** 或 **Code** 开始。
+4. 设置 working folder，然后让 Agent 读取你的项目。
+5. 需要结构化任务时启用 **Plan Mode**。

@@ -1,43 +1,63 @@
 ---
 title: 项目介绍
-description: OpenCowork 是什么，以及它的核心特性。
+description: OpenCowork 是什么、解决什么问题、适合什么样的工作流。
 ---
 
 # 项目介绍 / Introduction
 
-OpenCowork 是一个开源的桌面 AI Agent 应用，由 [AIDotNet](https://github.com/AIDotNet) 团队开发，核心贡献者 [@token](https://github.com/AIDotNet)。
+OpenCowork 是一个开源的桌面 AI Agent 工作台。它不是单纯的聊天应用，而是把 **对话、计划、任务、子代理、团队协作、消息平台、MCP、Cron、SSH、文件预览** 放到同一个本地运行时里。
 
-OpenCowork is an open-source desktop AI Agent application developed by the AIDotNet team.
+## 它解决什么问题 / What it solves
 
-## 核心特性 / Core Features
+很多 AI 工具只会“回答问题”，但很难稳定地完成真正的工作。OpenCowork 的目标是把“思考”变成“执行”：
 
-- **18+ AI 提供商**：支持 Anthropic Claude、OpenAI GPT、DeepSeek、Google Gemini、Ollama 等
-- **Agent 循环**：基于 AsyncGenerator 的流式 Agent 循环，支持工具调用与重试
-- **工具系统**：内置文件读写、Shell 执行、搜索、任务管理等 20+ 工具
-- **插件集成**：飞书、钉钉、Telegram、Discord、WhatsApp、企业微信自动回复
-- **Agent 团队**：Lead Agent 并行调度多个 Teammate，协同完成复杂任务
-- **计划模式**：结构化任务规划与追踪
-- **定时任务**：持久化 Cron 调度，SQLite 存储
-- **MCP 支持**：Model Context Protocol 服务器管理
-- **文件预览**：支持 PDF、Excel、Word、Markdown、图片预览
-- **多语言**：中英文界面切换
+- 读写本地文件
+- 运行 Shell / Git / 搜索命令
+- 调用 MCP 工具
+- 通过计划模式把复杂任务拆成可审阅的步骤
+- 通过子代理并行处理不同子任务
+- 通过 Cron 把一次性的能力变成持续的自动化
+- 通过消息平台把结果推送到真实工作场景
 
-## 与其他工具的对比 / Comparison
+## 核心设计 / Core design
 
-| 特性         | OpenCowork | Claude Code    | Cursor |
-| ------------ | ---------- | -------------- | ------ |
-| 桌面应用     | ✅         | ❌ CLI         | ✅     |
-| 多模型支持   | ✅ 18+     | ❌ Claude only | ✅     |
-| 消息平台插件 | ✅         | ❌             | ❌     |
-| Agent 团队   | ✅         | ❌             | ❌     |
-| 开源         | ✅         | ✅             | ❌     |
-| 定时任务     | ✅         | ❌             | ❌     |
+| 设计点 | 含义 |
+| --- | --- |
+| Local-first | 数据、配置、运行时尽量都落在本机 |
+| Multi-agent | 主 Agent 可以调度子代理和团队成员 |
+| Tool-driven | 所有非平凡工作都通过明确的工具完成 |
+| Evidence-based | 文档和运行时都尽量围绕真实源码和真实 IPC 契约 |
+| Secure bridge | renderer 不直接碰系统能力，系统能力放在 main |
 
-## 技术栈 / Tech Stack
+## 典型工作流 / Typical flows
 
-- **框架**：Electron 33 + React 19 + TypeScript
-- **构建**：electron-vite + Vite
-- **UI**：Tailwind CSS v4 + Radix UI + shadcn/ui
-- **状态管理**：Zustand + Immer
-- **数据库**：SQLite (better-sqlite3)
-- **AI SDK**：Anthropic SDK + OpenAI SDK
+### 1. 日常对话
+
+使用 **Chat** 或 **Cowork** 模式进行常规问答、文档处理、信息检索。
+
+### 2. 代码修改
+
+切换到 **Code** 模式，设置 working folder，然后让 Agent 读取项目、搜索文件、修改代码、运行命令。
+
+### 3. 不确定需求
+
+切换到 **Clarify** 模式，让 Agent 先收集信息，再进入 **Plan Mode** 输出可审阅计划。
+
+### 4. 架构设计
+
+切换到 **ACP** 模式，让主 Agent 只负责设计、拆解和分派，不直接修改代码。
+
+### 5. 自动化
+
+用 **Cron**、**MCP**、**Plugins**、**Skills** 和 **Sub-Agents** 把重复工作自动化。
+
+## 你需要记住的两件事
+
+1. **OpenCowork 的强项是执行，不只是生成文本。**
+2. **OpenCowork 的可靠性来自明确边界：UI、工具、主进程、共享协议各司其职。**
+
+## 下一步
+
+- 新用户：看 [安装指南](/docs/getting-started/installation)
+- 想快速跑起来：看 [快速上手](/docs/getting-started/quick-start)
+- 想理解原理：看 [架构总览](/docs/architecture/overview)

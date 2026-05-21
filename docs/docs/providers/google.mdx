@@ -1,36 +1,39 @@
 ---
 title: Google Gemini
-description: 配置 Google Gemini 系列模型。
+description: 配置 Google Gemini 以及超长上下文和多模态能力。
 ---
 
 # Google Gemini
 
-Google Gemini 提供超长上下文窗口和强大的多模态能力。
+Gemini 适合超长上下文、多模态输入和大量文档处理任务。
 
-## 获取 API Key
+## 配置入口 / Setup
 
-1. 访问 [aistudio.google.com](https://aistudio.google.com/)
-2. 点击 **Get API Key**
-3. 创建新的 API Key
+进入 **设置 → AI 提供商 → Google**，通常会配置：
 
-## 在 OpenCowork 中配置
-
-进入 **设置 → AI 提供商**，添加新提供商：
-
-| 配置项   | 值                                                        |
-| -------- | --------------------------------------------------------- |
-| 协议     | `openai-chat`                                             |
+| 配置项 | 值 |
+| --- | --- |
+| 协议 | `openai-chat` |
 | Base URL | `https://generativelanguage.googleapis.com/v1beta/openai` |
-| API Key  | 你的 Gemini API Key                                       |
+| API Key | Google AI Studio 的 key |
 
-## 支持的模型 / Supported Models
+## 常见模型 / Common model examples
 
-| 模型                        | 上下文 | 特性         |
-| --------------------------- | ------ | ------------ |
-| `gemini-2.0-flash`          | 1M     | 快速、多模态 |
-| `gemini-2.5-pro`            | 1M     | 最强能力     |
-| `gemini-2.0-flash-thinking` | 1M     | 推理模式     |
+| 模型 | 场景 |
+| --- | --- |
+| `gemini-2.0-flash` | 快速、多模态 |
+| `gemini-2.5-pro` | 更强能力 |
+| `gemini-2.0-flash-thinking` | 推理 / thinking |
 
-## 视觉能力 / Vision
+## 特点 / Characteristics
 
-Gemini 支持图片、视频、音频输入，可以在聊天中直接上传多媒体文件。
+- 超长上下文窗口
+- 图片 / 视频 / 音频等多模态能力
+- 适合长文档和复杂上下文整理
+- 通过 OpenAI-compatible 接口接入 OpenCowork
+
+## 什么时候选 Gemini？ / When to choose it?
+
+- 你要处理超长文档
+- 你要混合图片和文本
+- 你希望一个模型能扛住比较长的上下文

@@ -345,9 +345,10 @@ export function SubAgentExecutionDetail({
   const transcriptRevisionKey = agent
     ? agentDetail.signature
     : fallbackTranscript.map((message) => `${message.id}:${message._revision ?? 0}`).join('|')
+  const toolCalls = agent?.toolCalls
   const liveToolCallMap = React.useMemo(
-    () => (agent ? buildLiveToolCallMap(agent.toolCalls) : null),
-    [agent, transcriptRevisionKey]
+    () => (toolCalls ? buildLiveToolCallMap(toolCalls) : null),
+    [toolCalls]
   )
 
   if (!agent && transcript.length === 0) {

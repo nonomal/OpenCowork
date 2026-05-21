@@ -1,44 +1,79 @@
 ---
 title: 快速上手
-description: 5 分钟内完成 OpenCowork 的基础配置并发起第一次对话。
+description: 用最短路径完成第一次模型配置、会话创建和工具调用。
 ---
 
 # 快速上手 / Quick Start
 
-## 第一步：配置 API Key
+## 1. 配置一个提供商
 
-1. 打开 OpenCowork
-2. 点击右上角 **设置** 图标
-3. 选择 **AI 提供商** 标签
-4. 选择你的提供商（如 Anthropic）并填入 API Key
+打开应用后，先进入 **设置 → AI 提供商**，添加一个可用模型提供商。
 
-<Callout type="tip">
-  如果你没有 API Key，可以使用 Ollama 在本地运行模型，无需 API Key。参见 [Ollama
-  配置](/docs/providers/ollama)。
-</Callout>
+推荐优先级：
 
-## 第二步：创建会话
+1. Anthropic / Claude
+2. OpenAI / Azure OpenAI
+3. Google Gemini
+4. DeepSeek、Qwen、Moonshot、MiniMax、Ollama 等兼容或本地方案
 
-1. 点击左侧边栏的 **新建会话** 按钮
-2. 选择模型（如 `claude-sonnet-4-6`）
-3. 在输入框中输入你的第一条消息
+如果你不想先申请云端 Key，可以直接用 **Ollama**。
 
-## 第三步：使用工具
+## 2. 创建一个会话 / Create a session
 
-OpenCowork 的 Agent 可以自动调用工具完成任务。例如：
+新建会话后，先选一个适合当前任务的模式：
 
+| 模式 | 适合什么 |
+| --- | --- |
+| Chat | 轻量问答、快速对话 |
+| Cowork | 日常协作、文档处理、信息整理 |
+| Code | 项目修改、脚本运行、代码审查 |
+| Clarify | 需求不明确，需要先问清楚 |
+| ACP | 架构设计、任务拆分、委派执行 |
+
+## 3. 设置 working folder
+
+如果你要让 Agent 读写项目代码，先为会话设置工作目录。这样文件工具和 Shell 工具都会围绕这个目录执行。
+
+## 4. 让 Agent 做一个小任务
+
+先试一个简单的任务：
+
+```text
+请读取当前项目的 README，并总结这个项目的主要用途。
 ```
-帮我读取 ~/Documents/report.txt 并总结内容
+
+再试一个代码任务：
+
+```text
+请在当前项目里搜索和 cron 相关的实现，并告诉我调度器在哪里。
 ```
 
-Agent 会自动调用 `Read` 工具读取文件，然后生成摘要。
+## 5. 尝试 Plan Mode
 
-## 第四步：启用插件（可选）
+当需求开始变复杂时，切换到 **Clarify** 或直接启用 **Plan Mode**：
 
-如果你想让 OpenCowork 自动回复飞书/钉钉消息：
+```text
+请帮我把这个功能拆成可执行的实现计划。
+```
 
-1. 进入 **设置 → 插件**
-2. 选择对应平台并填入配置
-3. 开启插件开关
+Plan Mode 会先写计划文件，再让你审阅，不会直接跳进实现。
 
-详见 [插件系统](/docs/plugins/overview)。
+## 6. 尝试一个自动化任务
+
+如果你想把任务变成定时执行，可以直接让 Agent 创建 Cron：
+
+```text
+每天上午 9 点检查今天的待办，并把结果发给我。
+```
+
+## 7. 尝试一个消息平台插件
+
+如果你要把结果推到飞书、钉钉、企业微信、Telegram、Discord、WhatsApp、QQ 或微信，可以去 **设置 → 聊天频道** 配置对应插件。
+
+## 快速判断 / Rule of thumb
+
+- **需求不清楚**：用 Clarify
+- **要先出方案**：用 Plan Mode
+- **要改代码**：用 Code
+- **要长时间协作**：用 Cowork
+- **要设计和分派**：用 ACP

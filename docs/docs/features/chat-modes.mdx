@@ -1,49 +1,90 @@
 ---
 title: 聊天模式
-description: OpenCowork 的 Cowork 和 Code 两种聊天模式。
+description: OpenCowork 的 Chat、Clarify、Cowork、Code 和 ACP 模式说明。
 ---
 
 # 聊天模式 / Chat Modes
 
-OpenCowork 提供两种聊天模式，通过顶部工具栏切换。
+OpenCowork 的模式系统不只是“语气不同”，而是**工具权限、提示词目标和工作方式**都不同。当前模式包括：`chat`、`clarify`、`cowork`、`code` 和 `acp`。
 
-## Cowork 模式
+## 模式总览 / Mode overview
 
-通用 AI 助手模式，适合日常对话、文档处理、信息查询等任务。
+| 模式 | 定位 | 典型行为 |
+| --- | --- | --- |
+| `chat` | 轻量默认对话 | 直接回答、少工具、快速互动 |
+| `clarify` | 需求澄清 | 先问清楚，再进入 Plan Mode |
+| `cowork` | 通用协作 | 文档、信息、轻量执行和协同 |
+| `code` | 代码执行 | 读写文件、跑 Shell、做代码修改 |
+| `acp` | Architecture Control | 只做设计、拆解和委派，不直接改代码 |
 
-系统提示侧重于协作助手角色，工具调用更保守，适合非技术用户。
+## Chat
 
-## Code 模式
+Chat 是最轻量的对话模式。它适合：
 
-代码专家模式，适合软件开发任务：
+- 日常问答
+- 快速解释
+- 不需要复杂工具的请求
 
-- 系统提示包含代码最佳实践指导
-- 默认启用文件系统工具（Read/Write/Edit）
-- 启用 Shell 工具（Bash）
-- 启用搜索工具（Glob/Grep）
+它的目标是“先把话说清楚”，不是“先把工作做完”。
 
-## 工作目录 / Working Directory
+## Clarify
 
-在 Code 模式下，可以设置工作目录，Agent 的文件操作和 Shell 命令都在该目录下执行：
+Clarify 模式的目标是把不清晰的需求变成可执行计划：
 
-```
-设置 → 工作目录 → 选择文件夹
-```
+1. 先读取上下文
+2. 再通过 `AskUserQuestion` 追问关键歧义
+3. 最后进入 [Plan Mode](/docs/features/plan-mode)
 
-工作目录信息会注入到系统提示中，让 Agent 了解当前项目上下文。
+它适合：
 
-## 图片附件 / Image Attachments
+- 需求不完整
+- 方案有多个分支
+- 风险和约束还没确认
 
-聊天输入支持发送图片附件，可通过以下方式添加：
+## Cowork
 
-- **粘贴**：从剪贴板粘贴图片
-- **拖放**：将图片文件拖放到输入区域
-- **文件选择**：点击附件按钮选择图片文件
+Cowork 是协作型模式，适合：
 
-支持的格式包括 JPEG、PNG、GIF、WebP 等常见图片格式。图片会作为 `ImageBlock` 内容发送给 AI 模型，需要所选模型支持视觉（vision）能力。
+- 文档整理
+- 资料汇总
+- 轻量执行
+- 有一定上下文但不需要强代码权限的任务
 
-## 模式切换 / Switching Modes
+它强调“合作”，不是“全自动替你做一切”。
 
-模式切换通过顶部工具栏的切换按钮完成。切换后，系统提示会立即更新，但不会影响当前会话的历史消息。
+## Code
 
-<Callout type="info">手动切换模式后，OpenCowork 会记住你的选择，不会被自动同步覆盖。</Callout>
+Code 是代码执行模式，适合：
+
+- 读写项目文件
+- 搜索实现
+- 跑 Shell 命令
+- 修 bug / 加功能 / 重构
+
+如果你要让 Agent 修改仓库，优先用 Code，并且尽量先设置 working folder。
+
+## ACP
+
+ACP（Architecture Control）是架构控制模式，适合：
+
+- 设计系统结构
+- 拆解复杂任务
+- 分派给子代理或团队成员
+- 先确认边界，再决定实现路线
+
+ACP 的关键点是：**不直接做实现**。它更像总控，而不是执行者。
+
+## 模式和 Plan Mode 的关系 / Relation to Plan Mode
+
+- Clarify 常常会把你引导到 Plan Mode
+- Code 模式下也可以进入 Plan Mode
+- ACP 负责设计和委派，通常不会直接写代码
+- Plan Mode 是一个独立的执行前审阅阶段，不等同于模式切换
+
+## 你可以怎么选 / How to choose
+
+- **先聊天**：Chat
+- **先问清楚**：Clarify
+- **协作处理**：Cowork
+- **改仓库代码**：Code
+- **设计和委派**：ACP

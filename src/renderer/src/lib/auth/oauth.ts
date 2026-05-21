@@ -300,7 +300,9 @@ async function requestOAuthJson(args: {
     data = JSON.parse(result.body) as Record<string, unknown>
   } catch {
     const snippet = result.body.slice(0, 500)
-    console.error(`[OAuth] JSON parse failed for ${args.url} status=${result.statusCode} body=${snippet}`)
+    console.error(
+      `[OAuth] JSON parse failed for ${args.url} status=${result.statusCode} body=${snippet}`
+    )
     if (result.statusCode && result.statusCode >= 400) {
       throw new Error(`HTTP ${result.statusCode}: ${snippet}`)
     }

@@ -5,10 +5,6 @@ import {
   Send,
   FolderOpen,
   AlertTriangle,
-  CircleHelp,
-  Briefcase,
-  Code2,
-  ShieldCheck,
   FileUp,
   FileCode2,
   Sparkles,
@@ -112,12 +108,6 @@ import {
   DialogHeader,
   DialogTitle
 } from '@renderer/components/ui/dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from '@renderer/components/ui/dropdown-menu'
 import { ipcClient } from '@renderer/lib/ipc/ipc-client'
 import { IPC } from '@renderer/lib/ipc/channels'
 import { cn } from '@renderer/lib/utils'
@@ -323,20 +313,6 @@ const defaultRecommendationKeys: Record<AppMode, string> = {
   acp: 'input.recommendationDefaultAcp'
 }
 
-function getComposerModeOptions(tCommon: (key: string) => string): Array<{
-  value: AppMode
-  label: string
-  icon: React.JSX.Element
-}> {
-  return [
-    { value: 'chat', label: tCommon('mode.chat'), icon: <Send className="size-3.5" /> },
-    { value: 'clarify', label: tCommon('mode.clarify'), icon: <CircleHelp className="size-3.5" /> },
-    { value: 'cowork', label: tCommon('mode.cowork'), icon: <Briefcase className="size-3.5" /> },
-    { value: 'code', label: tCommon('mode.code'), icon: <Code2 className="size-3.5" /> },
-    { value: 'acp', label: tCommon('mode.acp'), icon: <ShieldCheck className="size-3.5" /> }
-  ]
-}
-
 interface FileSearchItem {
   name: string
   path: string
@@ -464,13 +440,10 @@ export function InputArea({
   disabled = false,
   draftKeyOverride,
   suppressPendingQueue = false,
-  hideGoalSessionBar = false,
-  hideModeSwitch = false
+  hideGoalSessionBar = false
 }: InputAreaProps): React.JSX.Element {
   const { t } = useTranslation('chat')
-  const { t: tCommon } = useTranslation('common')
   const chatView = useUIStore((s) => s.chatView)
-  const setMode = useUIStore((s) => s.setMode)
   const isSessionComposer = chatView === 'session' || Boolean(sessionId)
   const isHomeComposer = chatView === 'home' || chatView === 'project'
   const minComposerHeight = MIN_INPUT_HEIGHT
@@ -752,7 +725,7 @@ export function InputArea({
     return targetSession?.sshConnectionId ?? activeProject?.sshConnectionId ?? null
   })
   const showInlineClearConversation = false
-  const { activeSessionId, hasMessages, clearSessionMessages, updateSessionMode } = useChatStore(
+  const { activeSessionId, hasMessages, clearSessionMessages } = useChatStore(
     useShallow((s) => {
       const targetSessionId = sessionId ?? s.activeSessionId
       const idx = targetSessionId ? s.sessionsById[targetSessionId] : undefined
@@ -760,8 +733,7 @@ export function InputArea({
       return {
         activeSessionId: targetSessionId,
         hasMessages: (targetSession?.messageCount ?? 0) > 0,
-        clearSessionMessages: s.clearSessionMessages,
-        updateSessionMode: s.updateSessionMode
+        clearSessionMessages: s.clearSessionMessages
       }
     })
   )
@@ -1739,31 +1711,6 @@ export function InputArea({
     )
   }, [])
 
-  const showAllComposerModesForNewSession = !draftSessionId && Boolean(activeProjectId)
-  const availableComposerModes = React.useMemo(() => {
-    const options = getComposerModeOptions(tCommon)
-    if (showAllComposerModesForNewSession) {
-      return options
-    }
-    return projectScoped
-      ? options.filter((option) => option.value !== 'chat')
-      : options.filter((option) => option.value === 'chat')
-  }, [projectScoped, showAllComposerModesForNewSession, tCommon])
-  const showModeSwitchControl = !hideModeSwitch && availableComposerModes.length > 1
-  const activeComposerMode =
-    availableComposerModes.find((option) => option.value === mode) ??
-    availableComposerModes[0] ??
-    getComposerModeOptions(tCommon)[0]!
-  const handleModeSwitch = React.useCallback(
-    (nextMode: AppMode) => {
-      setMode(nextMode)
-      if (draftSessionId) {
-        updateSessionMode(draftSessionId, nextMode)
-      }
-    },
-    [draftSessionId, setMode, updateSessionMode]
-  )
-
   const getLiveEditorState = React.useCallback(() => {
     const liveDocument = editorRef.current?.getDocumentSnapshot() ?? documentRef.current
     const referencedFileIds = new Set(
@@ -2200,44 +2147,6 @@ export function InputArea({
 
   const composerVariant = 'session'
   const composerIconControlClass = 'composer-control rounded-xl'
-  const composerTextControlClass = 'composer-control rounded-xl text-[11px] shadow-none'
-
-  const modeSwitchControl = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          data-tour="mode-switch"
-          className={cn('gap-1.5 px-2.5', composerTextControlClass)}
-          disabled={disabled || isStreaming}
-        >
-          {activeComposerMode.icon}
-          <span>{activeComposerMode.label}</span>
-          <ChevronDown className="size-3.5 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="composer-flyout w-40">
-        {availableComposerModes.map((option) => {
-          const active = mode === option.value
-          return (
-            <DropdownMenuItem
-              key={option.value}
-              className={cn(
-                'gap-2',
-                active &&
-                  'bg-accent text-accent-foreground focus:bg-accent focus:text-accent-foreground'
-              )}
-              onSelect={() => handleModeSwitch(option.value)}
-            >
-              {option.icon}
-              <span>{option.label}</span>
-            </DropdownMenuItem>
-          )
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
 
   const webSearchToggleControl = canToggleWebSearch && (
     <Tooltip>
@@ -3050,8 +2959,6 @@ export function InputArea({
           >
             <div className="flex w-full items-center justify-between gap-2">
               <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pr-1 [scrollbar-width:none]">
-                {showModeSwitchControl ? modeSwitchControl : null}
-                {showModeSwitchControl ? <div className="h-4 w-px shrink-0 bg-border/50" /> : null}
                 <div className="shrink-0">
                   <ModelSwitcher />
                 </div>

@@ -1,45 +1,48 @@
 ---
 title: Anthropic
-description: 配置 Anthropic Claude 系列模型。
+description: 配置 Anthropic Claude、thinking 和 vision。
 ---
 
 # Anthropic / Claude
 
-Anthropic 是 OpenCowork 的首选提供商，支持 Claude 全系列模型。
+Anthropic 是 OpenCowork 的原生提供商之一，适合需要稳定思考流、视觉输入和高质量代码协作的场景。
 
-## 获取 API Key
+## 配置入口 / Setup
 
-1. 访问 [console.anthropic.com](https://console.anthropic.com/)
-2. 注册/登录账号
-3. 进入 **API Keys** 页面
-4. 点击 **Create Key**
+进入 **设置 → AI 提供商 → Anthropic**，填入 API Key 即可。通常不需要改 Base URL。
 
-## 在 OpenCowork 中配置
+## 典型能力 / Typical capabilities
 
-进入 **设置 → AI 提供商 → Anthropic**，填入 API Key。
+- 思考流（thinking）
+- 视觉输入（vision）
+- 稳定的长上下文交互
+- 适合复杂代码、分析和规划任务
 
-## 支持的模型 / Supported Models
+## 常见模型 / Common model examples
 
-| 模型                | 上下文 | 特性               |
-| ------------------- | ------ | ------------------ |
-| `claude-opus-4-6`   | 200K   | 最强能力，扩展思考 |
-| `claude-sonnet-4-6` | 200K   | 性能与速度平衡     |
-| `claude-haiku-4-5`  | 200K   | 快速、低成本       |
+| 模型 | 场景 |
+| --- | --- |
+| `claude-opus-*` | 最高能力、复杂任务 |
+| `claude-sonnet-*` | 平衡能力与速度 |
+| `claude-haiku-*` | 快速、低成本 |
 
-## 扩展思考 / Extended Thinking
+> 具体模型名会随 Anthropic 版本迭代而变化，文档里保留“常见示例”即可。
 
-Claude 支持扩展思考模式，让模型在回答前进行深度推理：
+## Thinking / 思考流
 
-在会话设置中开启 **Thinking** 模式，Agent 循环会在响应中包含 `thinking_delta` 事件。
+Anthropic 的 thinking 输出会被映射成统一的 `thinking_delta` / `thinking_encrypted` 事件，然后在 UI 中单独渲染。
 
-## 视觉能力 / Vision
+## Vision / 视觉
 
-所有 Claude 模型支持图片输入，可以直接在聊天中粘贴或上传图片。
+Claude 系列支持图片输入，适合：
 
-## 定价参考 / Pricing
+- 截图分析
+- 设计稿评审
+- 图文混合输入
+- 带图的故障排查
 
-| 模型              | Input   | Output  |
-| ----------------- | ------- | ------- |
-| claude-opus-4-6   | $15/M   | $75/M   |
-| claude-sonnet-4-6 | $3/M    | $15/M   |
-| claude-haiku-4-5  | $0.25/M | $1.25/M |
+## 什么时候选 Anthropic？ / When to choose it?
+
+- 你要最稳定的长对话体验
+- 你要比较强的 reasoning + coding 质量
+- 你需要把图片一起喂给模型

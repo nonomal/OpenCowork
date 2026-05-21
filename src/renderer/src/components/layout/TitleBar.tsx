@@ -1,4 +1,8 @@
 import {
+  Briefcase,
+  ChevronDown,
+  CircleHelp,
+  Code2,
   Download,
   FolderOpen,
   HelpCircle,
@@ -7,6 +11,7 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  Send,
   SquareTerminal,
   ShieldCheck
 } from 'lucide-react'
@@ -15,10 +20,16 @@ import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 import { confirm } from '@renderer/components/ui/confirm-dialog'
 import { Button } from '@renderer/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@renderer/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { useChatStore } from '@renderer/stores/chat-store'
 import { useSettingsStore } from '@renderer/stores/settings-store'
-import { useUIStore } from '@renderer/stores/ui-store'
+import { useUIStore, type AppMode } from '@renderer/stores/ui-store'
 import { cn } from '@renderer/lib/utils'
 import { PendingInboxPopover } from './PendingInboxPopover'
 import { WindowControls } from './WindowControls'
@@ -37,6 +48,20 @@ interface TitleBarProps {
   tooltip?: string | null
   showSidebarToggle?: boolean
   insetForMacTrafficLights?: boolean
+}
+
+function getTitlebarModeOptions(tCommon: (key: string) => string): Array<{
+  value: AppMode
+  label: string
+  icon: React.JSX.Element
+}> {
+  return [
+    { value: 'chat', label: tCommon('mode.chat'), icon: <Send className="size-3.5" /> },
+    { value: 'clarify', label: tCommon('mode.clarify'), icon: <CircleHelp className="size-3.5" /> },
+    { value: 'cowork', label: tCommon('mode.cowork'), icon: <Briefcase className="size-3.5" /> },
+    { value: 'code', label: tCommon('mode.code'), icon: <Code2 className="size-3.5" /> },
+    { value: 'acp', label: tCommon('mode.acp'), icon: <ShieldCheck className="size-3.5" /> }
+  ]
 }
 
 export function TitleBar({
@@ -63,12 +88,19 @@ export function TitleBar({
   const setBottomTerminalDockOpen = useUIStore((s) => s.setBottomTerminalDockOpen)
   const chatView = useUIStore((s) => s.chatView)
   const mode = useUIStore((s) => s.mode)
+  const setMode = useUIStore((s) => s.setMode)
   const settingsPageOpen = useUIStore((s) => s.settingsPageOpen)
   const skillsPageOpen = useUIStore((s) => s.skillsPageOpen)
   const resourcesPageOpen = useUIStore((s) => s.resourcesPageOpen)
   const drawPageOpen = useUIStore((s) => s.drawPageOpen)
   const translatePageOpen = useUIStore((s) => s.translatePageOpen)
   const tasksPageOpen = useUIStore((s) => s.tasksPageOpen)
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const activeSessionIsStreaming = useChatStore((s) =>
+    activeSessionId ? Boolean(s.streamingMessages[activeSessionId]) : false
+  )
+  const activeProjectId = useChatStore((s) => s.activeProjectId)
+  const updateSessionMode = useChatStore((s) => s.updateSessionMode)
   const sessionContext = useChatStore(
     useShallow((state) => {
       const activeSession = state.activeSessionId
@@ -124,6 +156,23 @@ export function TitleBar({
     !drawPageOpen &&
     !translatePageOpen &&
     !tasksPageOpen
+  const allModeOptions = getTitlebarModeOptions(tCommon)
+  const modeProjectScoped =
+    chatView === 'session' ? Boolean(sessionContext.sessionProjectId) : Boolean(activeProjectId)
+  const availableModeOptions =
+    chatView !== 'session' && modeProjectScoped
+      ? allModeOptions
+      : modeProjectScoped
+        ? allModeOptions.filter((option) => option.value !== 'chat')
+        : allModeOptions.filter((option) => option.value === 'chat')
+  const showTitlebarModeSwitch =
+    chatSurfaceActive &&
+    (chatView === 'home' || chatView === 'project' || chatView === 'session') &&
+    availableModeOptions.length > 1
+  const activeTitlebarMode =
+    availableModeOptions.find((option) => option.value === mode) ??
+    availableModeOptions[0] ??
+    allModeOptions[0]!
   const showInspectorToggle = chatSurfaceActive && chatView === 'session'
   const showFileManagerToggle =
     chatSurfaceActive && chatView === 'session' && Boolean(sessionContext.sessionProjectId)
@@ -145,6 +194,13 @@ export function TitleBar({
 
     const nextOpen = !terminalDockOpen
     setBottomTerminalDockOpen(sessionContext.terminalProjectId, nextOpen)
+  }
+
+  const handleTitlebarModeSwitch = (nextMode: AppMode): void => {
+    setMode(nextMode)
+    if (chatView === 'session' && activeSessionId) {
+      updateSessionMode(activeSessionId, nextMode)
+    }
   }
 
   const handleToggleAutoApprove = async (): Promise<void> => {
@@ -185,10 +241,45 @@ export function TitleBar({
                 )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>
-              {t('commandPalette.toggleSidebar')}
-            </TooltipContent>
+            <TooltipContent>{t('commandPalette.toggleSidebar')}</TooltipContent>
           </Tooltip>
+        ) : null}
+
+        {showTitlebarModeSwitch ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                data-tour="mode-switch"
+                className="workspace-titlebar-action titlebar-no-drag h-7 gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                disabled={activeSessionIsStreaming}
+              >
+                {activeTitlebarMode.icon}
+                <span>{activeTitlebarMode.label}</span>
+                <ChevronDown className="size-3.5 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-40">
+              {availableModeOptions.map((option) => {
+                const active = mode === option.value
+                return (
+                  <DropdownMenuItem
+                    key={option.value}
+                    className={cn(
+                      'gap-2',
+                      active &&
+                        'bg-accent text-accent-foreground focus:bg-accent focus:text-accent-foreground'
+                    )}
+                    onSelect={() => handleTitlebarModeSwitch(option.value)}
+                  >
+                    {option.icon}
+                    <span>{option.label}</span>
+                  </DropdownMenuItem>
+                )
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
 
         <div className="min-w-0 flex-1">
@@ -346,9 +437,7 @@ export function TitleBar({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {rightPanelOpen
-                    ? t('topbar.closeInspector')
-                    : t('topbar.openInspector')}
+                  {rightPanelOpen ? t('topbar.closeInspector') : t('topbar.openInspector')}
                 </TooltipContent>
               </Tooltip>
             )}

@@ -5,7 +5,7 @@ description: 如何为 OpenCowork 贡献代码。
 
 # 贡献指南 / Contributing
 
-欢迎为 OpenCowork 贡献代码！以下是参与贡献的指南。
+欢迎为 OpenCowork 贡献代码！
 
 ## 开始之前 / Before You Start
 
@@ -39,22 +39,21 @@ git push origin feature/your-feature-name
 
 使用 [Conventional Commits](https://www.conventionalcommits.org/) 规范：
 
-| 类型       | 说明            |
-| ---------- | --------------- |
-| `feat`     | 新功能          |
-| `fix`      | Bug 修复        |
-| `docs`     | 文档更新        |
-| `refactor` | 代码重构        |
-| `chore`    | 构建/工具链变更 |
+| 类型       | 说明            | 示例                                   |
+| ---------- | --------------- | -------------------------------------- |
+| `feat`     | 新功能          | `feat(tools): add git status tool`     |
+| `fix`      | Bug 修复        | `fix(agent): handle null tool result`  |
+| `docs`     | 文档更新        | `docs: update installation guide`      |
+| `refactor` | 代码重构        | `refactor(store): migrate to immer`    |
+| `chore`    | 构建/工具链变更  | `chore: bump electron to v36`          |
 
 ## 添加新工具 / Adding a New Tool
 
 1. 在 `src/renderer/src/lib/tools/` 创建工具文件
 2. 实现 `ToolHandler` 接口
-3. 在 `src/renderer/src/App.tsx` 的工具注册处添加
+3. 在 `src/renderer/src/lib/tools/index.ts` 的注册处添加
 
 ```typescript
-// 工具实现示例
 export const myTool: ToolHandler = {
   definition: {
     name: 'MyTool',
@@ -69,17 +68,28 @@ export const myTool: ToolHandler = {
   },
   async execute(input, ctx) {
     const { param } = input as { param: string }
-    // 实现逻辑
     return { type: 'text', text: `结果: ${param}` }
   }
 }
 ```
 
-## 添加新插件 / Adding a New Plugin
+## 添加新消息平台插件 / Adding a New Plugin
 
 1. 在 `src/main/channels/providers/` 创建平台目录
-2. 实现 `MessagingChannelService` 接口
-3. 在 `ChannelManager` 中注册工厂
+2. 实现 `MessagingChannelService` 接口（或继承 `BasePluginService`）
+3. 在 `src/main/index.ts` 的 `ChannelManager` 中注册工厂
+4. 在文档中添加对应的配置页面
+
+## 更新文档 / Updating Docs
+
+文档站点是独立的 Fumadocs + Next.js 项目：
+
+```bash
+cd docs
+npm run dev
+```
+
+MDX 源文件在 `docs/docs/` 目录下，修改后提交即可。
 
 ## 问题反馈 / Reporting Issues
 

@@ -1,119 +1,77 @@
 ---
 title: Electron 进程模型
-description: OpenCowork 的 Electron 主进程、渲染进程和预加载脚本详解。
+description: OpenCowork 的主进程、渲染进程、预加载脚本和共享契约如何分工。
 ---
 
 # Electron 进程模型 / Electron Process Model
 
-OpenCowork 的 Electron 进程模型已经从传统“三层 UI 应用”演进为“主进程编排 + 渲染进程 Agent Runtime + 预加载桥接 + sidecar 扩展运行时”的组合架构。
+OpenCowork 的 Electron 架构不是“一个窗口 + 一个渲染页”这么简单，而是一个有明确边界的四层系统：**Main、Preload、Renderer、Shared**。
 
-## 主进程 / Main Process
+## 进程边界 / Process boundaries
 
-**入口**：`src/main/index.ts`
+| 层 | 入口 | 职责 |
+| --- | --- | --- |
+| Main | `src/main/index.ts` | 窗口、托盘、数据库、IPC、MCP、Cron、SSH、消息平台、更新、崩溃日志 |
+| Preload | `src/preload/index.ts` | 只暴露白名单 API，提供最小安全桥接 |
+| Renderer | `src/renderer/src/main.tsx` | UI、Agent Loop、Tool Registry、Stores、Preview、Team Runtime |
+| Shared | `src/shared/` | 跨进程类型、事件协议、消息协议、Team Runtime 契约 |
 
-主进程负责所有系统级能力与运行时编排，当前主要包括：
+## Main 进程 / Main process
 
-- 创建主窗口与通知窗口环境
-- 管理托盘、窗口显隐、窗口状态同步
-- 注册完整 IPC 处理器集合
-- 初始化 `ChannelManager`、`McpManager`、`SidecarManager`
-- 加载持久化 cron jobs 并恢复后台运行能力
-- 配置系统代理、Chromium 缓存、渲染堆内存上限
-- 记录崩溃、无响应、加载失败等诊断事件
+主进程承担所有“系统级”能力：
 
-### 当前 IPC 注册面
+- 注册 `fs`、`db`、`settings`、`config`、`mcp`、`cron`、`ssh`、`plugin`、`channel`、`notify`、`screenshot`、`web-search`、`oauth`、`git`、`wiki`、`migration`、`sidecar`、`team-runtime`、`team-worker` 等 IPC
+- 管理 SQLite 数据库和本地数据目录
+- 创建窗口、通知窗口、托盘和更新器
+- 运行主进程 Agent Runtime，为 Cron 和插件自动回复复用同一套协议
+- 负责退出时的清理：停止 channel、mcp、cron、ssh、terminal、worker 和数据库
 
-```typescript
-registerFsHandlers()
-registerAgentChangeHandlers()
-registerShellHandlers()
-registerApiProxyHandlers()
-registerSettingsHandlers()
-registerSkillsHandlers()
-registerAgentsHandlers()
-registerPromptsHandlers()
-registerCommandsHandlers()
-registerProcessManagerHandlers()
-registerDbHandlers()
-registerConfigHandlers()
-registerChannelHandlers(channelManager)
-registerMcpHandlers(mcpManager)
-registerCronHandlers()
-registerInputHandlers()
-registerNotifyHandlers()
-registerScreenshotHandlers()
-registerWebSearchHandlers()
-registerOauthHandlers()
-registerImageGifHandlers()
-registerGitHandlers()
-registerWikiHandlers()
-registerMigrationHandlers()
-registerSidecarHandlers()
-registerTeamRuntimeHandlers()
-registerTeamWorkerHandlers()
-registerSshHandlers()
-```
+## Renderer 进程 / Renderer process
 
-这意味着主进程不再只是“系统 API 包装层”，而是整个桌面工作台的协调中心。
+渲染进程承担 UI 和 Agent 工作流：
 
-## 渲染进程 / Renderer Process
+- React UI 和右侧面板
+- Agent Loop 和流式事件渲染
+- Provider 调用和流式文本 / thinking / tool-use 处理
+- Tool Registry 和审批流
+- 计划、任务、团队、MCP、插件、预览和浏览器面板
 
-**入口**：`src/renderer/src/main.tsx`
+渲染进程是“工作台”，不是“系统权限入口”。它不直接操作文件系统、数据库或 SSH，而是通过 IPC 和工具系统请求主进程。
 
-渲染进程运行 React 19 UI，并承载核心 Agent 交互运行时：
+## Preload 脚本 / Preload script
 
-- 渲染 `App` 主界面与 `NotifyWindow`
-- 维护 Zustand store 网络
-- 执行 Agent loop、子代理、团队协作与审批流
-- 注册本地工具、MCP 工具、应用插件工具
-- 直接调用 LLM Provider API 并处理流式输出
+Preload 只暴露经过筛选的桥接：
 
-### 窗口装配
+- `window.electron`：Electron IPC 的安全子集
+- `window.api`：图像、Team Runtime、Team Worker 等最小必要 API
 
-```typescript
-const isNotifyWindow = window.location.hash.startsWith('#notify')
-createRoot(document.getElementById('root')!).render(isNotifyWindow ? <NotifyWindow /> : <App />)
-```
+这层的目标是把“能做什么”控制得很窄，把“谁能调用什么”变得清晰。
 
-### 为什么 Agent Runtime 放在渲染进程
+## Shared / 共享契约
 
-- 更贴近 UI 状态与流式消息展示
-- 工具调用、审批弹层、计划/任务面板可以即时联动
-- Provider 请求无需经过主进程转发，降低链路复杂度
+`src/shared/` 维护跨进程类型契约，主要包括：
 
-## 预加载脚本 / Preload Script
+- Agent loop 事件协议
+- Team Runtime 类型
+- OpenAI / Anthropic / Responses 消息结构
+- 迁移相关类型
 
-**入口**：`src/preload/index.ts`
+## 主进程为什么还要有 Agent Runtime？
 
-预加载脚本只暴露经过筛选的桥接能力。除 Electron Toolkit 标准桥接外，还额外开放：
+因为有些工作并不来自用户窗口：
 
-- 图像下载 / Base64 抓取 / 剪贴板写入
-- Team Runtime 创建、消息附加、快照读取
-- 独立 Team Worker 拉起与停止
+- Cron 定时任务
+- 消息平台自动回复
+- 后台队列式任务
+- 某些需要独立生命周期的系统自动化
 
-```typescript
-contextBridge.exposeInMainWorld('electron', electronAPI)
-contextBridge.exposeInMainWorld('api', api)
-```
+这些场景会复用主进程 JS Agent Runtime，而不是强行依赖前台 UI。
 
-这里的 `api` 不是任意 Node.js 暴露面，而是明确列举的受控 IPC 封装。
+## 安全结论 / Security takeaway
 
-## 主进程 Agent Runtime / Main Agent Runtime
+- renderer 负责表达和编排
+- main 负责系统与持久化
+- preload 负责安全桥接
+- shared 负责协议稳定
 
-**入口**：`src/main/ipc/js-agent-runtime.ts`
-
-当前的 Agent Runtime 已统一收敛到主进程 JS 服务，它仍然复用既有的自定义协议，但不再依赖独立的外部 sidecar 二进制：
-
-- 由主进程通过 `getSidecarManager()` 暴露统一 runtime 接口
-- 使用现有 JSON-RPC 风格协议与渲染进程双向通信
-- 可向渲染进程请求审批或工具执行结果
-- HTTP / WebSocket 请求、重试与 circuit 状态统一驻留在主进程
-- 用于承载更稳定、跨入口一致的 Agent 能力
-
-## 安全与边界 / Security Boundaries
-
-- 渲染进程不直接访问 Node.js 系统接口
-- 主进程集中处理文件、数据库、Shell、截图、输入控制、SSH 等敏感能力
-- 预加载脚本只暴露白名单 API
-- Agent Runtime 通过主进程中转，不直接接管 Electron UI
-- IPC / bridge 的通道按领域拆分，便于审计与渐进扩展
+这四层分工，是 OpenCowork 能同时兼顾“可用性”和“可控性”的基础。

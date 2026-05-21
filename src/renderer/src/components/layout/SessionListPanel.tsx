@@ -1316,9 +1316,7 @@ export function SessionListPanel(): React.JSX.Element {
             <button
               className={cn(
                 'relative mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium transition-colors',
-                isActiveProject
-                  ? 'text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
+                isActiveProject ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
               )}
               onClick={() => setActiveProject(group.project.id)}
               title={group.project.name}
@@ -1655,7 +1653,8 @@ export function SessionListPanel(): React.JSX.Element {
                 {deleteTarget?.queueCount ? (
                   <p>
                     {t('sidebar.deleteQueuedMessagesNotice', {
-                      defaultValue: 'This session has {{count}} queued messages that will also be deleted.',
+                      defaultValue:
+                        'This session has {{count}} queued messages that will also be deleted.',
                       count: deleteTarget.queueCount
                     })}
                   </p>
@@ -1663,7 +1662,8 @@ export function SessionListPanel(): React.JSX.Element {
                 {deleteTargetRunningInfo?.hasRunning && (
                   <p className="font-medium text-destructive">
                     {t('sidebar.deleteRunningNotice', {
-                      defaultValue: 'This session has running tasks that will be stopped before deletion.'
+                      defaultValue:
+                        'This session has running tasks that will be stopped before deletion.'
                     })}
                   </p>
                 )}

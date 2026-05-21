@@ -122,6 +122,7 @@ function formatCompactCount(value: number): string {
 }
 
 type FilePreviewTone = 'create' | 'edit'
+type CompactActionOp = 'create' | 'modify' | 'delete'
 
 function FilePreviewShell({
   filePath,
@@ -579,6 +580,17 @@ function FileIcon({ name }: { name: string }): React.JSX.Element {
   }
 }
 
+function CompactFileIcon({ op }: { op: CompactActionOp }): React.JSX.Element {
+  switch (op) {
+    case 'create':
+      return <FilePlus2 className="size-3.5 text-emerald-500 dark:text-emerald-300" />
+    case 'delete':
+      return <FileX2 className="size-3.5 text-red-500 dark:text-red-300" />
+    case 'modify':
+      return <FileEdit className="size-3.5 text-amber-500 dark:text-amber-300" />
+  }
+}
+
 // ── Change Stats Badge ───────────────────────────────────────────
 
 function ChangeStats({
@@ -683,12 +695,15 @@ function ChangeStats({
 
 function WriteRealtimeStats({
   input,
-  resolvedWrite
+  resolvedWrite,
+  op
 }: {
   input: Record<string, unknown>
   resolvedWrite: ResolvedWritePayload
+  op: Extract<CompactActionOp, 'create' | 'modify'>
 }): React.JSX.Element | null {
   const { t } = useTranslation('chat')
+  const isCreate = op === 'create'
   const charTotal =
     typeof input.content_chars === 'number'
       ? input.content_chars
@@ -698,18 +713,25 @@ function WriteRealtimeStats({
   if (resolvedWrite.lineTotal <= 0 && charTotal <= 0 && !isPreviewOnly) return null
 
   return (
-    <span className="flex shrink-0 items-center gap-1 text-[10px]">
+    <span className="flex shrink-0 items-center gap-1.5 text-[10px]">
       {resolvedWrite.lineTotal > 0 && (
         <span
-          className="font-medium text-emerald-500 dark:text-emerald-400/90"
+          className={cn(
+            'rounded border px-1.5 py-0.5 font-medium',
+            isCreate
+              ? 'border-emerald-500/15 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+              : 'border-amber-500/15 bg-amber-500/10 text-amber-600 dark:text-amber-300'
+          )}
           title={t('fileChange.lineCount', { count: resolvedWrite.lineTotal })}
         >
-          +{formatCompactCount(resolvedWrite.lineTotal)}
+          {t('fileChange.compactLineCount', {
+            value: `${isCreate ? '+' : ''}${formatCompactCount(resolvedWrite.lineTotal)}`
+          })}
         </span>
       )}
       {charTotal > 0 && (
         <span
-          className="hidden rounded bg-muted/70 px-1.5 py-0.5 text-muted-foreground/70 dark:bg-white/[0.04] sm:inline"
+          className="hidden rounded border border-border/40 bg-background/65 px-1.5 py-0.5 text-muted-foreground/75 dark:bg-white/[0.04] sm:inline"
           title={t('fileChange.charCount', { count: charTotal })}
         >
           {t('fileChange.compactCharCount', { value: formatCompactCount(charTotal) })}
@@ -741,11 +763,13 @@ function InlineDiff({
 function NewFileContent({
   content,
   filePath,
-  isStreaming
+  isStreaming,
+  tone = 'create'
 }: {
   content: string
   filePath: string
   isStreaming?: boolean
+  tone?: FilePreviewTone
 }): React.JSX.Element {
   const { t } = useTranslation('chat')
   const normalizedContent = React.useMemo(() => normalizeLineEndings(content), [content])
@@ -764,10 +788,10 @@ function NewFileContent({
         added={lines}
         deleted={0}
         copyText={normalizedContent}
-        tone="create"
+        tone={tone}
         maxHeight={isStreaming ? 400 : 300}
       >
-        <CodeFrame content={displayed} filePath={filePath} tone="create" />
+        <CodeFrame content={displayed} filePath={filePath} tone={tone} />
       </FilePreviewShell>
       {isStreaming ? (
         <p className="px-1 text-[10px] text-muted-foreground/70 dark:text-zinc-500">
@@ -984,10 +1008,12 @@ function TrackedEditDiff({
 
 function PendingWritePreview({
   input,
-  isStreaming
+  isStreaming,
+  op = 'modify'
 }: {
   input: Record<string, unknown>
   isStreaming: boolean
+  op?: Extract<CompactActionOp, 'create' | 'modify'>
 }): React.JSX.Element {
   const filePath = String(input.file_path ?? input.path ?? '')
   const content = typeof input.content === 'string' ? input.content : null
@@ -1003,7 +1029,14 @@ function PendingWritePreview({
 
   if (!visiblePreview) return <></>
 
-  return <NewFileContent content={visiblePreview} filePath={filePath} isStreaming={isStreaming} />
+  return (
+    <NewFileContent
+      content={visiblePreview}
+      filePath={filePath}
+      isStreaming={isStreaming}
+      tone={op === 'create' ? 'create' : 'edit'}
+    />
+  )
 }
 
 interface ResolvedEditPayload {
@@ -1181,25 +1214,28 @@ export function FileChangeCard({
     !Array.isArray(parsedOutput) &&
     parsedOutput.success === true
   )
-  const writeOp =
+  const outputWriteOp =
     trackedChange?.op ??
     (parsedOutput &&
     !Array.isArray(parsedOutput) &&
     (parsedOutput.op === 'create' || parsedOutput.op === 'modify')
       ? (parsedOutput.op as 'create' | 'modify')
       : undefined)
-  const compactActionOp: 'create' | 'modify' | 'delete' =
-    name === 'Delete'
-      ? 'delete'
-      : (trackedChange?.op ?? (name === 'Write' ? (writeOp ?? 'create') : 'modify'))
+  const effectiveWriteOp = name === 'Write' ? (outputWriteOp ?? 'modify') : undefined
+  const compactActionOp: CompactActionOp =
+    name === 'Delete' ? 'delete' : name === 'Write' ? (effectiveWriteOp ?? 'modify') : 'modify'
   const compactActionLabel =
     compactActionOp === 'create'
-      ? isRealtimeWrite
+      ? isActive
         ? t('fileChange.creating')
         : t('fileChange.created')
       : compactActionOp === 'delete'
-        ? t('fileChange.deleted')
-        : t('fileChange.edited')
+        ? isActive
+          ? t('fileChange.deleting')
+          : t('fileChange.deleted')
+        : isActive
+          ? t('fileChange.editing')
+          : t('fileChange.edited')
   const isOutputError = outputStr
     ? Boolean(parsedOutputError) || (!parsedOutput && outputStr.length > 0)
     : false
@@ -1210,13 +1246,13 @@ export function FileChangeCard({
   )
   const useCompactChangeLayout = name === 'Edit' || name === 'Delete' || name === 'Write'
   const compactActiveShellClass =
-    status === 'streaming'
-      ? 'my-0.5 rounded-lg border border-violet-500/25 bg-violet-500/[0.035] dark:bg-violet-500/[0.045]'
-      : status === 'running'
-        ? 'my-0.5 rounded-lg border border-blue-500/25 bg-blue-500/[0.035] dark:bg-blue-500/[0.045]'
-        : status === 'pending_approval'
-          ? 'my-0.5 rounded-lg border border-amber-500/25 bg-amber-500/[0.035] dark:bg-amber-500/[0.045]'
-          : ''
+    status === 'pending_approval'
+      ? 'my-0.5 rounded-lg border border-amber-500/25 bg-amber-500/[0.035] dark:bg-amber-500/[0.045]'
+      : compactActionOp === 'create'
+        ? 'my-0.5 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.035] dark:bg-emerald-500/[0.045]'
+        : compactActionOp === 'delete'
+          ? 'my-0.5 rounded-lg border border-red-500/25 bg-red-500/[0.035] dark:bg-red-500/[0.045]'
+          : 'my-0.5 rounded-lg border border-amber-500/25 bg-amber-500/[0.035] dark:bg-amber-500/[0.045]'
   const canRenderTrackedWriteDiff =
     !!trackedChange &&
     trackedChange.op === 'modify' &&
@@ -1258,13 +1294,13 @@ export function FileChangeCard({
     !trackedChange &&
     status !== 'streaming' &&
     status !== 'running' &&
-    writeOp === 'modify'
+    effectiveWriteOp === 'modify'
   const showSettledWriteNewFile =
     name === 'Write' &&
     !trackedChange &&
     status !== 'streaming' &&
     status !== 'running' &&
-    writeOp !== 'modify' &&
+    effectiveWriteOp === 'create' &&
     !!resolvedWrite.preview
   const showDeleteNotice = name === 'Delete'
   const hasExpandedContent =
@@ -1336,71 +1372,93 @@ export function FileChangeCard({
         {useCompactChangeLayout ? (
           <div
             className={cn(
-              'flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground transition-colors group-hover:text-foreground',
-              isActive && 'min-h-8'
+              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground transition-colors group-hover:text-foreground',
+              isActive && 'min-h-10'
             )}
             title={filePath || undefined}
           >
-            <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
-              {compactActionLabel}
+            <span
+              className={cn(
+                'flex size-7 shrink-0 items-center justify-center rounded-md border',
+                compactActionOp === 'create'
+                  ? 'border-emerald-500/20 bg-emerald-500/10'
+                  : compactActionOp === 'delete'
+                    ? 'border-red-500/20 bg-red-500/10'
+                    : 'border-amber-500/20 bg-amber-500/10'
+              )}
+            >
+              <CompactFileIcon op={compactActionOp} />
             </span>
-            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-sky-500 transition-colors group-hover:text-sky-600 dark:text-sky-300 dark:group-hover:text-sky-200">
-              {filePath ? (
-                fileName(filePath)
-              ) : (
-                <span className="text-zinc-500 italic animate-pulse">
-                  {t('toolCall.receivingArgs')}
+            <span className="min-w-0 flex-1">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+                  {compactActionLabel}
+                </span>
+                <span className="min-w-0 truncate text-[12px] font-semibold text-sky-600 transition-colors group-hover:text-sky-700 dark:text-sky-200 dark:group-hover:text-sky-100">
+                  {filePath ? (
+                    fileName(filePath)
+                  ) : (
+                    <span className="text-zinc-500 italic animate-pulse">
+                      {t('toolCall.receivingArgs')}
+                    </span>
+                  )}
+                </span>
+              </span>
+              {filePath && (
+                <span
+                  className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground/55"
+                  title={filePath}
+                >
+                  {shortPath(filePath)}
                 </span>
               )}
             </span>
-            {filePath && (
-              <span
-                className="hidden max-w-[12rem] shrink truncate font-mono text-[10px] text-muted-foreground/55 lg:block"
-                title={filePath}
-              >
-                {shortPath(filePath)}
-              </span>
-            )}
-            {compactEditDiff ? (
-              <>
-                <span className="shrink-0 text-[10px] font-medium text-emerald-500 dark:text-emerald-400/90">
-                  +{compactEditDiff.added}
+            <span className="flex shrink-0 items-center gap-1.5">
+              {compactEditDiff ? (
+                <>
+                  <span className="shrink-0 text-[10px] font-medium text-emerald-500 dark:text-emerald-400/90">
+                    +{compactEditDiff.added}
+                  </span>
+                  <span className="shrink-0 text-[10px] font-medium text-red-500/90 dark:text-red-400/90">
+                    -{compactEditDiff.deleted}
+                  </span>
+                </>
+              ) : isRealtimeWrite ? (
+                <WriteRealtimeStats
+                  input={input}
+                  resolvedWrite={resolvedWrite}
+                  op={compactActionOp === 'create' ? 'create' : 'modify'}
+                />
+              ) : (
+                <ChangeStats name={name} input={input} trackedChange={trackedChange} minimal />
+              )}
+              {hasCompactError ? (
+                <span
+                  className="size-1.5 shrink-0 rounded-full bg-red-500 dark:bg-red-400"
+                  title={error || parsedOutputError || t('error.label', { ns: 'common' })}
+                />
+              ) : trackedChange ? (
+                <span
+                  className={cn(
+                    'size-1.5 shrink-0 rounded-full',
+                    trackedStatusDotTone(trackedChange)
+                  )}
+                  title={`${t(trackedTransportLabelKey(trackedChange))} / ${t(trackedStatusLabelKey(trackedChange))}`}
+                />
+              ) : (
+                <CompactStatusDot status={status} />
+              )}
+              {elapsed && (
+                <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground/70">
+                  {elapsed}
                 </span>
-                <span className="shrink-0 text-[10px] font-medium text-red-500/90 dark:text-red-400/90">
-                  -{compactEditDiff.deleted}
-                </span>
-              </>
-            ) : isRealtimeWrite ? (
-              <WriteRealtimeStats input={input} resolvedWrite={resolvedWrite} />
-            ) : (
-              <ChangeStats name={name} input={input} trackedChange={trackedChange} minimal />
-            )}
-            {hasCompactError ? (
-              <span
-                className="size-1.5 shrink-0 rounded-full bg-red-500 dark:bg-red-400"
-                title={error || parsedOutputError || t('error.label', { ns: 'common' })}
-              />
-            ) : trackedChange ? (
-              <span
-                className={cn(
-                  'size-1.5 shrink-0 rounded-full',
-                  trackedStatusDotTone(trackedChange)
-                )}
-                title={`${t(trackedTransportLabelKey(trackedChange))} / ${t(trackedStatusLabelKey(trackedChange))}`}
-              />
-            ) : (
-              <CompactStatusDot status={status} />
-            )}
-            {elapsed && (
-              <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground/70">
-                {elapsed}
-              </span>
-            )}
-            {collapsed ? (
-              <ChevronRight className="size-3 shrink-0 text-muted-foreground/70" />
-            ) : (
-              <ChevronDown className="size-3 shrink-0 text-muted-foreground/70" />
-            )}
+              )}
+              {collapsed ? (
+                <ChevronRight className="size-3 shrink-0 text-muted-foreground/70" />
+              ) : (
+                <ChevronDown className="size-3 shrink-0 text-muted-foreground/70" />
+              )}
+            </span>
           </div>
         ) : (
           <>
@@ -1491,10 +1549,14 @@ export function FileChangeCard({
               <SnapshotSummaryNotice after={trackedChange.after} />
             )}
             {showPendingWriteStreaming && (
-              <PendingWritePreview input={input} isStreaming={status === 'streaming'} />
+              <PendingWritePreview
+                input={input}
+                isStreaming={status === 'streaming'}
+                op={compactActionOp === 'create' ? 'create' : 'modify'}
+              />
             )}
             {showSettledWriteModifyPreview && (
-              <PendingWritePreview input={input} isStreaming={false} />
+              <PendingWritePreview input={input} isStreaming={false} op="modify" />
             )}
             {showSettledWriteNewFile && (
               <NewFileContent

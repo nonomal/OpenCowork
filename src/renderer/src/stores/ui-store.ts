@@ -33,7 +33,13 @@ export type LegacyRightPanelTab =
   | 'team'
   | 'acp'
 export type RightPanelSection = 'execution' | 'resources' | 'collaboration' | 'monitoring'
-export type RightPanelTabKind = 'review' | 'preview' | 'browser' | 'subagent' | 'terminal'
+export type RightPanelTabKind =
+  | 'context'
+  | 'review'
+  | 'preview'
+  | 'browser'
+  | 'subagent'
+  | 'terminal'
 
 export interface RightPanelTabInstance {
   id: string
@@ -141,6 +147,7 @@ export interface BrowserPanelSessionState {
 
 export type SettingsTab =
   | 'general'
+  | 'system'
   | 'memory'
   | 'analytics'
   | 'migration'
@@ -163,6 +170,17 @@ export type DetailPanelContent =
   | { type: 'report'; title: string; data: unknown }
 
 const RIGHT_PANEL_REVIEW_TAB_ID = 'review'
+const RIGHT_PANEL_CONTEXT_TAB_ID = 'context'
+
+function createContextTab(): RightPanelTabInstance {
+  return {
+    id: RIGHT_PANEL_CONTEXT_TAB_ID,
+    kind: 'context',
+    title: 'Context',
+    closable: false,
+    createdAt: 0
+  }
+}
 
 function createReviewTab(initialChangeId?: string | null): RightPanelTabInstance {
   return {
@@ -180,29 +198,43 @@ function ensureReviewTab(
   initialChangeId?: string | null
 ): RightPanelTabInstance[] {
   const safeTabs = tabs ?? []
-  const existing = safeTabs.find((tab) => tab.id === RIGHT_PANEL_REVIEW_TAB_ID)
+  const withContext = safeTabs.some((tab) => tab.id === RIGHT_PANEL_CONTEXT_TAB_ID)
+    ? safeTabs
+    : [createContextTab(), ...safeTabs]
+  const baseTabs = withContext.map((tab) =>
+    tab.id === RIGHT_PANEL_CONTEXT_TAB_ID ? { ...tab, closable: false } : tab
+  )
+  const existing = baseTabs.find((tab) => tab.id === RIGHT_PANEL_REVIEW_TAB_ID)
   if (existing) {
-    return safeTabs.map((tab) =>
+    return baseTabs.map((tab) =>
       tab.id === RIGHT_PANEL_REVIEW_TAB_ID
         ? {
             ...tab,
+            closable: false,
             initialChangeId: initialChangeId !== undefined ? initialChangeId : tab.initialChangeId
           }
         : tab
     )
   }
-  return [createReviewTab(initialChangeId), ...safeTabs]
+  const contextIndex = baseTabs.findIndex((tab) => tab.id === RIGHT_PANEL_CONTEXT_TAB_ID)
+  const reviewTab = createReviewTab(initialChangeId)
+  if (contextIndex >= 0) {
+    return [...baseTabs.slice(0, contextIndex + 1), reviewTab, ...baseTabs.slice(contextIndex + 1)]
+  }
+  return [createContextTab(), reviewTab, ...baseTabs]
 }
 
 function getDefaultRightPanelTabs(): RightPanelTabInstance[] {
-  return [createReviewTab()]
+  return [createContextTab(), createReviewTab()]
 }
 
 function keepGlobalRightPanelTabs(
   tabs: RightPanelTabInstance[] | null | undefined
 ): RightPanelTabInstance[] {
   return ensureReviewTab(
-    (tabs ?? []).filter((tab) => tab.kind === 'review' || tab.kind === 'browser'),
+    (tabs ?? []).filter(
+      (tab) => tab.kind === 'context' || tab.kind === 'review' || tab.kind === 'browser'
+    ),
     null
   )
 }
@@ -844,6 +876,15 @@ export const useUIStore = create<UIStore>()(
           get().ensureBrowserTab()
           return
         }
+        if (tab === 'context') {
+          set((state) => ({
+            rightPanelTabs: ensureReviewTab(state.rightPanelTabs),
+            rightPanelActiveTabId: RIGHT_PANEL_CONTEXT_TAB_ID,
+            rightPanelTab: 'context',
+            rightPanelOpen: true
+          }))
+          return
+        }
         if (tab === 'subagents') {
           get().ensureSubAgentTab()
           return
@@ -973,18 +1014,26 @@ export const useUIStore = create<UIStore>()(
           const sessionId =
             state.activeScopedSessionId ?? useChatStore.getState().activeSessionId ?? null
           const existing = state.rightPanelTabs.find((tab) => tab.id === tabId)
-          const tab: RightPanelTabInstance = existing ?? {
-            id: tabId,
-            kind: 'terminal',
-            title: title?.trim() || 'Terminal',
-            closable: true,
-            sessionId,
-            processId,
-            createdAt: Date.now()
-          }
-          const rightPanelTabs = existing
-            ? ensureReviewTab(state.rightPanelTabs)
-            : ensureReviewTab([...state.rightPanelTabs, tab])
+          const tab: RightPanelTabInstance = existing
+            ? {
+                ...existing,
+                sessionId: sessionId ?? existing.sessionId ?? null,
+                title: title?.trim() || existing.title
+              }
+            : {
+                id: tabId,
+                kind: 'terminal',
+                title: title?.trim() || 'Terminal',
+                closable: true,
+                sessionId,
+                processId,
+                createdAt: Date.now()
+              }
+          const rightPanelTabs = ensureReviewTab(
+            existing
+              ? state.rightPanelTabs.map((item) => (item.id === tabId ? tab : item))
+              : [...state.rightPanelTabs, tab]
+          )
           return {
             rightPanelTabs,
             rightPanelActiveTabId: tabId,

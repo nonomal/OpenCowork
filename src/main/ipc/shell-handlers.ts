@@ -240,7 +240,10 @@ export function registerShellHandlers(): void {
 
   ipcMain.handle(
     'shell:exec',
-    async (event, args: { command: string; timeout?: number; cwd?: string; execId?: string }) => {
+    async (
+      event,
+      args: { command: string; timeout?: number; cwd?: string; execId?: string; shell?: string }
+    ) => {
       const DEFAULT_TIMEOUT = 600_000
       const MAX_TIMEOUT = 3_600_000
       const timeout = Math.min(args.timeout ?? DEFAULT_TIMEOUT, MAX_TIMEOUT)
@@ -252,6 +255,7 @@ export function registerShellHandlers(): void {
         {
           cwd: args.cwd || process.cwd(),
           command: args.command,
+          shell: args.shell,
           title: 'Shell'
         },
         event.sender

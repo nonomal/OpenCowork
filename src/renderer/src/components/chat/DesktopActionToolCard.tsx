@@ -220,13 +220,13 @@ export function DesktopActionToolCard({
                   </p>
                   {images.map((image, index) => {
                     const src =
-                      image.source.type === 'base64'
+                      image.source.type === 'base64' && image.source.data
                         ? `data:${image.source.mediaType || 'image/png'};base64,${image.source.data}`
                         : (image.source.url ?? '')
-                    if (!src) return null
+                    if (!src && !image.source.filePath) return null
                     return (
                       <ImagePreview
-                        key={`${src}-${index}`}
+                        key={`${image.source.filePath ?? src}-${index}`}
                         src={src}
                         alt={`Desktop screenshot ${index + 1}`}
                         filePath={image.source.filePath}

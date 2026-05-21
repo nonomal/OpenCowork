@@ -1,79 +1,69 @@
 ---
 title: 欢迎使用 OpenCowork
-description: OpenCowork 是一个基于 Electron + React + TypeScript 的桌面 AI Agent 应用。
+description: OpenCowork 是一个 local-first 的桌面 AI Agent 工作台，围绕多 Agent 协作、工具调用、本地持久化和外部集成构建。
 ---
 
 # 欢迎使用 OpenCowork
 
-OpenCowork 是由 [AIDotNet](https://github.com/AIDotNet) 团队打造的多 Agent 协作工作台，基于 **Electron + React + TypeScript** 构建，支持 18+ AI 提供商、20+ 工具能力，并与飞书、钉钉、Telegram 等消息平台无缝衔接，可在本地安全地 orchestration 你的自动化工作流。
+OpenCowork 是一个基于 **Electron 36 + React 19 + TypeScript strict** 构建的桌面 AI Agent 工作台。它把聊天、规划、子代理、团队协作、MCP、Cron、消息平台接入、文件预览、SSH 和本地数据库统一放在一个本地优先的应用里。
 
-OpenCowork is an opinionated yet extensible desktop AI Agent platform. It ships with a production-ready agent loop, tool registry, SQLite persistence, and a plugin-friendly UI so that teams can orchestrate complex automations entirely on-device.
+OpenCowork is a local-first desktop AI agent workbench. It keeps the execution runtime on your machine and uses a narrow preload bridge plus SQLite persistence to coordinate tools, agents, and integrations.
 
-> ⚡ 通过 Agent Loop + Tool System，你可以把检索、写作、脚本执行、数据库操作等任务交给多个 AI Agent 协同完成，同时保留本地审阅与审批流程。
+## 当前实现快照 / What ships today
 
-## 快速导航 / Quick Navigation
+| 领域 | 当前实现 |
+| --- | --- |
+| 运行时 | 4 层架构：Main / Preload / Renderer / Shared |
+| 模型适配 | 5 个运行时 API adapter：Anthropic、OpenAI Chat、OpenAI Responses、OpenAI Images、Gemini |
+| 预置提供商 | 24 个内置 provider preset，覆盖 OpenAI-compatible、Anthropic、Google、Ollama、Qwen、Moonshot、MiniMax、Baidu、SiliconFlow、Azure OpenAI、Copilot、Codex 等 |
+| 工具系统 | 文件、搜索、Shell、计划、任务、Cron、Goal、Web、Browser、Desktop、MCP、Team、Notify、AskUserQuestion、Widget |
+| 消息平台 | 8 个渠道：飞书、钉钉、企业微信、QQ、微信、Telegram、Discord、WhatsApp |
+| 应用插件 | 3 个内置 app plugin：Image、Browser、Desktop Control |
+| 子代理 | 15 个内置 agent 定义，保存在 `resources/agents/`，首次运行后同步到 `~/.open-cowork/agents/` |
+| 技能 | 11 个内置 skill，保存在 `resources/skills/`，首次运行后同步到 `~/.agents/skills/` |
+| 命令 | 6 个内置 slash command，保存在 `resources/commands/` |
+| 数据持久化 | SQLite (`~/.open-cowork/data.db`) + JSON 配置文件 + 文件系统目录 |
 
-<Cards>
-  <Card
-    title="快速开始"
-    href="/docs/getting-started/introduction"
-    description="了解 OpenCowork 的核心特性并完成安装"
-  />
-  <Card
-    title="核心概念"
-    href="/docs/core-concepts/agent-loop"
-    description="深入理解 Agent 循环与工具系统"
-  />
-  <Card
-    title="功能特性"
-    href="/docs/features/chat-modes"
-    description="探索聊天模式、子代理、团队协作"
-  />
-  <Card title="插件系统" href="/docs/plugins/overview" description="配置消息平台自动回复" />
-  <Card
-    title="AI 提供商"
-    href="/docs/providers/overview"
-    description="配置 Claude、GPT、DeepSeek 等模型"
-  />
-  <Card
-    title="架构设计"
-    href="/docs/architecture/overview"
-    description="了解 Electron 进程模型与数据库设计"
-  />
-</Cards>
+## 系统分层 / Layers
 
-## 为什么选择 OpenCowork / Why OpenCowork
+| 层 | 作用 | 关键目录 |
+| --- | --- | --- |
+| Main | 系统能力、IPC、数据库、MCP、Cron、SSH、消息平台、更新、崩溃日志 | `src/main/` |
+| Preload | 安全桥接，只暴露最小必要 API | `src/preload/` |
+| Renderer | React UI、Agent Loop、Tool Registry、Stores、Preview、Team Runtime | `src/renderer/src/` |
+| Shared | 事件协议、Team Runtime 类型、消息/模型/工具契约 | `src/shared/` |
 
-- **多 Agent 协作 (Multi-Agent Teams)**：内置 Team & SubAgent 运行器，可让多个 Agent 并行 / 串行处理任务，通过审批流插入人工决策。
-- **工具生态 (Rich Tooling)**：提供文件系统、Shell、搜索、Todo、预览等 15+ 工具，并支持自定义技能（Skills）与外部 API 代理。
-- **本地优先 (Local-first)**：Electron 主进程管理数据库、进程与密钥，所有消息与配置都保留在本地机器，便于审计与自托管。
-- **跨平台通知 (Messaging Integrations)**：内置飞书、钉钉、Telegram 等连接器，自动将 Agent 输出同步到你的工作群或机器人。
+## 适合什么场景 / Why it exists
 
-## 即刻开始 / Get Started in Minutes
+- 你想在本地安全地跑 AI Agent，而不是把所有上下文都交给云端。
+- 你希望 Agent 不只是聊天，而是能读写文件、跑命令、调用 MCP、发消息、创建计划、排定 Cron。
+- 你需要多人协作式的多 Agent 编排，而不是单一“回答器”。
+- 你希望把 OpenCowork 接到飞书、钉钉、企业微信、Telegram、Discord、WhatsApp、QQ 或微信里。
 
-1. **下载与安装**：参考 [安装指南](/docs/getting-started/installation) 获取最新版本，支持 Windows / macOS / Linux。
-2. **配置提供商**：在「AI 提供商」面板中填入 API Key，可一次性接入 Claude、GPT、DeepSeek、月之暗面等模型。
-3. **创建工作台**：使用预置的「聊天模式」「Agent 团队」模板，或通过 `agents/*.md` 自定义专属 Agent。
-4. **串联自动化**：借助工具系统编排文件写入、Shell 执行与外部 Webhook，使 Agent 产出的结果落地到实际业务流程。
+## 推荐阅读顺序 / Suggested reading order
 
-## 功能速览 / Feature Glimpse
+1. [项目介绍](/docs/getting-started/introduction)
+2. [安装指南](/docs/getting-started/installation)
+3. [快速上手](/docs/getting-started/quick-start)
+4. [架构总览](/docs/architecture/overview)
+5. [Agent 循环](/docs/core-concepts/agent-loop)
+6. [工具系统](/docs/core-concepts/tool-system)
+7. [计划模式](/docs/features/plan-mode)
+8. [插件系统概述](/docs/plugins/overview)
+9. [提供商概述](/docs/providers/overview)
 
-| 模块          | 描述                                                                    |
-| ------------- | ----------------------------------------------------------------------- |
-| Agent Loop    | 基于 AsyncGenerator 的流式循环，实时展示模型思考、工具调用与结果。      |
-| Tool Registry | 文件、搜索、Shell、Todo、技能加载等工具统一注册，支持热插拔。           |
-| IPC & DB      | 通过 Electron IPC 连接主进程 SQLite（WAL），保障数据可靠与高性能。      |
-| UI/UX         | React 19 + Tailwind CSS 4 + shadcn/ui，提供聊天、协作、设置等完整界面。 |
+## 你可以从哪里开始 / Start here
 
-## 加入社群 / Join the Community
+- 如果你要做代码改动：先看 [开发环境搭建](/docs/development/setup)
+- 如果你要接入模型：先看 [提供商概述](/docs/providers/overview)
+- 如果你要接入消息平台：先看 [插件系统概述](/docs/plugins/overview)
+- 如果你要理解系统结构：先看 [架构总览](/docs/architecture/overview)
 
-与其他开发者一起讨论多 Agent 的最佳实践、分享自动化成果，或第一时间获取版本更新。
+## 社区 / Community
 
 <figure>
   <img src="/fieshu.png" alt="OpenCowork 飞书交流群二维码" width="360" />
-  <figcaption>
-    扫码进入飞书群，获取实时更新与支持 / Scan the QR code to join the Feishu group.
-  </figcaption>
+  <figcaption>扫码进入飞书群，获取更新与支持 / Scan the QR code to join the Feishu group.</figcaption>
 </figure>
 
-> 需要企业级支持或定制功能？欢迎在飞书群内留下需求，或直接在 [GitHub Issues](https://github.com/AIDotNet/OpenCowork/issues) 反馈。
+> 如果你在使用中发现文档与源码不一致，请优先以源码为准；本文档会尽量保持和当前实现同步。

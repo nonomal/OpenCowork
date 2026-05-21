@@ -1,52 +1,106 @@
 ---
 title: MCP 服务器
-description: Model Context Protocol 服务器管理。
+description: OpenCowork 的 MCP 服务器管理、连接、发现和调用流程。
 ---
 
 # MCP 服务器 / MCP Servers
 
-OpenCowork 支持 Model Context Protocol (MCP)，可以连接外部 MCP 服务器扩展 Agent 能力。
+OpenCowork 支持 Model Context Protocol (MCP)，用来把外部工具、资源和 prompts 接入 Agent。
 
-## 什么是 MCP / What is MCP
+## 配置存储 / Config storage
 
-MCP 是 Anthropic 提出的开放协议，允许 AI 应用连接外部工具和数据源。通过 MCP，你可以：
+MCP 服务器配置会被写入：
 
-- 连接数据库（PostgreSQL、MySQL、SQLite）
-- 访问外部 API（GitHub、Slack、Notion）
-- 使用专业工具（代码执行、浏览器控制）
+```text
+~/.open-cowork/mcp-servers.json
+```
 
-## 添加 MCP 服务器 / Add MCP Server
+主进程会在启动时自动连接所有 `enabled=true` 的 server。
 
-1. 进入 **设置 → MCP 服务器**
-2. 点击 **添加服务器**
-3. 填写服务器配置：
+## 支持的 transport / Supported transports
+
+| transport | 场景 |
+| --- | --- |
+| `stdio` | 本地 CLI / 本地进程 |
+| `sse` | 远程 HTTP + SSE |
+| `streamable-http` | 新式 HTTP 传输 |
+
+`streamable-http` 失败时还可以按配置回退到 `sse`。
+
+## 主要 IPC / Main IPC
+
+MCP 主进程 handler 提供这些能力：
+
+- `mcp:list`
+- `mcp:add`
+- `mcp:update`
+- `mcp:remove`
+- `mcp:connect`
+- `mcp:disconnect`
+- `mcp:status`
+- `mcp:server-info`
+- `mcp:all-servers-info`
+- `mcp:list-tools`
+- `mcp:call-tool`
+- `mcp:read-resource`
+- `mcp:list-resources`
+- `mcp:get-prompt`
+- `mcp:list-prompts`
+- `mcp:refresh-capabilities`
+
+## Server 配置 / Server config
+
+`McpServerConfig` 常见字段：
+
+| 字段 | 作用 |
+| --- | --- |
+| `id` / `name` | server 标识 |
+| `enabled` | 是否启用 |
+| `projectId` | 是否绑定到某个项目 |
+| `transport` | `stdio` / `sse` / `streamable-http` |
+| `command` / `args` / `env` / `cwd` | stdio 进程配置 |
+| `url` / `headers` | HTTP/SSE 配置 |
+| `autoFallback` | streamable-http 失败后是否回退 |
+| `description` | 说明 |
+
+## 能力发现 / Capability discovery
+
+连接成功后，OpenCowork 会把 server 暴露出来的：
+
+- tools
+- resources
+- prompts
+
+都整理到前端可用的列表里。Agent 就能像使用本地工具一样使用这些能力。
+
+## 典型流程 / Typical flow
+
+1. 在设置里新增 MCP server
+2. 保存到 `mcp-servers.json`
+3. 启动或手动连接 server
+4. 读取工具 / 资源 / prompts
+5. 在对话里直接调用
+6. server 断开后，能力自动消失
+
+## 示例 / Example
 
 ```json
 {
-  "name": "github",
+  "id": "github",
+  "name": "GitHub MCP",
+  "enabled": true,
+  "transport": "stdio",
   "command": "npx",
   "args": ["-y", "@modelcontextprotocol/server-github"],
   "env": {
-    "GITHUB_PERSONAL_ACCESS_TOKEN": "your-token"
+    "GITHUB_PERSONAL_ACCESS_TOKEN": "..."
   }
 }
 ```
 
-## 支持的传输方式 / Transport
+## 什么时候该用 MCP？ / When to use MCP?
 
-| 传输方式 | 描述                              |
-| -------- | --------------------------------- |
-| `stdio`  | 通过标准输入输出通信（本地进程）  |
-| `sse`    | Server-Sent Events（HTTP 服务器） |
-
-## 工具发现 / Tool Discovery
-
-连接 MCP 服务器后，OpenCowork 会自动发现并注册服务器提供的工具，Agent 可以直接使用这些工具。
-
-## 管理服务器 / Manage Servers
-
-通过 `mcp-store` 管理 MCP 服务器状态：
-
-- 查看连接状态（connected / disconnected / error）
-- 启用/禁用服务器
-- 查看服务器提供的工具列表
+- 访问外部系统 API
+- 读写第三方资源
+- 把 CLI 工具接进 Agent
+- 想把团队内部服务暴露成可调用能力

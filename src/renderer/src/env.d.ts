@@ -7,6 +7,8 @@ declare namespace JSX {
         src?: string
         partition?: string
         allowpopups?: boolean | string
+        plugins?: boolean | string
+        useragent?: string
         webpreferences?: string
       },
       Electron.WebviewTag

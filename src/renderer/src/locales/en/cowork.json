@@ -12,6 +12,23 @@
     "runningCommands": "{{count}} running commands",
     "openSession": "Open Session",
     "stopCommand": "Stop Command",
+    "backgroundShellsTitle": "Background Tasks",
+    "backgroundShellsEmpty": "No background shell tasks",
+    "backgroundShellsSummary": "{{running}} running · {{total}} total",
+    "clearFinishedShells": "Clear finished shell tasks",
+    "currentSession": "Current session",
+    "otherSession": "Other session",
+    "globalShell": "Global shell",
+    "stopShell": "Stop shell task",
+    "removeShell": "Remove shell task",
+    "moreBackgroundShells": "{{count}} more background shell tasks",
+    "shellOutputLines": "{{count}} lines",
+    "shellStatus": {
+      "running": "running",
+      "exited": "exited",
+      "stopped": "stopped",
+      "error": "error"
+    },
     "autoApproved": "Auto-approved: {{count}}",
     "noContext": "No context loaded",
     "noContextDesc": "Select a working folder to give the assistant access to your project"

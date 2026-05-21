@@ -1,72 +1,51 @@
 ---
 title: 其他提供商
-description: Qwen、Moonshot、MiniMax、百度文心、硅基流动等提供商配置。
+description: Qwen、Moonshot、MiniMax、百度文心、硅基流动等内置 preset。
 ---
 
 # 其他提供商 / Other Providers
 
-所有兼容 OpenAI API 的提供商都可以通过 `openai-chat` 协议接入 OpenCowork。
+这一页汇总的是 OpenCowork 里已经预置好的其他 provider preset。它们大多是 **OpenAI-compatible**，少数是 OAuth 或专用 preset。
 
-## 通义千问 (Qwen)
+## OpenAI-compatible 预设 / Compatible presets
 
-| 配置项   | 值                                                  |
-| -------- | --------------------------------------------------- |
-| Base URL | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| API Key  | 阿里云 DashScope API Key                            |
-| 推荐模型 | `qwen-max`, `qwen-plus`, `qwen-turbo`               |
+| 提供商 | Base URL / 说明 |
+| --- | --- |
+| Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Moonshot | `https://api.moonshot.cn/v1` |
+| MiniMax | `https://api.minimax.chat/v1` |
+| 百度文心 | `https://qianfan.baidubce.com/v2` |
+| SiliconFlow | `https://api.siliconflow.cn/v1` |
+| Azure OpenAI | 自定义 Azure deployment URL |
+| OpenRouter | OpenAI-compatible gateway |
+| Gitee AI | Gitee AI endpoint |
+| Xiaomi | 小米 AI 相关 preset |
+| BigModel | 智谱 / BigModel preset |
+| LongCat | LongCat preset |
+| Routin AI | Routin AI preset |
 
-## Moonshot (Kimi)
+## OAuth 类预设 / OAuth presets
 
-| 配置项   | 值                           |
-| -------- | ---------------------------- |
-| Base URL | `https://api.moonshot.cn/v1` |
-| API Key  | Moonshot API Key             |
-| 推荐模型 | `moonshot-v1-128k`           |
+| 提供商 | 说明 |
+| --- | --- |
+| Codex OAuth | 通过系统浏览器授权后接入 OpenAI 相关接口 |
+| Copilot OAuth | GitHub Copilot OAuth preset |
 
-## MiniMax
+## 适合什么场景？ / When to use them?
 
-| 配置项   | 值                            |
-| -------- | ----------------------------- |
-| Base URL | `https://api.minimax.chat/v1` |
-| API Key  | MiniMax API Key               |
-| 推荐模型 | `abab6.5s-chat`               |
+- 你已经有第三方 AI 平台账号
+- 你想换更便宜的 API
+- 你想用企业自己的网关
+- 你想用不止一个 provider，按任务切换
 
-## 百度文心 (ERNIE)
+## 配置思路 / Configuration idea
 
-| 配置项   | 值                                |
-| -------- | --------------------------------- |
-| Base URL | `https://qianfan.baidubce.com/v2` |
-| API Key  | 百度智能云 API Key                |
-| 推荐模型 | `ernie-4.5-turbo-128k`            |
+1. 先选一个 provider preset
+2. 填 API Key 或 OAuth 信息
+3. 检查 Base URL
+4. 选择模型
+5. 确认模型 category 和能力标志
 
-## 硅基流动 (SiliconFlow)
+## 关键提醒 / Important reminder
 
-| 配置项   | 值                                                     |
-| -------- | ------------------------------------------------------ |
-| Base URL | `https://api.siliconflow.cn/v1`                        |
-| API Key  | SiliconFlow API Key                                    |
-| 推荐模型 | `Qwen/Qwen2.5-72B-Instruct`, `deepseek-ai/DeepSeek-R1` |
-
-<Callout type="tip">硅基流动提供多种开源模型的 API 接入，价格较低，适合高频使用场景。</Callout>
-
-## OAuth 登录 / OAuth Login
-
-- OAuth 提供商使用系统浏览器授权 + 本地回调，无需手动粘贴令牌。
-- Codex OAuth 默认使用 OpenClaw 的参数：`https://auth.openai.com/oauth/authorize`、`https://auth.openai.com/oauth/token`，以及回调 `http://127.0.0.1:1455/auth/callback`（PKCE）。
-- 若提供商参数不同，可在设置中编辑 `client_id`、`scope`、回调端口与路径。
-
-## 渠道商短信/邮箱登录 / Channel Login
-
-- 发送验证码：`POST https://api.moark.com/v1/app/auth/vcode`
-- 校验验证码并换取令牌：`POST https://api.moark.com/v1/app/auth/token`
-- 获取用户信息：`GET https://api.moark.com/v1/app/user`
-- 请求需携带 `Authorization: Bearer <appToken>`，Body 包含 `appid`、`channel_type` 与手机号/邮箱。
-
-## 自定义提供商 / Custom Provider
-
-任何兼容 OpenAI Chat Completions API 的服务都可以接入：
-
-1. 进入 **设置 → AI 提供商 → 添加提供商**
-2. 选择协议 `openai-chat`
-3. 填入 Base URL 和 API Key
-4. 手动输入模型名称
+只要服务兼容 OpenAI Chat Completions API，通常都能用 `openai-chat` 方式接入；如果要 reasoning 或更特殊的流式特性，再看具体 preset 是否需要单独 adapter。

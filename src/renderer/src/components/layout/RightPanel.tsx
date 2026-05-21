@@ -22,6 +22,7 @@ import { SubAgentsPanel } from './SubAgentsPanel'
 import { SubAgentExecutionDetail } from './SubAgentExecutionDetail'
 import { SessionChangeReviewPanel } from './SessionChangeReviewPanel'
 import { LocalTerminal } from '@renderer/components/terminal/LocalTerminal'
+import { ContextPanel } from '@renderer/components/cowork/ContextPanel'
 import { ipcClient } from '@renderer/lib/ipc/ipc-client'
 import { IPC } from '@renderer/lib/ipc/channels'
 import { RIGHT_PANEL_DEFAULT_WIDTH, clampRightPanelWidth } from './right-panel-defs'
@@ -152,6 +153,9 @@ export function RightPanel({ compact = false, sessionId }: RightPanelProps): Rea
   const tabs = useMemo(() => {
     if (!rightPanelOpen) return rightPanelTabs
     return rightPanelTabs.map((tab) => {
+      if (tab.kind === 'context') {
+        return { ...tab, title: t('rightPanel.context', { defaultValue: 'Context' }) }
+      }
       if (tab.kind === 'review') {
         return { ...tab, title: t('rightPanel.review', { defaultValue: 'Review' }) }
       }
@@ -248,6 +252,13 @@ export function RightPanel({ compact = false, sessionId }: RightPanelProps): Rea
 
   const renderActivePanel = (tab: RightPanelTabInstance | undefined): React.ReactNode => {
     if (!tab) return null
+    if (tab.kind === 'context') {
+      return (
+        <div className="h-full overflow-y-auto px-4 py-4">
+          <ContextPanel />
+        </div>
+      )
+    }
     if (tab.kind === 'review') {
       return <SessionChangeReviewPanel initialChangeId={tab.initialChangeId} />
     }

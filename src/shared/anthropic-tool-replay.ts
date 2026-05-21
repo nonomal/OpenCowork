@@ -20,6 +20,16 @@ type ToolResultLikeBlock<TBlock extends ReplayContentBlock> = TBlock & {
   toolUseId: string
 }
 
+type ReplaySegment<TBlock extends ReplayContentBlock> = {
+  blocks: TBlock[]
+  toolUses: Array<ToolUseLikeBlock<TBlock>>
+}
+
+type ReplayResidual<TBlock extends ReplayContentBlock, TMessage extends ReplayMessage<TBlock>> = {
+  message: TMessage
+  residualContent: string | TBlock[] | null
+}
+
 function isToolUseBlock<TBlock extends ReplayContentBlock>(
   block: TBlock
 ): block is ToolUseLikeBlock<TBlock> {
@@ -62,6 +72,65 @@ function hasReplayableContent<TBlock extends ReplayContentBlock>(
 
 function buildSyntheticId(baseId: string, counter: number): string {
   return `${baseId}::anthropic-replay-${counter}`
+}
+
+function splitAssistantReplaySegments<TBlock extends ReplayContentBlock>(
+  content: TBlock[]
+): ReplaySegment<TBlock>[] {
+  const segments: ReplaySegment<TBlock>[] = []
+  let blocks: TBlock[] = []
+  let toolUses: Array<ToolUseLikeBlock<TBlock>> = []
+
+  for (const block of content) {
+    if (toolUses.length > 0 && !isToolUseBlock(block)) {
+      segments.push({ blocks, toolUses })
+      blocks = []
+      toolUses = []
+    }
+
+    blocks.push(block)
+    if (isToolUseBlock(block)) {
+      toolUses.push(block)
+    }
+  }
+
+  if (blocks.length > 0) {
+    segments.push({ blocks, toolUses })
+  }
+
+  return segments
+}
+
+function appendContent<TBlock extends ReplayContentBlock>(
+  target: TBlock[],
+  content: string | TBlock[]
+): void {
+  if (typeof content === 'string') {
+    target.push({ type: 'text', text: content } as unknown as TBlock)
+    return
+  }
+
+  target.push(...content)
+}
+
+function mergeResidualIntoToolResultMessage<
+  TBlock extends ReplayContentBlock,
+  TMessage extends ReplayMessage<TBlock>
+>(normalized: TMessage[], content: string | TBlock[]): boolean {
+  const lastMessage = normalized[normalized.length - 1]
+  if (
+    !lastMessage ||
+    lastMessage.role !== 'user' ||
+    !hasArrayContent<TBlock>(lastMessage.content) ||
+    !lastMessage.content.some((block) => isToolResultBlock(block))
+  ) {
+    return false
+  }
+
+  const mergedContent = [...lastMessage.content]
+  appendContent(mergedContent, content)
+  normalized[normalized.length - 1] = withContent(lastMessage, mergedContent)
+  return true
 }
 
 /**
@@ -113,15 +182,18 @@ export function normalizeMessagesForAnthropicToolReplay<
       continue
     }
 
-    const toolUses = message.content.filter((block) => isToolUseBlock(block))
+    const replaySegments = splitAssistantReplaySegments(message.content)
+    const toolUses = replaySegments.flatMap((segment) => segment.toolUses)
     if (toolUses.length === 0) {
-      const assistantBlocks = message.content.filter((block) => {
-        if (isToolResultBlock(block)) {
-          changed = true
-          return false
-        }
-        return true
-      })
+      const assistantBlocks = replaySegments.flatMap((segment) =>
+        segment.blocks.filter((block) => {
+          if (isToolResultBlock(block)) {
+            changed = true
+            return false
+          }
+          return true
+        })
+      )
 
       if (assistantBlocks.length === message.content.length) {
         normalized.push(message)
@@ -135,10 +207,7 @@ export function normalizeMessagesForAnthropicToolReplay<
 
     const toolUseIds = new Set(toolUses.map((block) => block.id))
     const pairedToolResults = new Map<string, ToolResultLikeBlock<TBlock>>()
-    const replayWindow: Array<{
-      message: TMessage
-      residualContent: string | TBlock[] | null
-    }> = []
+    const replayWindow: Array<ReplayResidual<TBlock, TMessage>> = []
 
     let cursor = index + 1
     while (cursor < messages.length && isReplayCarrierRole(messages[cursor].role)) {
@@ -176,51 +245,82 @@ export function normalizeMessagesForAnthropicToolReplay<
       cursor += 1
     }
 
-    const keptToolUseIds = new Set(
-      toolUses.map((block) => block.id).filter((toolUseId) => pairedToolResults.has(toolUseId))
-    )
-    const assistantBlocks = message.content.filter((block) => {
-      if (isToolUseBlock(block)) {
-        const keep = keptToolUseIds.has(block.id)
-        if (!keep) changed = true
-        return keep
-      }
-      if (isToolResultBlock(block)) {
-        changed = true
-        return false
-      }
-      return true
-    })
+    const firstReplayMessage = replayWindow[0]?.message
+    let emittedToolResultMessage = false
 
-    if (assistantBlocks.length > 0) {
-      if (
-        assistantBlocks.length === message.content.length &&
-        keptToolUseIds.size === toolUses.length
-      ) {
-        normalized.push(message)
-      } else {
-        normalized.push(withContent(message, assistantBlocks))
-      }
-    }
-
-    if (keptToolUseIds.size > 0 && replayWindow.length > 0) {
-      const firstReplayMessage = replayWindow[0].message
-      const orderedToolResults = toolUses
-        .map((block) => pairedToolResults.get(block.id))
-        .filter((block): block is ToolResultLikeBlock<TBlock> => Boolean(block))
-
-      normalized.push(
-        withContent(firstReplayMessage, orderedToolResults as TBlock[], {
-          role: 'user' as TMessage['role']
-        })
+    replaySegments.forEach((segment, segmentIndex) => {
+      const keptSegmentToolUseIds = new Set(
+        segment.toolUses
+          .map((block) => block.id)
+          .filter((toolUseId) => pairedToolResults.has(toolUseId))
       )
-    }
+      const segmentBlocks = segment.blocks.filter((block) => {
+        if (isToolUseBlock(block)) {
+          const keep = keptSegmentToolUseIds.has(block.id)
+          if (!keep) changed = true
+          return keep
+        }
+        if (isToolResultBlock(block)) {
+          changed = true
+          return false
+        }
+        return true
+      })
+
+      if (segmentBlocks.length > 0) {
+        if (
+          segmentIndex === 0 &&
+          replaySegments.length === 1 &&
+          segmentBlocks.length === message.content.length &&
+          keptSegmentToolUseIds.size === segment.toolUses.length
+        ) {
+          normalized.push(message)
+        } else {
+          if (segmentIndex > 0 || replaySegments.length > 1) {
+            changed = true
+          }
+          normalized.push(
+            withContent(message, segmentBlocks, {
+              id:
+                segmentIndex === 0
+                  ? message.id
+                  : (buildSyntheticId(message.id, ++syntheticIdCounter) as TMessage['id'])
+            })
+          )
+        }
+      }
+
+      if (keptSegmentToolUseIds.size > 0 && firstReplayMessage) {
+        const orderedToolResults = segment.toolUses
+          .map((block) => pairedToolResults.get(block.id))
+          .filter((block): block is ToolResultLikeBlock<TBlock> => Boolean(block))
+
+        normalized.push(
+          withContent(firstReplayMessage, orderedToolResults as TBlock[], {
+            id:
+              emittedToolResultMessage || replaySegments.length > 1
+                ? (buildSyntheticId(firstReplayMessage.id, ++syntheticIdCounter) as TMessage['id'])
+                : firstReplayMessage.id,
+            role: 'user' as TMessage['role']
+          })
+        )
+        emittedToolResultMessage = true
+      }
+    })
 
     replayWindow.forEach((entry, replayIndex) => {
       const { message: replayMessage, residualContent } = entry
       if (!residualContent || !hasReplayableContent(residualContent)) return
 
-      if (replayIndex === 0 && keptToolUseIds.size > 0) {
+      if (emittedToolResultMessage && replayMessage.role === 'user') {
+        const merged = mergeResidualIntoToolResultMessage(normalized, residualContent)
+        if (merged) {
+          changed = true
+          return
+        }
+      }
+
+      if (replayIndex === 0 && emittedToolResultMessage) {
         syntheticIdCounter += 1
         normalized.push(
           withContent(replayMessage, residualContent, {

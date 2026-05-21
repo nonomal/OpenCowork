@@ -1,45 +1,35 @@
-# docs
+# OpenCowork 文档站点
 
-This is a Next.js application generated with
-[Create Fumadocs](https://github.com/fuma-nama/fumadocs).
+这是 OpenCowork 的独立文档站点，基于 **Fumadocs + Next.js** 构建。
 
-Run development server:
+## 开发
 
 ```bash
+npm install
 npm run dev
-# or
-pnpm dev
-# or
-yarn dev
 ```
 
-Open http://localhost:3000 with your browser to see the result.
+## 构建
 
-## Explore
+```bash
+npm run build
+```
 
-In the project, you can see:
+## 类型检查
 
-- `lib/source.ts`: Code for content source adapter, [`loader()`](https://fumadocs.dev/docs/headless/source-api) provides the interface to access your content.
-- `lib/layout.shared.tsx`: Shared options for layouts, optional but preferred to keep.
+```bash
+npm run types:check
+```
 
-| Route                     | Description                                            |
-| ------------------------- | ------------------------------------------------------ |
-| `app/(home)`              | The route group for your landing page and other pages. |
-| `app/docs`                | The documentation layout and pages.                    |
-| `app/api/search/route.ts` | The Route Handler for search.                          |
+## 内容位置
 
-### Fumadocs MDX
+- 文档内容：`docs/docs/`
+- 静态资源：`docs/public/`
+- MDX 组件：`docs/src/mdx-components.tsx`
+- 文档源配置：`docs/source.config.ts`
 
-A `source.config.ts` config file has been included, you can customise different options like frontmatter schema.
+## 运行机制
 
-Read the [Introduction](https://fumadocs.dev/docs/mdx) for further details.
+`npm run dev` 和 `npm run build` 都会先执行 `scripts/generate-skills-index.mjs`，再启动 Next.js。
 
-## Learn More
-
-To learn more about Next.js and Fumadocs, take a look at the following
-resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js
-  features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-- [Fumadocs](https://fumadocs.dev) - learn about Fumadocs
+如果你要更新文档内容，优先修改 `docs/docs/` 下的 MDX 文件。

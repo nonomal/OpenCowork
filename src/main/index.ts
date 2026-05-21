@@ -69,6 +69,10 @@ import { writeCrashLog, getCrashLogDir } from './crash-logger'
 import { setupAutoUpdater } from './updater'
 import { safeSendToWindow } from './window-ipc'
 import * as sessionsDao from './db/sessions-dao'
+import {
+  configureBuiltInBrowserSession,
+  resolveBrowserSessionStorageMode
+} from './browser/browser-emulation'
 
 import { createFeishuService } from './channels/providers/feishu/feishu-service'
 import { FeishuApi } from './channels/providers/feishu/feishu-api'
@@ -406,7 +410,8 @@ function attachWindowCrashLogging(window: BrowserWindow): void {
 }
 
 function configureChromiumCachePaths(): void {
-  const sessionDataPath = join(app.getPath('userData'), 'session-data')
+  const browserStorageMode = resolveBrowserSessionStorageMode(app.getPath('userData'))
+  const sessionDataPath = browserStorageMode.sessionDataPath
   const diskCachePath = join(sessionDataPath, 'Cache')
 
   try {
@@ -414,6 +419,13 @@ function configureChromiumCachePaths(): void {
     mkdirSync(diskCachePath, { recursive: true })
     app.setPath('sessionData', sessionDataPath)
     app.commandLine.appendSwitch('disk-cache-dir', diskCachePath)
+    if (browserStorageMode.usingDetectedBrowserProfile) {
+      console.log(
+        `[Browser] Reusing ${browserStorageMode.browserName} profile data: ${browserStorageMode.browserProfilePath}`
+      )
+    } else if (browserStorageMode.reuseEnabled) {
+      console.log('[Browser] Browser profile reuse enabled, but no supported profile was found')
+    }
   } catch (error) {
     console.error('[Main] Failed to configure Chromium cache paths:', error)
     recordCrash('configure_chromium_cache_failed', { error })
@@ -721,6 +733,16 @@ function getTrayIcon() {
   return image
 }
 
+function setMacDockIcon(): void {
+  if (process.platform !== 'darwin' || !app.dock) return
+
+  try {
+    app.dock.setIcon(nativeImage.createFromPath(icon_mac))
+  } catch (error) {
+    console.warn('[Main] Failed to set macOS dock icon:', error)
+  }
+}
+
 function createTray(): void {
   if (tray) return
 
@@ -1022,10 +1044,12 @@ if (gotSingleInstanceLock) {
 
     await syncMacOSShellEnvironment()
     await configureSystemProxy()
+    const browserEmulationStatus = configureBuiltInBrowserSession()
 
     recordCrash('app_started', {
       userDataPath: app.getPath('userData'),
-      crashLogDir: getCrashLogDir()
+      crashLogDir: getCrashLogDir(),
+      browserEmulation: browserEmulationStatus
     })
     console.log(`[CrashLogger] Logs will be written to ${getCrashLogDir()}`)
 
@@ -1228,6 +1252,7 @@ if (gotSingleInstanceLock) {
     void autoStartChannels(channelManager)
     void autoConnectMcpServers(mcpManager)
 
+    setMacDockIcon()
     createWindow()
 
     createTray()
