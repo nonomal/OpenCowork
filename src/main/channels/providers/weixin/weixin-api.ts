@@ -61,8 +61,13 @@ export interface GetUpdatesResponse {
 }
 
 interface WeixinGetUploadUrlResponse {
+  ret?: number
+  errcode?: number
+  errmsg?: string
   upload_param?: string
   thumb_upload_param?: string
+  upload_full_url?: string
+  data?: WeixinGetUploadUrlResponse
 }
 
 interface WeixinUploadedFileInfo {
@@ -287,16 +292,28 @@ function buildCdnUploadUrl(cdnBaseUrl: string, uploadParam: string, fileKey: str
   return `${normalizeCdnBaseUrl(cdnBaseUrl)}/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(fileKey)}`
 }
 
+function encodeOutboundMediaAesKey(aesKeyHex: string): string {
+  return Buffer.from(aesKeyHex, 'utf8').toString('base64')
+}
+
 async function uploadBufferToCdn(params: {
   buffer: Buffer
-  uploadParam: string
+  uploadParam?: string
+  uploadFullUrl?: string
   fileKey: string
   cdnBaseUrl: string
   aesKey: Buffer
   signal?: AbortSignal
 }): Promise<string> {
   const ciphertext = encryptAesEcb(params.buffer, params.aesKey)
-  const url = buildCdnUploadUrl(params.cdnBaseUrl, params.uploadParam, params.fileKey)
+  const url = params.uploadFullUrl?.trim()
+    ? params.uploadFullUrl.trim()
+    : params.uploadParam
+      ? buildCdnUploadUrl(params.cdnBaseUrl, params.uploadParam, params.fileKey)
+      : ''
+  if (!url) {
+    throw new Error('Weixin CDN upload missing upload URL')
+  }
 
   let lastError: unknown
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -353,6 +370,19 @@ async function uploadBufferToCdn(params: {
   throw lastError instanceof Error ? lastError : new Error('Weixin CDN upload failed')
 }
 
+function normalizeUploadUrlResponse(response: WeixinGetUploadUrlResponse): WeixinGetUploadUrlResponse {
+  const nested = response.data
+  if (!nested) return response
+  return {
+    ret: response.ret ?? nested.ret,
+    errcode: response.errcode ?? nested.errcode,
+    errmsg: response.errmsg ?? nested.errmsg,
+    upload_param: response.upload_param ?? nested.upload_param,
+    thumb_upload_param: response.thumb_upload_param ?? nested.thumb_upload_param,
+    upload_full_url: response.upload_full_url ?? nested.upload_full_url
+  }
+}
+
 export class WeixinApi {
   private readonly wechatUin: string
 
@@ -391,7 +421,7 @@ export class WeixinApi {
     mediaType: number
     signal?: AbortSignal
   }): Promise<WeixinGetUploadUrlResponse> {
-    return postJson<WeixinGetUploadUrlResponse>({
+    const response = await postJson<WeixinGetUploadUrlResponse>({
       baseUrl: this.baseUrl,
       path: 'ilink/bot/getuploadurl',
       body: {
@@ -402,7 +432,10 @@ export class WeixinApi {
         rawfilemd5: params.rawFileMd5,
         filesize: params.fileSize,
         no_need_thumb: true,
-        aeskey: params.aesKeyHex
+        aeskey: params.aesKeyHex,
+        base_info: {
+          channel_version: '1.0.0'
+        }
       },
       token: this.token,
       routeTag: this.routeTag,
@@ -410,6 +443,7 @@ export class WeixinApi {
       timeoutMs: 20000,
       signal: params.signal
     })
+    return normalizeUploadUrlResponse(response)
   }
 
   private async uploadMedia(params: {
@@ -436,13 +470,22 @@ export class WeixinApi {
       signal: params.signal
     })
 
-    if (!uploadUrl.upload_param) {
-      throw new Error('Weixin getuploadurl returned empty upload_param')
+    const uploadParam = uploadUrl.upload_param?.trim()
+    const uploadFullUrl = uploadUrl.upload_full_url?.trim()
+    const errcode = uploadUrl.errcode ?? uploadUrl.ret ?? 0
+    if (errcode !== 0) {
+      throw new Error(
+        `Weixin getuploadurl failed: ${uploadUrl.errmsg || `errcode ${errcode}`}`
+      )
+    }
+    if (!uploadParam && !uploadFullUrl) {
+      throw new Error('Weixin getuploadurl returned no upload_param or upload_full_url')
     }
 
     const downloadEncryptedQueryParam = await uploadBufferToCdn({
       buffer: params.buffer,
-      uploadParam: uploadUrl.upload_param,
+      uploadParam,
+      uploadFullUrl,
       fileKey,
       cdnBaseUrl: params.cdnBaseUrl || DEFAULT_WEIXIN_CDN_BASE_URL,
       aesKey,
@@ -627,7 +670,7 @@ export class WeixinApi {
       image_item: {
         media: {
           encrypt_query_param: uploaded.downloadEncryptedQueryParam,
-          aes_key: Buffer.from(uploaded.aesKeyHex, 'hex').toString('base64'),
+          aes_key: encodeOutboundMediaAesKey(uploaded.aesKeyHex),
           encrypt_type: 1
         },
         mid_size: uploaded.fileSizeCiphertext
@@ -671,7 +714,7 @@ export class WeixinApi {
       file_item: {
         media: {
           encrypt_query_param: uploaded.downloadEncryptedQueryParam,
-          aes_key: Buffer.from(uploaded.aesKeyHex, 'hex').toString('base64'),
+          aes_key: encodeOutboundMediaAesKey(uploaded.aesKeyHex),
           encrypt_type: 1
         },
         file_name: params.fileName,
