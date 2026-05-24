@@ -117,6 +117,12 @@ interface ConsolidationOutput {
   writtenItems?: string[]
 }
 
+interface Stage1BuildResult {
+  input?: MemoryStage1OutputInput
+  reason?: MemoryAutomationFilterReason
+  content?: string
+}
+
 interface TargetDescriptor {
   target: MemoryAutomationTarget
   path: string
@@ -674,21 +680,30 @@ function buildStage1Input(args: {
   scopeOutput: PipelineScopeOutput
   sourceSessionId: string
   sourceUpdatedAt?: number | null
-}): MemoryStage1OutputInput | null {
+}): Stage1BuildResult {
   const raw = sanitizeMemoryPayload(args.scopeOutput.rawMemory)
-  if (!raw.content) return null
+  if (!raw.content) {
+    return {
+      reason: raw.reason ?? 'temporary_chatter',
+      content: args.scopeOutput.rawMemory
+    }
+  }
   const summary = sanitizeMemoryPayload(args.scopeOutput.rolloutSummary)
   const slug = args.scopeOutput.rolloutSlug || rolloutSlugFromSession(args.sourceSessionId, args.root.scope)
   return {
-    memoryRootId: args.root.id,
-    scope: args.root.scope,
-    sourceSessionId: args.sourceSessionId,
-    sourceUpdatedAt: args.sourceUpdatedAt ?? null,
-    rawMemory: raw.content,
-    rolloutSummary: summary.content || raw.content.slice(0, 500),
-    rolloutSlug: slug,
-    fingerprint: fingerprintContent(`${args.root.id}:${args.sourceSessionId}:${raw.content}`),
-    status: raw.reason || summary.reason ? 'filtered' : 'active'
+    input: {
+      memoryRootId: args.root.id,
+      scope: args.root.scope,
+      sourceSessionId: args.sourceSessionId,
+      sourceUpdatedAt: args.sourceUpdatedAt ?? null,
+      rawMemory: raw.content,
+      rolloutSummary: summary.content || raw.content.slice(0, 500),
+      rolloutSlug: slug,
+      fingerprint: fingerprintContent(`${args.root.id}:${args.sourceSessionId}:${raw.content}`),
+      status: raw.reason || summary.reason ? 'filtered' : 'active'
+    },
+    reason: raw.reason ?? summary.reason,
+    content: raw.content
   }
 }
 
@@ -1134,33 +1149,35 @@ export async function runMemoryAutomationForSession(options: RunSessionOptions):
       if (scopeOutput.scope === 'project' && !snapshot.projectRootPath) continue
       const root = findRootForScope(prepared.roots, scopeOutput.scope)
       if (!root) continue
-      const input = buildStage1Input({
+      const built = buildStage1Input({
         root,
         scopeOutput,
         sourceSessionId: options.sessionId,
         sourceUpdatedAt: session.updatedAt
       })
-      if (input) {
-        stage1Inputs.push(input)
-      } else {
+      if (built.input) {
+        stage1Inputs.push(built.input)
+      }
+      if (!built.input || built.input.status === 'filtered') {
         await recordSyntheticEntry({
           status: 'filtered',
-          reason: 'temporary_chatter',
+          reason: built.reason ?? 'temporary_chatter',
           sourceSessionId: options.sessionId,
           rootScope: root.scope,
           memoryRootId: root.id,
           jobId: stage1JobId,
           projectId: root.projectId ?? null,
           target: targetForRoot(root),
-          content: 'Stage 1 output was empty after safety filtering'
+          content: built.content || 'Stage 1 output was empty after safety filtering'
         })
       }
     }
 
+    const activeStage1Inputs = stage1Inputs.filter((input) => input.status !== 'filtered')
     const completed = await completeStage1({
       sessionId: options.sessionId,
       jobId: stage1JobId,
-      status: stage1Inputs.length > 0 ? 'succeeded' : 'succeeded_no_output',
+      status: activeStage1Inputs.length > 0 ? 'succeeded' : 'succeeded_no_output',
       outputs: stage1Inputs
     })
     if (!completed.success) throw new Error(completed.error ?? 'Failed to complete stage 1')
@@ -1175,8 +1192,9 @@ export async function runMemoryAutomationForSession(options: RunSessionOptions):
       })
       return
     }
+    if (activeStage1Inputs.length === 0) return
 
-    const touchedRootIds = new Set(stage1Inputs.map((input) => input.memoryRootId))
+    const touchedRootIds = new Set(activeStage1Inputs.map((input) => input.memoryRootId))
     for (const root of prepared.roots ?? []) {
       if (!touchedRootIds.has(root.id)) continue
       await runPhase2ForRoot({
@@ -1240,7 +1258,7 @@ async function runRollupForDescriptor(args: {
     return
   }
 
-  const input = buildStage1Input({
+  const built = buildStage1Input({
     root: args.root,
     scopeOutput: {
       scope: args.root.scope,
@@ -1250,12 +1268,26 @@ async function runRollupForDescriptor(args: {
     },
     sourceSessionId: `rollup:${args.sourceDate}`
   })
-  if (!input) return
+  if (!built.input || built.input.status === 'filtered') {
+    if (built.reason) {
+      await recordSyntheticEntry({
+        status: 'filtered',
+        reason: built.reason,
+        sourceSessionId: `rollup:${args.sourceDate}`,
+        rootScope: args.root.scope,
+        memoryRootId: args.root.id,
+        projectId: args.root.projectId ?? null,
+        target: targetForRoot(args.root),
+        content: built.content || 'Daily rollup was filtered'
+      })
+    }
+    return
+  }
 
   await completeStage1({
     sessionId: `rollup:${args.sourceDate}`,
     status: 'succeeded',
-    outputs: [input]
+    outputs: [built.input]
   })
   await runPhase2ForRoot({
     root: args.root,
