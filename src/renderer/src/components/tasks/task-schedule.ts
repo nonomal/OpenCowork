@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 import type { CronJobEntry, CronSchedule } from '@renderer/stores/cron-store'
 
 export interface DayWindowEntry {
@@ -10,6 +11,11 @@ export interface DayWindowEntry {
 
 const MINUTE_MS = 60_000
 const PLANNED_TIME_LIMIT = 500
+
+function resolveTaskLocale(language?: string): string {
+  if (!language) return 'en-US'
+  return language.startsWith('zh') ? 'zh-CN' : 'en-US'
+}
 
 export function startOfLocalDay(value: Date | number): Date {
   const date = typeof value === 'number' ? new Date(value) : new Date(value)
@@ -51,30 +57,34 @@ export function buildDayWindow(pastDays = 7, futureDays = 30): DayWindowEntry[] 
   return entries
 }
 
-export function formatDayLabel(date: Date): string {
+export function formatDayLabel(date: Date, t: TFunction, language?: string): string {
+  const locale = resolveTaskLocale(language)
   const todayKey = dateKeyFromTimestamp(Date.now())
   const key = dateKeyFromDate(date)
-  if (key === todayKey) return 'Today'
+  if (key === todayKey) return t('tasksPage.dayToday')
   const tomorrow = new Date(startOfLocalDay(Date.now()))
   tomorrow.setDate(tomorrow.getDate() + 1)
-  if (key === dateKeyFromDate(tomorrow)) return 'Tomorrow'
+  if (key === dateKeyFromDate(tomorrow)) return t('tasksPage.dayTomorrow')
   const yesterday = new Date(startOfLocalDay(Date.now()))
   yesterday.setDate(yesterday.getDate() - 1)
-  if (key === dateKeyFromDate(yesterday)) return 'Yesterday'
-  return date.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', weekday: 'short' })
+  if (key === dateKeyFromDate(yesterday)) return t('tasksPage.dayYesterday')
+  return date.toLocaleDateString(locale, { month: 'numeric', day: 'numeric', weekday: 'short' })
 }
 
-export function formatTimeLabel(timestamp: number | null | undefined): string {
+export function formatTimeLabel(timestamp: number | null | undefined, language?: string): string {
   if (!timestamp) return '—'
-  return new Date(timestamp).toLocaleTimeString('en-US', {
+  return new Date(timestamp).toLocaleTimeString(resolveTaskLocale(language), {
     hour: '2-digit',
     minute: '2-digit'
   })
 }
 
-export function formatDateTimeLabel(timestamp: number | null | undefined): string {
+export function formatDateTimeLabel(
+  timestamp: number | null | undefined,
+  language?: string
+): string {
   if (!timestamp) return '—'
-  return new Date(timestamp).toLocaleString('en-US', {
+  return new Date(timestamp).toLocaleString(resolveTaskLocale(language), {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -82,28 +92,42 @@ export function formatDateTimeLabel(timestamp: number | null | undefined): strin
   })
 }
 
-export function formatIntervalLabel(ms: number | null | undefined): string {
+export function formatIntervalLabel(ms: number | null | undefined, t: TFunction): string {
   if (!ms) return '—'
-  if (ms < 60_000) return `每 ${Math.round(ms / 1000)} 秒`
-  if (ms < 3_600_000) return `每 ${Math.round(ms / 60_000)} 分钟`
-  if (ms < 86_400_000) return `每 ${(ms / 3_600_000).toFixed(ms % 3_600_000 === 0 ? 0 : 1)} 小时`
-  return `每 ${(ms / 86_400_000).toFixed(ms % 86_400_000 === 0 ? 0 : 1)} 天`
+  if (ms < 60_000) {
+    return t('tasksPage.intervalSeconds', {
+      value: Math.round(ms / 1000)
+    })
+  }
+  if (ms < 3_600_000) {
+    return t('tasksPage.intervalMinutes', {
+      value: Math.round(ms / 60_000)
+    })
+  }
+  if (ms < 86_400_000) {
+    return t('tasksPage.intervalHours', {
+      value: (ms / 3_600_000).toFixed(ms % 3_600_000 === 0 ? 0 : 1)
+    })
+  }
+  return t('tasksPage.intervalDays', {
+    value: (ms / 86_400_000).toFixed(ms % 86_400_000 === 0 ? 0 : 1)
+  })
 }
 
-export function scheduleKindLabel(kind: CronSchedule['kind']): string {
+export function scheduleKindLabel(kind: CronSchedule['kind'], t: TFunction): string {
   switch (kind) {
     case 'at':
-      return '一次性'
+      return t('tasksPage.scheduleKindAt')
     case 'every':
-      return '间隔'
+      return t('tasksPage.scheduleKindEvery')
     case 'cron':
-      return 'Cron'
+      return t('tasksPage.scheduleKindCron')
   }
 }
 
-export function scheduleSummary(job: CronJobEntry): string {
-  if (job.schedule.kind === 'at') return formatDateTimeLabel(job.schedule.at)
-  if (job.schedule.kind === 'every') return formatIntervalLabel(job.schedule.every)
+export function scheduleSummary(job: CronJobEntry, t: TFunction, language?: string): string {
+  if (job.schedule.kind === 'at') return formatDateTimeLabel(job.schedule.at, language)
+  if (job.schedule.kind === 'every') return formatIntervalLabel(job.schedule.every, t)
   return job.schedule.expr ?? '—'
 }
 

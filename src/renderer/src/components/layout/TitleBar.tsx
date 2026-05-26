@@ -91,6 +91,7 @@ export function TitleBar({
   const setMode = useUIStore((s) => s.setMode)
   const settingsPageOpen = useUIStore((s) => s.settingsPageOpen)
   const skillsPageOpen = useUIStore((s) => s.skillsPageOpen)
+  const soulsPageOpen = useUIStore((s) => s.soulsPageOpen)
   const resourcesPageOpen = useUIStore((s) => s.resourcesPageOpen)
   const drawPageOpen = useUIStore((s) => s.drawPageOpen)
   const translatePageOpen = useUIStore((s) => s.translatePageOpen)
@@ -152,6 +153,7 @@ export function TitleBar({
   const chatSurfaceActive =
     !settingsPageOpen &&
     !skillsPageOpen &&
+    !soulsPageOpen &&
     !resourcesPageOpen &&
     !drawPageOpen &&
     !translatePageOpen &&
@@ -159,18 +161,18 @@ export function TitleBar({
   const allModeOptions = getTitlebarModeOptions(tCommon)
   const modeProjectScoped =
     chatView === 'session' ? Boolean(sessionContext.sessionProjectId) : Boolean(activeProjectId)
-  const availableModeOptions =
-    chatView !== 'session' && modeProjectScoped
-      ? allModeOptions
-      : modeProjectScoped
-        ? allModeOptions.filter((option) => option.value !== 'chat')
-        : allModeOptions.filter((option) => option.value === 'chat')
+  const availableModeOptions = modeProjectScoped
+    ? allModeOptions.filter((option) => option.value !== 'chat')
+    : allModeOptions.filter((option) => option.value === 'chat')
   const showTitlebarModeSwitch =
     chatSurfaceActive &&
     (chatView === 'home' || chatView === 'project' || chatView === 'session') &&
     availableModeOptions.length > 1
+  const defaultProjectModeOption =
+    allModeOptions.find((option) => option.value === 'cowork') ?? allModeOptions[0]!
   const activeTitlebarMode =
     availableModeOptions.find((option) => option.value === mode) ??
+    (modeProjectScoped ? defaultProjectModeOption : undefined) ??
     availableModeOptions[0] ??
     allModeOptions[0]!
   const showInspectorToggle = chatSurfaceActive && chatView === 'session'

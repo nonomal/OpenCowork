@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.109] - 2026-05-26
+
+### Added
+
+- Added goal runtime service support for blocked and usage-limited goal states so active goals can persist, resume, or pause based on blocker and usage conditions.
+- Added dedicated browser tool cards and browser tool name grouping so browser tool calls render consistently in assistant messages.
+- Added a Xiaomi coding preset and fast-route model selection support for separate main and fast model workflows.
+
+### Changed
+
+- Reworked goal persistence, schema migration, and event emission to support objective replacement, blocked audits, usage limits, and live elapsed-time tracking.
+- Improved browser handling with shared built-in storage cleanup, more resilient webview JSON parsing, and screenshot encoding that preserves the native image format.
+- Refined the chat composer, working-folder picker, sidebar and project navigation, and task calendar so project-scoped sessions and queued messages behave more predictably.
+- Updated OpenAI Responses websocket session scoping in the cron background runtime so agent runs use distinct connection keys.
+
+### Removed
+
+- Removed placeholder code-compatible `LSP` and worktree tool stubs from the code-compatible tool catalog.
+
+## [0.9.108] - 2026-05-25
+
+### Added
+
+- Added Soul marketplace page for discovering and browsing community souls.
+- Finalized marketplace install flow with end-to-end soul installation from marketplace.
+
+### Changed
+
+- Refactored working directory selector dialog with improved UX and streamlined layout.
+- Unified file and tool icon styles across chat cards and session panels for visual consistency.
+
+### Fixed
+
+- Added `Stage1BuildResult` wrapper in memory pipeline to preserve filter reasons and original content, ensuring filtered entries are recorded with accurate metadata instead of fallback values.
+
+### Removed
+
+- Removed WeChat UI send skill and its automation scripts.
+
 ## [0.9.107] - 2026-05-24
 
 ### Added

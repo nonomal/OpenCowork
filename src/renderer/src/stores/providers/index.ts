@@ -17,7 +17,7 @@ import { siliconflowPreset } from './siliconflow'
 import { giteeAiPreset } from './gitee-ai'
 import { codexOAuthPreset } from './codex-oauth'
 import { copilotOAuthPreset } from './copilot-oauth'
-import { xiaomiPreset } from './xiaomi'
+import { xiaomiCodingPreset, xiaomiPreset } from './xiaomi'
 import { bigmodelCodingPreset, bigmodelPreset } from './bigmodel'
 import type { BuiltinProviderPreset } from './types'
 
@@ -44,6 +44,7 @@ export const builtinProviderPresets: BuiltinProviderPreset[] = [
   giteeAiPreset,
   codexOAuthPreset,
   copilotOAuthPreset,
+  xiaomiCodingPreset,
   xiaomiPreset,
   bigmodelCodingPreset,
   bigmodelPreset

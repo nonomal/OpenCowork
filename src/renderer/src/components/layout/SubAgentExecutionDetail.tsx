@@ -254,6 +254,7 @@ function SubAgentConversationInput({
       suppressPendingQueue
       hideGoalSessionBar
       hideModeSwitch
+      modelRoute="fast"
     />
   )
 }

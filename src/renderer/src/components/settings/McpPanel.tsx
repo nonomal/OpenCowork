@@ -691,12 +691,12 @@ function AddServerDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>{t('mcp.addServerTitle')}</DialogTitle>
           <DialogDescription>{t('mcp.addServerDesc')}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 mt-2">
+        <div className="mt-2 min-w-0 space-y-4">
           <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted p-1">
             <button
               onClick={() => setMode('manual')}
@@ -763,8 +763,9 @@ function AddServerDialog({
                 <Textarea
                   value={jsonText}
                   onChange={(e) => setJsonText(e.target.value)}
-                  className="min-h-[180px] text-xs font-mono"
+                  className="min-h-[180px] max-w-full overflow-x-auto overflow-y-auto text-xs font-mono whitespace-pre [field-sizing:fixed]"
                   placeholder={t('mcp.importJsonPlaceholder')}
+                  wrap="off"
                 />
                 <p className="text-[10px] text-muted-foreground">{t('mcp.importJsonHint')}</p>
               </div>

@@ -1,9 +1,7 @@
-import { ipcMain, session } from 'electron'
-import { BUILTIN_BROWSER_PARTITION } from '../../shared/browser-plugin'
+import { ipcMain } from 'electron'
 import {
   getBrowserEmulationStatus,
-  getBuiltInBrowserSession,
-  shouldUseDefaultBrowserSession
+  getBuiltInBrowserStorageSessions
 } from '../browser/browser-emulation'
 
 function getErrorMessage(error: unknown): string {
@@ -13,10 +11,11 @@ function getErrorMessage(error: unknown): string {
 export function registerBrowserHandlers(): void {
   ipcMain.handle('browser:clear-cookies', async () => {
     try {
-      const browserSession = shouldUseDefaultBrowserSession()
-        ? getBuiltInBrowserSession()
-        : session.fromPartition(BUILTIN_BROWSER_PARTITION)
-      await browserSession.clearStorageData({ storages: ['cookies'] })
+      await Promise.all(
+        getBuiltInBrowserStorageSessions().map((browserSession) =>
+          browserSession.clearStorageData({ storages: ['cookies'] })
+        )
+      )
       return { success: true }
     } catch (error) {
       console.error('[Browser] Failed to clear cookies:', error)

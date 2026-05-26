@@ -91,6 +91,7 @@ const modeIcons: Record<SessionMode, React.ReactNode> = {
   code: <Code2 className="size-4" />,
   acp: <ShieldCheck className="size-4" />
 }
+const sessionModeOptions: readonly SessionMode[] = ['chat', 'clarify', 'cowork', 'code', 'acp']
 
 interface SessionListItem {
   id: string
@@ -198,7 +199,6 @@ export function SessionListPanel(): React.JSX.Element {
     [activeSessionId, sessions]
   )
   const deleteSession = useChatStore((s) => s.deleteSession)
-  const setActiveSession = useChatStore((s) => s.setActiveSession)
   const setActiveProject = useChatStore((s) => s.setActiveProject)
   const createProject = useChatStore((s) => s.createProject)
   const renameProject = useChatStore((s) => s.renameProject)
@@ -518,8 +518,8 @@ export function SessionListPanel(): React.JSX.Element {
   ])
 
   const handleNewSession = (): void => {
-    setActiveSession(null)
     const uiStore = useUIStore.getState()
+    setActiveProject(null)
     uiStore.setMode('chat')
     uiStore.navigateToHome()
   }
@@ -1238,19 +1238,21 @@ export function SessionListPanel(): React.JSX.Element {
             {t('sidebar.switchMode')}
           </ContextMenuSubTrigger>
           <ContextMenuSubContent>
-            {(['chat', 'clarify', 'cowork', 'code', 'acp'] as const).map((m) => (
-              <ContextMenuItem
-                key={m}
-                disabled={session.mode === m}
-                onClick={() => {
-                  updateSessionMode(session.id, m)
-                  toast.success(t('sidebar_toast.switchedMode', { mode: m }))
-                }}
-              >
-                {modeIcons[m]}
-                <span className="capitalize">{t(`sidebar.mode.${m}`)}</span>
-              </ContextMenuItem>
-            ))}
+            {sessionModeOptions
+              .filter((mode) => !session.projectId || mode !== 'chat')
+              .map((m) => (
+                <ContextMenuItem
+                  key={m}
+                  disabled={session.mode === m}
+                  onClick={() => {
+                    updateSessionMode(session.id, m)
+                    toast.success(t('sidebar_toast.switchedMode', { mode: m }))
+                  }}
+                >
+                  {modeIcons[m]}
+                  <span className="capitalize">{t(`sidebar.mode.${m}`)}</span>
+                </ContextMenuItem>
+              ))}
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSeparator />
@@ -1781,6 +1783,8 @@ export function SessionListPanel(): React.JSX.Element {
         }}
         workingFolder={folderPickerProject?.workingFolder ?? undefined}
         sshConnectionId={folderPickerProject?.sshConnectionId ?? null}
+        projectName={folderPickerTarget?.type === 'create' ? t('sidebar.newProject') : undefined}
+        createMode={folderPickerTarget?.type === 'create'}
         onSelectLocalFolder={async (folderPath) => {
           if (folderPickerTarget?.type === 'create') {
             await handleCreateProjectWithDirectory(folderPath, null)

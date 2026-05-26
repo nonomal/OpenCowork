@@ -19,6 +19,7 @@ import { useTeamStore, type ActiveTeam } from '@renderer/stores/team-store'
 import { useAgentStore, type SubAgentState } from '@renderer/stores/agent-store'
 import { TeamPanel } from '@renderer/components/cowork/TeamPanel'
 import { ToolCallCard } from '@renderer/components/chat/ToolCallCard'
+import { BrowserToolCard } from '@renderer/components/chat/BrowserToolCard'
 import { TranscriptMessageList } from '@renderer/components/chat/TranscriptMessageList'
 import { Separator } from '@renderer/components/ui/separator'
 import { Badge } from '@renderer/components/ui/badge'
@@ -44,6 +45,7 @@ import {
   selectSessionScopedAgentState,
   type SessionScopedAgentSelection
 } from '@renderer/lib/agent/session-scoped-agent-state'
+import { isBrowserToolName } from '@renderer/lib/app-plugin/browser-tool-names'
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -453,19 +455,30 @@ export function SubAgentExecutionDetailContent({
                 <CollapsibleContent>
                   <div className="mt-4 space-y-2">
                     {agent.toolCalls.length > 0 ? (
-                      agent.toolCalls.map((tc) => (
-                        <ToolCallCard
-                          key={tc.id}
-                          toolUseId={tc.id}
-                          name={tc.name}
-                          input={tc.input}
-                          output={tc.output}
-                          status={tc.status}
-                          error={tc.error}
-                          startedAt={tc.startedAt}
-                          completedAt={tc.completedAt}
-                        />
-                      ))
+                      agent.toolCalls.map((tc) =>
+                        isBrowserToolName(tc.name) ? (
+                          <BrowserToolCard
+                            key={tc.id}
+                            name={tc.name}
+                            input={tc.input}
+                            output={tc.output}
+                            status={tc.status}
+                            error={tc.error}
+                          />
+                        ) : (
+                          <ToolCallCard
+                            key={tc.id}
+                            toolUseId={tc.id}
+                            name={tc.name}
+                            input={tc.input}
+                            output={tc.output}
+                            status={tc.status}
+                            error={tc.error}
+                            startedAt={tc.startedAt}
+                            completedAt={tc.completedAt}
+                          />
+                        )
+                      )
                     ) : (
                       <div className="text-sm text-muted-foreground/70">
                         {t('detailPanel.toolCalls', { count: 0 })}

@@ -11,7 +11,6 @@ import {
   Search,
   FolderTree,
   SquareTerminal,
-  Pencil,
   Trash2,
   ListTodo,
   CalendarClock,
@@ -2666,13 +2665,10 @@ const COMPACT_BUILTIN_TOOL_NAMES = new Set([
   'Delete',
   'Edit',
   'EnterPlanMode',
-  'EnterWorktree',
   'ExitPlanMode',
-  'ExitWorktree',
   'Glob',
   'Grep',
   'LS',
-  'LSP',
   'ListMcpResourcesTool',
   'MemoryList',
   'MemoryRead',
@@ -2817,7 +2813,7 @@ function genericCompactToolHeaderModel({
 
 function getBuiltinToolIcon(name: string): React.ReactNode {
   if (['Write', 'SavePlan'].includes(name)) return <FileCode className="size-3.5" />
-  if (['Edit', 'MultiEdit', 'NotebookEdit'].includes(name)) return <Pencil className="size-3.5" />
+  if (['Edit', 'MultiEdit', 'NotebookEdit'].includes(name)) return <FileCode className="size-3.5" />
   if (name === 'Delete') return <Trash2 className="size-3.5" />
   if (name.startsWith('Task') || name === 'TodoWrite') return <ListTodo className="size-3.5" />
   if (name.startsWith('Cron')) return <CalendarClock className="size-3.5" />
@@ -2833,11 +2829,11 @@ function getBuiltinToolIcon(name: string): React.ReactNode {
     return <Globe2 className="size-3.5" />
   }
   if (name.includes('McpResource')) return <Database className="size-3.5" />
-  if (name === 'ToolSearch' || name === 'LSP') return <Wrench className="size-3.5" />
+  if (name === 'ToolSearch') return <Wrench className="size-3.5" />
   if (name === 'Agent') return <Brain className="size-3.5" />
   if (name === 'Monitor') return <SquareTerminal className="size-3.5" />
-  if (name === 'EnterWorktree' || name === 'EnterPlanMode') return <LogIn className="size-3.5" />
-  if (name === 'ExitWorktree' || name === 'ExitPlanMode') return <LogOut className="size-3.5" />
+  if (name === 'EnterPlanMode') return <LogIn className="size-3.5" />
+  if (name === 'ExitPlanMode') return <LogOut className="size-3.5" />
   if (name.endsWith('goal')) return <Target className="size-3.5" />
   if (name.startsWith('Memory')) return <Database className="size-3.5" />
   if (name.startsWith('Wiki')) return <BookOpen className="size-3.5" />
@@ -3068,10 +3064,7 @@ function buildCompactToolHeaderModel({
       'ListMcpResourcesTool',
       'ReadMcpResourceTool',
       'ToolSearch',
-      'LSP',
       'Monitor',
-      'EnterWorktree',
-      'ExitWorktree',
       'EnterPlanMode',
       'ExitPlanMode',
       'get_goal',

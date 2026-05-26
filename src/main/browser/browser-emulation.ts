@@ -259,6 +259,23 @@ export function getBuiltInBrowserSession(): Session {
     : session.fromPartition(BUILTIN_BROWSER_PARTITION)
 }
 
+export function getBuiltInBrowserStorageSessions(): Session[] {
+  const sessions = new Set<Session>()
+  sessions.add(getBuiltInBrowserSession())
+  sessions.add(session.fromPartition(BUILTIN_BROWSER_PARTITION))
+  return [...sessions]
+}
+
+export function flushBuiltInBrowserStorage(): void {
+  for (const browserSession of getBuiltInBrowserStorageSessions()) {
+    try {
+      browserSession.flushStorageData()
+    } catch (error) {
+      console.warn('[Browser] Failed to flush browser session storage:', error)
+    }
+  }
+}
+
 function getPlatformUserAgentToken(): string {
   if (platform() === 'darwin') return 'Macintosh; Intel Mac OS X 10_15_7'
   if (platform() === 'win32') return 'Windows NT 10.0; Win64; x64'

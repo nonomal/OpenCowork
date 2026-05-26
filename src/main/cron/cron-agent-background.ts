@@ -31,7 +31,9 @@ import { getSshClientForGitExec } from '../ipc/ssh-handlers'
 import { safeSendToAllWindows } from '../window-ipc'
 import { getDb } from '../db/database'
 import {
+  buildResponsesWebsocketSessionKey,
   resolveResponsesWebsocketConfig,
+  RESPONSES_WEBSOCKET_AGENT_MAIN_SCOPE,
   type ResponsesWebsocketMode
 } from '../../shared/openai-responses-websocket'
 import { normalizeMessagesForAnthropicToolReplay } from '../../shared/anthropic-tool-replay'
@@ -350,6 +352,7 @@ interface ProviderConfig {
   instructionsPrompt?: string
   serviceTier?: string
   sessionId?: string
+  responsesSessionScope?: string
   computerUseEnabled?: boolean
   responsesImageGeneration?: {
     enabled?: boolean
@@ -3777,11 +3780,16 @@ async function* sendOpenAIResponses(
     }
   }
 
+  // Agent runtime requests should default to the WebSocket-enabled scope unless
+  // an auxiliary flow explicitly opts into another scope or disables WS.
+  const responsesSessionScope =
+    config.responsesSessionScope?.trim() || RESPONSES_WEBSOCKET_AGENT_MAIN_SCOPE
   const websocketConfig = resolveResponsesWebsocketConfig({
     providerType: config.type,
     websocketMode: config.websocketMode,
     websocketUrl: config.websocketUrl,
-    baseUrl: url
+    baseUrl: url,
+    sessionScope: responsesSessionScope
   })
   const circuitReason = websocketConfig.websocketUrl
     ? responsesWsManager.getCircuitReason(
@@ -3801,10 +3809,13 @@ async function* sendOpenAIResponses(
   }
 
   const websocketUrl = websocketConfig.websocketUrl
-  const connectionKey =
-    !config.sessionId || !config.model
-      ? null
-      : `${config.providerId ?? config.providerBuiltinId ?? 'unknown'}::${config.model}::${config.sessionId}::${websocketUrl}`
+  const connectionKey = buildResponsesWebsocketSessionKey({
+    providerKey: config.providerId ?? config.providerBuiltinId ?? 'unknown',
+    model: config.model,
+    sessionId: config.sessionId,
+    websocketUrl,
+    sessionScope: responsesSessionScope
+  })
   const queue: StreamEvent[] = []
   let resolveQueue: (() => void) | null = null
   let managerDone = false
