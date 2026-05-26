@@ -78,6 +78,7 @@ const modeIcons: Record<SessionMode, React.ReactNode> = {
   code: <Code2 className="size-4" />,
   acp: <ShieldCheck className="size-4" />
 }
+const sessionModeOptions: readonly SessionMode[] = ['chat', 'clarify', 'cowork', 'code', 'acp']
 
 interface SessionListItem {
   id: string
@@ -89,6 +90,7 @@ interface SessionListItem {
   pinned?: boolean
   messageCount: number
   pluginId?: string
+  projectId?: string
 }
 
 // Shallow-equality check across the sidebar-visible fields. Invoked by Zustand on every
@@ -112,7 +114,8 @@ function areSessionListsEqualForSidebar(a: Session[], b: Session[]): boolean {
       !!x.pinned !== !!y.pinned ||
       x.messageCount !== y.messageCount ||
       !!x.messagesLoaded !== !!y.messagesLoaded ||
-      x.pluginId !== y.pluginId
+      x.pluginId !== y.pluginId ||
+      x.projectId !== y.projectId
     ) {
       return false
     }
@@ -142,7 +145,8 @@ export function AppSidebar(): React.JSX.Element {
         updatedAt: session.updatedAt,
         pinned: session.pinned,
         messageCount: session.messageCount,
-        pluginId: session.pluginId
+        pluginId: session.pluginId,
+        projectId: session.projectId
       })),
     [sessionsRaw]
   )
@@ -152,6 +156,7 @@ export function AppSidebar(): React.JSX.Element {
   )
   const deleteSession = useChatStore((s) => s.deleteSession)
   const setActiveSession = useChatStore((s) => s.setActiveSession)
+  const setActiveProject = useChatStore((s) => s.setActiveProject)
   const clearSessionMessages = useChatStore((s) => s.clearSessionMessages)
   const duplicateSession = useChatStore((s) => s.duplicateSession)
   const updateSessionMode = useChatStore((s) => s.updateSessionMode)
@@ -271,7 +276,7 @@ export function AppSidebar(): React.JSX.Element {
 
   const handleNewSession = (): void => {
     const uiStore = useUIStore.getState()
-    setActiveSession(null)
+    setActiveProject(null)
     uiStore.setMode('chat')
     uiStore.navigateToHome()
   }
@@ -732,8 +737,9 @@ export function AppSidebar(): React.JSX.Element {
                                 {t('sidebar.switchMode')}
                               </ContextMenuSubTrigger>
                               <ContextMenuSubContent>
-                                {(['chat', 'clarify', 'cowork', 'code', 'acp'] as const).map(
-                                  (m) => (
+                                {sessionModeOptions
+                                  .filter((mode) => !session.projectId || mode !== 'chat')
+                                  .map((m) => (
                                     <ContextMenuItem
                                       key={m}
                                       disabled={session.mode === m}
@@ -745,8 +751,7 @@ export function AppSidebar(): React.JSX.Element {
                                       {modeIcons[m]}
                                       <span className="capitalize">{t(`sidebar.mode.${m}`)}</span>
                                     </ContextMenuItem>
-                                  )
-                                )}
+                                  ))}
                               </ContextMenuSubContent>
                             </ContextMenuSub>
                             <ContextMenuSeparator />

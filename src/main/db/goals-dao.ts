@@ -1,7 +1,13 @@
 import { nanoid } from 'nanoid'
 import { getDb } from './database'
 
-export type SessionGoalStatus = 'active' | 'paused' | 'budget_limited' | 'complete'
+export type SessionGoalStatus =
+  | 'active'
+  | 'paused'
+  | 'blocked'
+  | 'usage_limited'
+  | 'budget_limited'
+  | 'complete'
 export type SessionGoalEventType =
   | 'created'
   | 'replaced'
@@ -9,8 +15,10 @@ export type SessionGoalEventType =
   | 'budget_updated'
   | 'status_changed'
   | 'usage_accounted'
+  | 'usage_limited'
   | 'budget_limited'
   | 'completion_deferred'
+  | 'blocked'
   | 'completed'
   | 'stall_paused'
   | 'auto_continue_blocked'
@@ -237,6 +245,94 @@ export function updateGoal(sessionId: string, patch: SessionGoalUpdate): Session
   const existing = getGoal(sessionId)
   if (!existing) return null
 
+  const objectiveChanged =
+    patch.objective !== undefined && patch.objective.trim() !== existing.objective.trim()
+
+  if (objectiveChanged) {
+    const db = getDb()
+    const now = Date.now()
+    const replacementStatus = normalizeStatusAfterBudget(
+      patch.status ??
+        (existing.status === 'paused'
+          ? 'paused'
+          : existing.status === 'complete'
+            ? 'active'
+            : existing.status === 'budget_limited'
+              ? 'active'
+              : existing.status === 'usage_limited'
+                ? 'active'
+                : existing.status === 'blocked'
+                  ? 'active'
+                  : existing.status),
+      0,
+      patch.tokenBudget !== undefined ? patch.tokenBudget : existing.token_budget
+    )
+    const replacementBudget =
+      patch.tokenBudget !== undefined ? patch.tokenBudget : existing.token_budget
+    const row = db
+      .prepare(
+        `UPDATE session_goals
+         SET goal_id = ?,
+             objective = ?,
+             status = ?,
+             token_budget = ?,
+             tokens_used = 0,
+             time_used_seconds = 0,
+             created_at = ?,
+             updated_at = ?
+         WHERE session_id = ?
+         RETURNING *`
+      )
+      .get(
+        nanoid(),
+        patch.objective ?? existing.objective,
+        replacementStatus,
+        replacementBudget,
+        now,
+        now,
+        sessionId
+      ) as SessionGoalRow | null
+
+    if (row) {
+      addGoalEvent({
+        sessionId,
+        goalId: row.goal_id,
+        eventType: 'objective_updated',
+        metadata: {
+          previousGoalId: existing.goal_id,
+          previousObjective: existing.objective,
+          status: row.status,
+          tokenBudget: row.token_budget
+        }
+      })
+      if (row.status !== existing.status) {
+        addGoalEvent({
+          sessionId,
+          goalId: row.goal_id,
+          eventType:
+            row.status === 'budget_limited'
+              ? 'budget_limited'
+              : row.status === 'usage_limited'
+                ? 'usage_limited'
+                : row.status === 'blocked'
+                  ? 'blocked'
+                  : 'status_changed',
+          metadata: { from: existing.status, to: row.status }
+        })
+      }
+      if (row.token_budget !== existing.token_budget) {
+        addGoalEvent({
+          sessionId,
+          goalId: row.goal_id,
+          eventType: 'budget_updated',
+          metadata: { tokenBudget: row.token_budget, tokensUsed: row.tokens_used }
+        })
+      }
+    }
+
+    return row
+  }
+
   const objective = patch.objective ?? existing.objective
   const tokenBudget = patch.tokenBudget !== undefined ? patch.tokenBudget : existing.token_budget
   const status = normalizeStatusAfterBudget(
@@ -278,7 +374,14 @@ export function updateGoal(sessionId: string, patch: SessionGoalUpdate): Session
       addGoalEvent({
         sessionId,
         goalId: row.goal_id,
-        eventType: row.status === 'budget_limited' ? 'budget_limited' : 'status_changed',
+        eventType:
+          row.status === 'budget_limited'
+            ? 'budget_limited'
+            : row.status === 'usage_limited'
+              ? 'usage_limited'
+              : row.status === 'blocked'
+                ? 'blocked'
+                : 'status_changed',
         metadata: { from: existing.status, to: row.status }
       })
     }
@@ -325,9 +428,16 @@ export function accountGoalUsage(args: AccountGoalUsageArgs): SessionGoalRow | n
              ELSE status
            END,
            updated_at = ?
-       WHERE session_id = ?
+      WHERE session_id = ?
          AND (? IS NULL OR goal_id = ?)
-         AND status IN ('active', 'paused', 'budget_limited', 'complete')
+         AND status IN (
+           'active',
+           'paused',
+           'blocked',
+           'usage_limited',
+           'budget_limited',
+           'complete'
+         )
        RETURNING *`
     )
     .get(
@@ -357,6 +467,14 @@ export function accountGoalUsage(args: AccountGoalUsageArgs): SessionGoalRow | n
         sessionId: args.sessionId,
         goalId: row.goal_id,
         eventType: 'budget_limited',
+        metadata: { tokenBudget: row.token_budget, tokensUsed: row.tokens_used }
+      })
+    }
+    if (existing?.status !== 'usage_limited' && row.status === 'usage_limited') {
+      addGoalEvent({
+        sessionId: args.sessionId,
+        goalId: row.goal_id,
+        eventType: 'usage_limited',
         metadata: { tokenBudget: row.token_budget, tokensUsed: row.tokens_used }
       })
     }

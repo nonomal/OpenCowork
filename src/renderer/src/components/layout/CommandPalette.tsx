@@ -83,7 +83,6 @@ export function CommandPalette(): React.JSX.Element {
 
   const sessions = useChatStore((s) => s.sessions)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
-  const setActiveSession = useChatStore((s) => s.setActiveSession)
   const deleteSession = useChatStore((s) => s.deleteSession)
   const togglePinSession = useChatStore((s) => s.togglePinSession)
   const updateSessionMode = useChatStore((s) => s.updateSessionMode)
@@ -162,7 +161,7 @@ export function CommandPalette(): React.JSX.Element {
             onSelect={() =>
               runAndClose(() => {
                 const uiStore = useUIStore.getState()
-                setActiveSession(null)
+                useChatStore.getState().setActiveProject(null)
                 uiStore.setMode('chat')
                 uiStore.navigateToHome()
               })

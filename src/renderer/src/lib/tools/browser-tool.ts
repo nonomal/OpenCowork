@@ -102,6 +102,25 @@ function getCurrentBrowserAccessError(ctx?: ToolContext): ToolResultContent | nu
   return url ? getBrowserAccessError(url) : null
 }
 
+function extractBase64ImageData(dataUrl: string): { data: string; mediaType: string } | null {
+  const commaIndex = dataUrl.indexOf(',')
+  if (!dataUrl.startsWith('data:') || commaIndex === -1) return null
+
+  const metadata = dataUrl.slice(5, commaIndex)
+  if (!metadata.includes(';base64')) return null
+
+  return {
+    data: dataUrl.slice(commaIndex + 1),
+    mediaType: metadata.split(';')[0] || 'image/png'
+  }
+}
+
+function parseWebviewJson<T>(raw: unknown): T {
+  if (typeof raw === 'string') return JSON.parse(raw) as T
+  if (raw && typeof raw === 'object') return raw as T
+  throw new Error(`Unexpected browser script result: ${String(raw)}`)
+}
+
 // ---------------------------------------------------------------------------
 // 1. BrowserNavigate
 // ---------------------------------------------------------------------------
@@ -332,9 +351,9 @@ const browserGetContentHandler: ToolHandler = {
         })(${sel ? JSON.stringify(sel) : 'null'})`
           )
         )
-        const parsed = JSON.parse(raw as string)
+        const parsed = parseWebviewJson<{ error?: string; title?: string; content?: string }>(raw)
         if (parsed.error) return encodeToolError(parsed.error)
-        const content = (parsed.content as string).slice(0, 80000)
+        const content = (parsed.content ?? '').slice(0, 80000)
         return encodeStructuredToolResult({
           url: useUIStore.getState().getBrowserState(ctx.sessionId).url,
           title: parsed.title,
@@ -346,9 +365,9 @@ const browserGetContentHandler: ToolHandler = {
       const raw = await runWebviewCommand(wv, 'read page Markdown', (webview) =>
         webview.executeJavaScript(`${HTML_TO_MD_SCRIPT}(${sel ? JSON.stringify(sel) : 'null'})`)
       )
-      const parsed = JSON.parse(raw as string)
+      const parsed = parseWebviewJson<{ error?: string; title?: string; content?: string }>(raw)
       if (parsed.error) return encodeToolError(parsed.error)
-      const content = (parsed.content as string).slice(0, 80000)
+      const content = (parsed.content ?? '').slice(0, 80000)
       return encodeStructuredToolResult({
         url: useUIStore.getState().getBrowserState(ctx.sessionId).url,
         title: parsed.title,
@@ -389,18 +408,21 @@ const browserScreenshotHandler: ToolHandler = {
       if (nativeImage.isEmpty()) {
         return encodeToolError('Failed to capture screenshot — page may still be loading.')
       }
-      const base64 = nativeImage.toPNG().toString('base64')
+      const encodedImage = extractBase64ImageData(nativeImage.toDataURL())
+      if (!encodedImage?.data) {
+        return encodeToolError('Failed to encode screenshot image.')
+      }
       const size = nativeImage.getSize()
       const persisted = (await ctx.ipc.invoke(IPC.IMAGE_PERSIST_GENERATED, {
-        data: base64,
-        mediaType: 'image/png'
+        data: encodedImage.data,
+        mediaType: encodedImage.mediaType
       })) as { filePath?: string; mediaType?: string; data?: string; error?: string }
       const image: ImageBlock = {
         type: 'image',
         source: {
           type: 'base64',
-          mediaType: persisted?.mediaType || 'image/png',
-          data: persisted?.data || base64,
+          mediaType: persisted?.mediaType || encodedImage.mediaType,
+          data: persisted?.data || encodedImage.data,
           ...(persisted?.filePath ? { filePath: persisted.filePath } : {})
         }
       }
@@ -501,14 +523,19 @@ const browserSnapshotHandler: ToolHandler = {
       const raw = await runWebviewCommand(wv, 'read interactive elements', (webview) =>
         webview.executeJavaScript(SNAPSHOT_SCRIPT)
       )
-      const parsed = JSON.parse(raw as string)
-      const lines = (parsed.elements as Array<{ selector: string; description: string }>)
+      const parsed = parseWebviewJson<{
+        title?: string
+        count?: number
+        elements?: Array<{ selector: string; description: string }>
+      }>(raw)
+      const elements = parsed.elements ?? []
+      const lines = elements
         .map((e, i) => `[${i}] ${e.description}\n    selector: ${e.selector}`)
         .join('\n')
       return encodeStructuredToolResult({
         url: useUIStore.getState().getBrowserState(ctx.sessionId).url,
         title: parsed.title,
-        elementCount: parsed.count,
+        elementCount: parsed.count ?? elements.length,
         elements: lines
       })
     })
@@ -579,7 +606,7 @@ const browserClickHandler: ToolHandler = {
       const raw = await runWebviewCommand(wv, 'click page element', (webview) =>
         webview.executeJavaScript(`${CLICK_SCRIPT}(${JSON.stringify(selector)})`)
       )
-      const parsed = JSON.parse(raw as string)
+      const parsed = parseWebviewJson<{ error?: string; tag?: string; text?: string }>(raw)
       if (parsed.error) return encodeToolError(parsed.error)
       await new Promise((r) => setTimeout(r, 300))
       return encodeStructuredToolResult({
@@ -676,7 +703,7 @@ const browserTypeHandler: ToolHandler = {
           `${TYPE_SCRIPT}(${JSON.stringify(selector)}, ${JSON.stringify(text)}, ${clear}, ${submit})`
         )
       )
-      const parsed = JSON.parse(raw as string)
+      const parsed = parseWebviewJson<{ error?: string; tag?: string; value?: string }>(raw)
       if (parsed.error) return encodeToolError(parsed.error)
       return encodeStructuredToolResult({
         success: true,
@@ -735,7 +762,11 @@ const browserScrollHandler: ToolHandler = {
       })()
     `)
       )
-      const parsed = JSON.parse(raw as string)
+      const parsed = parseWebviewJson<{
+        scrollY?: number
+        scrollHeight?: number
+        viewportHeight?: number
+      }>(raw)
       return encodeStructuredToolResult({
         success: true,
         scrollY: parsed.scrollY,

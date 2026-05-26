@@ -1,5 +1,6 @@
 import { toolRegistry } from '../agent/tool-registry'
 import { useGoalStore, type SessionGoal } from '../../stores/goal-store'
+import { ipcClient } from '../ipc/ipc-client'
 import { encodeStructuredToolResult, encodeToolError } from './tool-result-format'
 import type { ToolHandler } from './tool-types'
 
@@ -32,6 +33,19 @@ function completionBudgetReport(goal: SessionGoal): string | null {
   }
   if (parts.length === 0) return null
   return `Goal achieved. Report final budget usage to the user: ${parts.join('; ')}.`
+}
+
+async function canMarkGoalBlocked(sessionId: string, goalId?: string | null): Promise<boolean> {
+  try {
+    const result = (await ipcClient.invoke('goal-runtime:can-mark-blocked', {
+      sessionId,
+      goalId
+    })) as { canMarkBlocked?: boolean } | null
+    return result?.canMarkBlocked === true
+  } catch (error) {
+    console.warn('[GoalTool] Failed to query blocked eligibility:', error)
+    return false
+  }
 }
 
 const getGoalHandler: ToolHandler = {
@@ -103,15 +117,15 @@ const updateGoalHandler: ToolHandler = {
   definition: {
     name: 'update_goal',
     description:
-      'Update the existing goal. Use this tool only to mark the goal achieved. Set status to complete only when the objective has actually been achieved and no required work remains. Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work. You cannot use this tool to pause, resume, or budget-limit a goal; those status changes are controlled by the user or system. The runtime may defer completion if the run still has unfinished tasks, failed or unfinished tool calls, queued user messages, or an active Plan Mode gate. When marking a budgeted goal achieved with status complete, report the final token usage from the tool result to the user.',
+      'Update the existing goal. Use this tool only to mark the goal achieved or genuinely blocked. Set status to complete only when the objective is achieved and no required work remains. Set status to blocked only after the same blocking condition has recurred for at least three consecutive goal turns and the agent cannot make meaningful progress without user input or an external-state change. Do not use blocked merely because the work is hard, slow, uncertain, incomplete, or would benefit from clarification. You cannot use this tool to pause, resume, or limit a goal; those status changes are controlled by the user or system. The runtime may defer completion if the run still has unfinished tasks, failed or unfinished tool calls, queued user messages, or an active Plan Mode gate. When marking a budgeted goal achieved with status complete, report the final token usage from the tool result to the user.',
     inputSchema: {
       type: 'object',
       properties: {
         status: {
           type: 'string',
-          enum: ['complete'],
+          enum: ['complete', 'blocked'],
           description:
-            'Required. Set to complete only when the objective is achieved and no required work remains.'
+            'Required. Set to complete only when the objective is achieved and no required work remains. Set to blocked only after the same blocking condition has recurred for at least three consecutive goal turns.'
         }
       },
       required: ['status']
@@ -120,13 +134,28 @@ const updateGoalHandler: ToolHandler = {
   execute: async (input, ctx) => {
     const sessionId = getSessionId(ctx.sessionId)
     if (!sessionId) return encodeToolError('No active session for update_goal.')
-    if (input.status !== 'complete') {
+    if (input.status !== 'complete' && input.status !== 'blocked') {
       return encodeToolError(
-        'update_goal can only mark the existing goal complete; pause, resume, and budget-limited status changes are controlled by the user or system.'
+        'update_goal can only mark the existing goal complete or blocked; pause, resume, and limit status changes are controlled by the user or system.'
       )
     }
 
-    const result = await useGoalStore.getState().updateGoal(sessionId, { status: 'complete' })
+    const currentGoal =
+      useGoalStore.getState().getGoalBySession(sessionId) ??
+      (await useGoalStore.getState().loadGoalForSession(sessionId, true))
+    if (!currentGoal) {
+      return encodeToolError('No active goal exists for update_goal.')
+    }
+
+    if (input.status === 'blocked' && !(await canMarkGoalBlocked(sessionId, currentGoal.goalId))) {
+      return encodeToolError(
+        'update_goal can only mark the goal blocked after the same blocker has recurred for at least three consecutive goal turns.'
+      )
+    }
+
+    const result = await useGoalStore.getState().updateGoal(sessionId, {
+      status: input.status as 'complete' | 'blocked'
+    })
     if (!result.success || !result.goal) {
       return encodeToolError(result.error ?? 'Unable to update goal.')
     }

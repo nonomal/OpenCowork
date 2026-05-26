@@ -318,14 +318,33 @@ function getSourceSessionMeta(
   }
 }
 
+function getLogTypeLabel(type: RunDetailResponse['logs'][number]['type'], t: TFunction): string {
+  switch (type) {
+    case 'start':
+      return t('tasksPage.logTypeStart')
+    case 'text':
+      return t('tasksPage.logTypeText')
+    case 'tool_call':
+      return t('tasksPage.logTypeToolCall')
+    case 'tool_result':
+      return t('tasksPage.logTypeToolResult')
+    case 'error':
+      return t('tasksPage.logTypeError')
+    case 'end':
+      return t('tasksPage.logTypeEnd')
+  }
+}
+
 export function TasksPage(): React.JSX.Element {
-  const { t } = useTranslation('layout')
+  const { t, i18n } = useTranslation('layout')
   const jobs = useCronStore((state) => state.jobs)
   const runs = useCronStore((state) => state.runs)
   const loadJobs = useCronStore((state) => state.loadJobs)
   const loadRuns = useCronStore((state) => state.loadRuns)
   const sessionSummaries = useChatStore(selectTaskPageSessionSummaries)
   const projects = useChatStore((state) => state.projects)
+  const language = i18n.resolvedLanguage ?? i18n.language
+  const locale = React.useMemo(() => (language?.startsWith('zh') ? 'zh-CN' : 'en-US'), [language])
 
   const [selectedDateKey, setSelectedDateKey] = React.useState(() => dateKeyFromDate(new Date()))
   const [calendarCursor, setCalendarCursor] = React.useState(() => {
@@ -657,7 +676,11 @@ export function TasksPage(): React.JSX.Element {
 
   const handleSubmit = React.useCallback(async () => {
     if (!editorForm.name.trim() || !editorForm.prompt.trim()) {
-      toast.error('Task name and Prompt cannot be empty')
+      toast.error(
+        t('tasksPage.validationRequiredNamePrompt', {
+          defaultValue: 'Task name and prompt cannot be empty'
+        })
+      )
       return
     }
 
@@ -701,14 +724,18 @@ export function TasksPage(): React.JSX.Element {
 
       setEditorOpen(false)
       await refreshAll()
-      toast.success(editorMode === 'create' ? 'Task created' : 'Task updated')
+      toast.success(
+        t(editorMode === 'create' ? 'tasksPage.toastTaskCreated' : 'tasksPage.toastTaskUpdated', {
+          defaultValue: editorMode === 'create' ? 'Task created' : 'Task updated'
+        })
+      )
     } catch (error) {
       console.error('[TasksPage] Failed to save cron job:', error)
-      toast.error('Failed to save task')
+      toast.error(t('tasksPage.toastSaveFailed', { defaultValue: 'Failed to save task' }))
     } finally {
       setSubmitting(false)
     }
-  }, [editorForm, editorMode, projects, refreshAll, sessionSummaryById])
+  }, [editorForm, editorMode, projects, refreshAll, sessionSummaryById, t])
 
   const handleRunNow = React.useCallback(
     async (jobId: string) => {
@@ -717,10 +744,14 @@ export function TasksPage(): React.JSX.Element {
         toast.error(String((result as { error: string }).error))
         return
       }
-      toast.success('Immediate execution triggered')
+      toast.success(
+        t('tasksPage.toastRunNowTriggered', {
+          defaultValue: 'Immediate execution triggered'
+        })
+      )
       await refreshAll()
     },
-    [refreshAll]
+    [refreshAll, t]
   )
 
   const handleAbortRun = React.useCallback(
@@ -730,10 +761,10 @@ export function TasksPage(): React.JSX.Element {
         toast.error(String((result as { error: string }).error))
         return
       }
-      toast.success('已中止运行')
+      toast.success(t('tasksPage.toastRunAborted', { defaultValue: 'Run aborted' }))
       await refreshAll()
     },
-    [refreshAll]
+    [refreshAll, t]
   )
 
   const handleToggle = React.useCallback(
@@ -758,10 +789,14 @@ export function TasksPage(): React.JSX.Element {
         toast.error(String((result as { error: string }).error))
         return
       }
-      toast.success('Plan deleted, history preserved')
+      toast.success(
+        t('tasksPage.toastPlanDeleted', {
+          defaultValue: 'Plan deleted, history preserved'
+        })
+      )
       await refreshAll()
     },
-    [refreshAll]
+    [refreshAll, t]
   )
 
   const selectedJob = selectedItem?.job ?? null
@@ -769,7 +804,14 @@ export function TasksPage(): React.JSX.Element {
     ? getSourceSessionMeta(selectedItem, sessionSummaryById, t)
     : null
   const selectedStatus = selectedItem ? getLatestRunStatus(selectedItem) : null
-  const monthTitle = `${calendarCursor.year} / ${calendarCursor.month + 1}`
+  const monthTitle = React.useMemo(
+    () =>
+      new Intl.DateTimeFormat(locale, {
+        year: 'numeric',
+        month: 'numeric'
+      }).format(new Date(calendarCursor.year, calendarCursor.month, 1)),
+    [calendarCursor.month, calendarCursor.year, locale]
+  )
   const todayKey = dateKeyFromDate(new Date())
 
   return (
@@ -778,14 +820,18 @@ export function TasksPage(): React.JSX.Element {
         <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border/60 bg-background shadow-sm">
           <div className="flex items-center justify-between px-4 py-3">
             <div>
-              <div className="text-sm font-semibold text-foreground">Task Calendar</div>
+              <div className="text-sm font-semibold text-foreground">
+                {t('tasksPage.calendarTitle', { defaultValue: 'Task Calendar' })}
+              </div>
               <div className="text-[11px] text-muted-foreground">
-                View plans and executions by day
+                {t('tasksPage.calendarSubtitle', {
+                  defaultValue: 'View plans and executions by day'
+                })}
               </div>
             </div>
             <Button size="sm" className="h-7 px-2 text-xs" onClick={openCreateDialog}>
               <Plus className="mr-1 size-3.5" />
-              New
+              {t('tasksPage.newButton', { defaultValue: 'New' })}
             </Button>
           </div>
           <div className="flex items-center justify-between px-4 pb-2">
@@ -800,7 +846,9 @@ export function TasksPage(): React.JSX.Element {
                 <ChevronRight className="size-4" />
               </Button>
             </div>
-            <span className="text-[11px] text-muted-foreground">Shows local time by default</span>
+            <span className="text-[11px] text-muted-foreground">
+              {t('tasksPage.localTimeHint', { defaultValue: 'Shows local time by default' })}
+            </span>
           </div>
           <div className="grid grid-cols-7 gap-1 px-4 pb-2 text-center text-[10px] text-muted-foreground">
             {getWeekdayLabels(t).map((label) => (
@@ -843,9 +891,9 @@ export function TasksPage(): React.JSX.Element {
           <div className="border-b border-border/60 px-4 py-3">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground">
               <CalendarDays className="size-4 text-primary" />
-              {formatDayLabel(selectedDay.date)}
+              {formatDayLabel(selectedDay.date, t, language)}
               <span className="text-xs text-muted-foreground">
-                {selectedDay.date.toLocaleDateString()}
+                {selectedDay.date.toLocaleDateString(locale)}
               </span>
             </div>
             <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -854,20 +902,24 @@ export function TasksPage(): React.JSX.Element {
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
               >
-                <option value="all">All statuses</option>
-                <option value="enabled">Enabled</option>
-                <option value="disabled">Disabled</option>
-                <option value="running">Running</option>
-                <option value="success">Success</option>
-                <option value="error">Failed</option>
-                <option value="aborted">Aborted</option>
+                <option value="all">
+                  {t('tasksPage.allStatuses', { defaultValue: 'All statuses' })}
+                </option>
+                <option value="enabled">{t('tasksPage.statusEnabled')}</option>
+                <option value="disabled">{t('tasksPage.statusDisabled')}</option>
+                <option value="running">{t('tasksPage.statusRunning')}</option>
+                <option value="success">{t('tasksPage.statusSuccess')}</option>
+                <option value="error">{t('tasksPage.statusFailed')}</option>
+                <option value="aborted">{t('tasksPage.statusAborted')}</option>
               </select>
               <select
                 className={INPUT_CLASS}
                 value={sessionFilter}
                 onChange={(event) => setSessionFilter(event.target.value)}
               >
-                <option value="all">All sessions</option>
+                <option value="all">
+                  {t('tasksPage.allSessions', { defaultValue: 'All sessions' })}
+                </option>
                 {sessionSummaries.map((session) => (
                   <option key={session.id} value={session.id}>
                     {session.title}
@@ -878,7 +930,9 @@ export function TasksPage(): React.JSX.Element {
                 className="h-8 text-xs"
                 value={workingFolderFilter}
                 onChange={(event) => setWorkingFolderFilter(event.target.value)}
-                placeholder="Filter working directory"
+                placeholder={t('tasksPage.filterWorkingDirectory', {
+                  defaultValue: 'Filter working directory'
+                })}
               />
             </div>
           </div>
@@ -886,7 +940,11 @@ export function TasksPage(): React.JSX.Element {
             {filteredTimelineItems.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
                 <CalendarDays className="size-10 opacity-30" />
-                <div className="text-sm">No tasks match the filters for this day</div>
+                <div className="text-sm">
+                  {t('tasksPage.emptyFilteredDay', {
+                    defaultValue: 'No tasks match the filters for this day'
+                  })}
+                </div>
               </div>
             ) : (
               <div className="space-y-2">
@@ -924,26 +982,40 @@ export function TasksPage(): React.JSX.Element {
                             </span>
                             {item.job && (
                               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                                {scheduleKindLabel(item.job.schedule.kind)}
+                                {scheduleKindLabel(item.job.schedule.kind, t)}
                               </span>
                             )}
                           </div>
                           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                            <span>Source: {meta.title}</span>
-                            {meta.model && <span>Model: {meta.model}</span>}
+                            <span>
+                              {t('tasksPage.labelSource', { defaultValue: 'Source' })}: {meta.title}
+                            </span>
+                            {meta.model && (
+                              <span>
+                                {t('tasksPage.labelModel', { defaultValue: 'Model' })}: {meta.model}
+                              </span>
+                            )}
                             {item.plannedTimes.length > 0 && (
                               <span>
-                                Planned:{' '}
+                                {t('tasksPage.labelPlanned', { defaultValue: 'Planned' })}:{' '}
                                 {item.plannedTimes
                                   .slice(0, 3)
-                                  .map((time) => formatTimeLabel(time))
+                                  .map((time) => formatTimeLabel(time, language))
                                   .join(', ')}
                                 {item.plannedTimes.length > 3
-                                  ? ` +${item.plannedTimes.length - 3}`
+                                  ? t('tasksPage.moreCount', {
+                                      count: item.plannedTimes.length - 3,
+                                      defaultValue: '+{{count}}'
+                                    })
                                   : ''}
                               </span>
                             )}
-                            {item.runs.length > 0 && <span>Runs: {item.runs.length}</span>}
+                            {item.runs.length > 0 && (
+                              <span>
+                                {t('tasksPage.labelRuns', { defaultValue: 'Runs' })}:{' '}
+                                {item.runs.length}
+                              </span>
+                            )}
                           </div>
                           {meta.workingFolder && (
                             <div className="mt-1 truncate text-[11px] text-muted-foreground">
@@ -981,17 +1053,28 @@ export function TasksPage(): React.JSX.Element {
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
-                    <div>Source session: {selectedMeta?.title ?? '—'}</div>
-                    <div>Model: {selectedMeta?.model ?? '—'}</div>
-                    <div className="truncate">
-                      Working directory: {selectedMeta?.workingFolder ?? '—'}
+                    <div>
+                      {t('tasksPage.labelSourceSession', { defaultValue: 'Source session' })}:{' '}
+                      {selectedMeta?.title ?? '—'}
                     </div>
                     <div>
-                      Scheduled:{' '}
+                      {t('tasksPage.labelModel', { defaultValue: 'Model' })}:{' '}
+                      {selectedMeta?.model ?? '—'}
+                    </div>
+                    <div className="truncate">
+                      {t('tasksPage.labelWorkingDirectory', {
+                        defaultValue: 'Working directory'
+                      })}
+                      : {selectedMeta?.workingFolder ?? '—'}
+                    </div>
+                    <div>
+                      {t('tasksPage.labelScheduled', { defaultValue: 'Scheduled' })}:{' '}
                       {selectedItem.plannedTimes.length > 0
-                        ? selectedItem.plannedTimes.map((time) => formatTimeLabel(time)).join(', ')
+                        ? selectedItem.plannedTimes
+                            .map((time) => formatTimeLabel(time, language))
+                            .join(', ')
                         : selectedJob
-                          ? scheduleSummary(selectedJob)
+                          ? scheduleSummary(selectedJob, t, language)
                           : '—'}
                     </div>
                   </div>
@@ -1007,7 +1090,7 @@ export function TasksPage(): React.JSX.Element {
                         onClick={() => void handleRunNow(selectedJob.id)}
                       >
                         <Play className="mr-1 size-3.5" />
-                        Run now
+                        {t('tasksPage.runNow', { defaultValue: 'Run now' })}
                       </Button>
                       {selectedJob.executing && (
                         <Button
@@ -1017,7 +1100,7 @@ export function TasksPage(): React.JSX.Element {
                           onClick={() => void handleAbortRun(selectedJob.id)}
                         >
                           <StopCircle className="mr-1 size-3.5" />
-                          中止运行
+                          {t('tasksPage.abortRun', { defaultValue: 'Abort run' })}
                         </Button>
                       )}
                       <Button
@@ -1029,12 +1112,12 @@ export function TasksPage(): React.JSX.Element {
                         {selectedJob.enabled ? (
                           <>
                             <PowerOff className="mr-1 size-3.5" />
-                            Disable
+                            {t('tasksPage.disable', { defaultValue: 'Disable' })}
                           </>
                         ) : (
                           <>
                             <Power className="mr-1 size-3.5" />
-                            Enable
+                            {t('tasksPage.enable', { defaultValue: 'Enable' })}
                           </>
                         )}
                       </Button>
@@ -1045,7 +1128,7 @@ export function TasksPage(): React.JSX.Element {
                         onClick={() => openEditDialog(selectedJob)}
                       >
                         <Pencil className="mr-1 size-3.5" />
-                        Edit
+                        {t('tasksPage.editButton', { defaultValue: 'Edit' })}
                       </Button>
                       <Button
                         size="sm"
@@ -1054,7 +1137,7 @@ export function TasksPage(): React.JSX.Element {
                         onClick={() => void handleDelete(selectedJob)}
                       >
                         <Trash2 className="mr-1 size-3.5" />
-                        Delete plan
+                        {t('tasksPage.deletePlan', { defaultValue: 'Delete plan' })}
                       </Button>
                     </>
                   )}
@@ -1064,13 +1147,19 @@ export function TasksPage(): React.JSX.Element {
 
             <div className="flex min-h-0 flex-1">
               <div className="flex w-72 shrink-0 flex-col border-r border-border/60">
-                <div className="px-4 py-3 text-sm font-medium text-foreground">Day run records</div>
+                <div className="px-4 py-3 text-sm font-medium text-foreground">
+                  {t('tasksPage.dayRunRecords', { defaultValue: 'Day run records' })}
+                </div>
                 <Separator />
                 <div className="flex-1 overflow-y-auto p-3">
                   {selectedItem.runs.length === 0 ? (
                     <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
                       <CheckCircle2 className="size-9 opacity-30" />
-                      <div className="text-sm">No execution records for this day</div>
+                      <div className="text-sm">
+                        {t('tasksPage.emptyDayRuns', {
+                          defaultValue: 'No execution records for this day'
+                        })}
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -1096,11 +1185,14 @@ export function TasksPage(): React.JSX.Element {
                               {getStatusLabel(run.status, t)}
                             </span>
                             <span className="text-xs text-foreground">
-                              {formatTimeLabel(run.startedAt)}
+                              {formatTimeLabel(run.startedAt, language)}
                             </span>
                           </div>
                           <div className="mt-1 text-[11px] text-muted-foreground">
-                            Tool calls: {run.toolCallCount}
+                            {t('tasksPage.toolCalls', {
+                              count: run.toolCallCount,
+                              defaultValue: 'Tool calls: {{count}}'
+                            })}
                           </div>
                           {(run.error || run.outputSummary) && (
                             <div className="mt-1 truncate text-[11px] text-muted-foreground">
@@ -1125,7 +1217,12 @@ export function TasksPage(): React.JSX.Element {
                       <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
                         <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[12px]">
                           <div>
-                            <span className="text-muted-foreground">Source session: </span>
+                            <span className="text-muted-foreground">
+                              {t('tasksPage.labelSourceSession', {
+                                defaultValue: 'Source session'
+                              })}
+                              :{' '}
+                            </span>
                             <span className="text-foreground">
                               {runDetail.run.sourceSessionTitleSnapshot ??
                                 selectedMeta?.title ??
@@ -1133,33 +1230,46 @@ export function TasksPage(): React.JSX.Element {
                             </span>
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Status: </span>
+                            <span className="text-muted-foreground">
+                              {t('tasksPage.labelStatus', { defaultValue: 'Status' })}:{' '}
+                            </span>
                             <span className="text-foreground">
                               {getStatusLabel(runDetail.run.status, t)}
                             </span>
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Working directory: </span>
+                            <span className="text-muted-foreground">
+                              {t('tasksPage.labelWorkingDirectory', {
+                                defaultValue: 'Working directory'
+                              })}
+                              :{' '}
+                            </span>
                             <span className="text-foreground">
                               {runDetail.run.workingFolderSnapshot ?? '—'}
                             </span>
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Model: </span>
+                            <span className="text-muted-foreground">
+                              {t('tasksPage.labelModel', { defaultValue: 'Model' })}:{' '}
+                            </span>
                             <span className="text-foreground">
                               {runDetail.run.modelSnapshot ?? '—'}
                             </span>
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Scheduled: </span>
+                            <span className="text-muted-foreground">
+                              {t('tasksPage.labelScheduled', { defaultValue: 'Scheduled' })}:{' '}
+                            </span>
                             <span className="text-foreground">
-                              {formatDateTimeLabel(runDetail.run.scheduledFor)}
+                              {formatDateTimeLabel(runDetail.run.scheduledFor, language)}
                             </span>
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Started: </span>
+                            <span className="text-muted-foreground">
+                              {t('tasksPage.labelStarted', { defaultValue: 'Started' })}:{' '}
+                            </span>
                             <span className="text-foreground">
-                              {formatDateTimeLabel(runDetail.run.startedAt)}
+                              {formatDateTimeLabel(runDetail.run.startedAt, language)}
                             </span>
                           </div>
                         </div>
@@ -1170,13 +1280,15 @@ export function TasksPage(): React.JSX.Element {
                       ) : (
                         <div className="space-y-3">
                           <div className="rounded-xl border border-dashed border-border/60 bg-muted/10 p-4 text-sm text-muted-foreground">
-                            This is an old record with no full playback. Showing basic info,
-                            summary, and lightweight logs.
+                            {t('tasksPage.legacyRecordNotice', {
+                              defaultValue:
+                                'This is an old record with no full playback. Showing basic info, summary, and lightweight logs.'
+                            })}
                           </div>
                           {runDetail.run.outputSummary && (
                             <div className="rounded-xl border border-border/60 p-3">
                               <div className="mb-2 text-sm font-medium text-foreground">
-                                Output summary
+                                {t('tasksPage.outputSummary', { defaultValue: 'Output summary' })}
                               </div>
                               <div className="whitespace-pre-wrap text-sm text-muted-foreground">
                                 {runDetail.run.outputSummary}
@@ -1187,7 +1299,7 @@ export function TasksPage(): React.JSX.Element {
                             <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3">
                               <div className="mb-2 flex items-center gap-2 text-sm font-medium text-destructive">
                                 <XCircle className="size-4" />
-                                Error message
+                                {t('tasksPage.errorMessage', { defaultValue: 'Error message' })}
                               </div>
                               <div className="whitespace-pre-wrap text-sm text-destructive/80">
                                 {runDetail.run.error}
@@ -1197,7 +1309,9 @@ export function TasksPage(): React.JSX.Element {
                           {runDetail.logs.length > 0 && (
                             <div className="rounded-xl border border-border/60 p-3">
                               <div className="mb-2 text-sm font-medium text-foreground">
-                                Agent execution logs
+                                {t('tasksPage.agentExecutionLogs', {
+                                  defaultValue: 'Agent execution logs'
+                                })}
                               </div>
                               <div className="space-y-1">
                                 {runDetail.logs.map((log) => (
@@ -1206,10 +1320,10 @@ export function TasksPage(): React.JSX.Element {
                                     className="flex items-start gap-2 text-[12px] text-muted-foreground"
                                   >
                                     <span className="w-16 shrink-0 tabular-nums">
-                                      {formatTimeLabel(log.timestamp)}
+                                      {formatTimeLabel(log.timestamp, language)}
                                     </span>
                                     <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
-                                      {log.type}
+                                      {getLogTypeLabel(log.type, t)}
                                     </span>
                                     <span className="min-w-0 flex-1 break-words">
                                       {log.content}
@@ -1224,12 +1338,16 @@ export function TasksPage(): React.JSX.Element {
                     </div>
                   ) : (
                     <div className="flex h-full items-center justify-center text-muted-foreground">
-                      No details available
+                      {t('tasksPage.noDetailsAvailable', {
+                        defaultValue: 'No details available'
+                      })}
                     </div>
                   )
                 ) : (
                   <div className="flex h-full items-center justify-center text-muted-foreground">
-                    Select a run to view details
+                    {t('tasksPage.selectRunToViewDetails', {
+                      defaultValue: 'Select a run to view details'
+                    })}
                   </div>
                 )}
               </div>
@@ -1240,11 +1358,15 @@ export function TasksPage(): React.JSX.Element {
             <div className="flex w-full max-w-md flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/70 bg-muted/10 px-6 py-10 text-center text-muted-foreground">
               <CalendarDays className="size-10 opacity-30" />
               <div className="text-sm font-medium text-foreground/80">
-                Select a day from the left to view tasks
+                {t('tasksPage.emptyStateTitle', {
+                  defaultValue: 'Select a day from the left to view tasks'
+                })}
               </div>
               <div className="text-xs">
-                After selecting a task, source session, run records, and full playback will be shown
-                here
+                {t('tasksPage.emptyStateDescription', {
+                  defaultValue:
+                    'After selecting a task, source session, run records, and full playback will be shown here'
+                })}
               </div>
             </div>
           </div>
@@ -1254,12 +1376,23 @@ export function TasksPage(): React.JSX.Element {
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{editorMode === 'create' ? 'New task' : 'Edit task'}</DialogTitle>
+            <DialogTitle>
+              {t(
+                editorMode === 'create'
+                  ? 'tasksPage.dialogCreateTitle'
+                  : 'tasksPage.dialogEditTitle',
+                {
+                  defaultValue: editorMode === 'create' ? 'New task' : 'Edit task'
+                }
+              )}
+            </DialogTitle>
           </DialogHeader>
           <div className="grid gap-3 py-1">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Task name</div>
+                <div className="text-xs text-muted-foreground">
+                  {t('tasksPage.fieldTaskName', { defaultValue: 'Task name' })}
+                </div>
                 <Input
                   className="h-8 text-xs"
                   value={editorForm.name}
@@ -1269,13 +1402,17 @@ export function TasksPage(): React.JSX.Element {
                 />
               </div>
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Source session</div>
+                <div className="text-xs text-muted-foreground">
+                  {t('tasksPage.fieldSourceSession', { defaultValue: 'Source session' })}
+                </div>
                 <select
                   className={INPUT_CLASS}
                   value={editorForm.sessionId}
                   onChange={(event) => handleSessionPreset(event.target.value)}
                 >
-                  <option value="">No session bound</option>
+                  <option value="">
+                    {t('tasksPage.unboundSession', { defaultValue: 'No session bound' })}
+                  </option>
                   {sessionSummaries.map((session) => (
                     <option key={session.id} value={session.id}>
                       {session.title}
@@ -1286,7 +1423,9 @@ export function TasksPage(): React.JSX.Element {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Prompt</div>
+              <div className="text-xs text-muted-foreground">
+                {t('tasksPage.fieldPrompt', { defaultValue: 'Prompt' })}
+              </div>
               <Textarea
                 className="min-h-28 text-xs"
                 value={editorForm.prompt}
@@ -1298,7 +1437,9 @@ export function TasksPage(): React.JSX.Element {
 
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Schedule type</div>
+                <div className="text-xs text-muted-foreground">
+                  {t('tasksPage.fieldScheduleType', { defaultValue: 'Schedule type' })}
+                </div>
                 <select
                   className={INPUT_CLASS}
                   value={editorForm.scheduleKind}
@@ -1309,24 +1450,36 @@ export function TasksPage(): React.JSX.Element {
                     }))
                   }
                 >
-                  <option value="at">Once</option>
-                  <option value="every">Interval</option>
-                  <option value="cron">Cron</option>
+                  <option value="at">
+                    {t('tasksPage.scheduleTypeOnce', { defaultValue: 'Once' })}
+                  </option>
+                  <option value="every">
+                    {t('tasksPage.scheduleTypeInterval', { defaultValue: 'Interval' })}
+                  </option>
+                  <option value="cron">
+                    {t('tasksPage.scheduleTypeCron', { defaultValue: 'Cron' })}
+                  </option>
                 </select>
               </div>
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Model</div>
+                <div className="text-xs text-muted-foreground">
+                  {t('tasksPage.fieldModel', { defaultValue: 'Model' })}
+                </div>
                 <Input
                   className="h-8 text-xs"
                   value={editorForm.model}
                   onChange={(event) =>
                     setEditorForm((state) => ({ ...state, model: event.target.value }))
                   }
-                  placeholder="Default from session/global"
+                  placeholder={t('tasksPage.placeholderModelDefault', {
+                    defaultValue: 'Default from session/global'
+                  })}
                 />
               </div>
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Max iterations</div>
+                <div className="text-xs text-muted-foreground">
+                  {t('tasksPage.fieldMaxIterations', { defaultValue: 'Max iterations' })}
+                </div>
                 <Input
                   className="h-8 text-xs"
                   value={editorForm.maxIterations}
@@ -1339,7 +1492,9 @@ export function TasksPage(): React.JSX.Element {
 
             {editorForm.scheduleKind === 'at' && (
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Execution time</div>
+                <div className="text-xs text-muted-foreground">
+                  {t('tasksPage.fieldExecutionTime', { defaultValue: 'Execution time' })}
+                </div>
                 <Input
                   className="h-8 text-xs"
                   type="datetime-local"
@@ -1353,7 +1508,11 @@ export function TasksPage(): React.JSX.Element {
 
             {editorForm.scheduleKind === 'every' && (
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Interval (minutes)</div>
+                <div className="text-xs text-muted-foreground">
+                  {t('tasksPage.fieldIntervalMinutes', {
+                    defaultValue: 'Interval (minutes)'
+                  })}
+                </div>
                 <Input
                   className="h-8 text-xs"
                   value={editorForm.everyMinutes}
@@ -1367,7 +1526,11 @@ export function TasksPage(): React.JSX.Element {
             {editorForm.scheduleKind === 'cron' && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <div className="text-xs text-muted-foreground">Cron expression</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t('tasksPage.fieldCronExpression', {
+                      defaultValue: 'Cron expression'
+                    })}
+                  </div>
                   <Input
                     className="h-8 text-xs"
                     value={editorForm.expr}
@@ -1377,7 +1540,9 @@ export function TasksPage(): React.JSX.Element {
                   />
                 </div>
                 <div className="space-y-1">
-                  <div className="text-xs text-muted-foreground">Timezone</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t('tasksPage.fieldTimezone', { defaultValue: 'Timezone' })}
+                  </div>
                   <Input
                     className="h-8 text-xs"
                     value={editorForm.tz}
@@ -1391,7 +1556,11 @@ export function TasksPage(): React.JSX.Element {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Working directory</div>
+                <div className="text-xs text-muted-foreground">
+                  {t('tasksPage.fieldWorkingDirectory', {
+                    defaultValue: 'Working directory'
+                  })}
+                </div>
                 <Input
                   className="h-8 text-xs"
                   value={editorForm.workingFolder}
@@ -1401,7 +1570,9 @@ export function TasksPage(): React.JSX.Element {
                 />
               </div>
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Delivery mode</div>
+                <div className="text-xs text-muted-foreground">
+                  {t('tasksPage.fieldDeliveryMode', { defaultValue: 'Delivery mode' })}
+                </div>
                 <select
                   className={INPUT_CLASS}
                   value={editorForm.deliveryMode}
@@ -1412,9 +1583,19 @@ export function TasksPage(): React.JSX.Element {
                     }))
                   }
                 >
-                  <option value="desktop">Desktop notification</option>
-                  <option value="session">Write to session</option>
-                  <option value="none">No delivery</option>
+                  <option value="desktop">
+                    {t('tasksPage.deliveryModeDesktop', {
+                      defaultValue: 'Desktop notification'
+                    })}
+                  </option>
+                  <option value="session">
+                    {t('tasksPage.deliveryModeSession', {
+                      defaultValue: 'Write to session'
+                    })}
+                  </option>
+                  <option value="none">
+                    {t('tasksPage.deliveryModeNone', { defaultValue: 'No delivery' })}
+                  </option>
                 </select>
               </div>
             </div>
@@ -1422,7 +1603,9 @@ export function TasksPage(): React.JSX.Element {
             {editorForm.deliveryMode === 'session' && (
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">
-                  Target session ID (leave empty to use source session)
+                  {t('tasksPage.fieldTargetSession', {
+                    defaultValue: 'Target session ID (leave empty to use source session)'
+                  })}
                 </div>
                 <Input
                   className="h-8 text-xs"
@@ -1442,16 +1625,18 @@ export function TasksPage(): React.JSX.Element {
                   setEditorForm((state) => ({ ...state, deleteAfterRun: event.target.checked }))
                 }
               />
-              Delete plan after execution (history will be preserved)
+              {t('tasksPage.deleteAfterExecution', {
+                defaultValue: 'Delete plan after execution (history will be preserved)'
+              })}
             </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditorOpen(false)}>
-              Cancel
+              {t('tasksPage.cancel', { defaultValue: 'Cancel' })}
             </Button>
             <Button onClick={() => void handleSubmit()} disabled={submitting}>
               {submitting ? <Loader2 className="mr-1 size-4 animate-spin" /> : null}
-              Save
+              {t('tasksPage.save', { defaultValue: 'Save' })}
             </Button>
           </DialogFooter>
         </DialogContent>

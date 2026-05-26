@@ -31,6 +31,7 @@ const providerIconSlugMap: Record<string, string> = {
   'codex-oauth': 'openai',
   'copilot-oauth': 'github',
   xiaomi: 'xiaomimimo',
+  'xiaomi-coding': 'xiaomimimo',
   'bigmodel-coding': 'chatglm',
   bigmodel: 'chatglm'
 }

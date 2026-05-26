@@ -171,6 +171,8 @@ const PENDING_ASSISTANT_ROW_KEY_PREFIX = '__pending_assistant__'
 const USER_LOCATOR_PREVIEW_LIMIT = 88
 const USER_LOCATOR_SCROLL_OFFSET = 28
 const USER_LOCATOR_HIGHLIGHT_MS = 1400
+const OLDER_MESSAGE_LOAD_SCROLL_THRESHOLD = 72
+const MIN_RENDERABLE_HISTORY_ROWS = 3
 const EMPTY_ORCHESTRATION_STATE = { runs: [], byId: new Map(), byMessageId: new Map() }
 const MESSAGE_COLUMN_CLASS = 'mx-auto w-full max-w-[820px] px-5'
 const MESSAGE_COLUMN_COMPACT_CLASS = 'mx-auto w-full max-w-[720px] px-5'
@@ -845,6 +847,7 @@ function MessageListInner(props: MessageListProps): React.JSX.Element {
     null
   )
   const [highlightedMessageId, setHighlightedMessageId] = React.useState<string | null>(null)
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = React.useState(false)
   const [userLocatorSnapshot, setUserLocatorSnapshot] = React.useState<{
     sessionId: string | null
     rows: UserMessageIndexRow[]
@@ -1012,6 +1015,10 @@ function MessageListInner(props: MessageListProps): React.JSX.Element {
     () => findPendingAskUserQuestion(rows, toolResultsLookup, messageLookup),
     [messageLookup, rows, toolResultsLookup]
   )
+  const isAwaitingInitialMessages =
+    Boolean(activeSessionId) &&
+    messages.length === 0 &&
+    (!activeSessionLoaded || activeSessionMessageCount > 0 || loadedRangeStart > 0)
 
   const lastMessageRowIndex = rows.length - 1
   const userLocatorItemById = React.useMemo(
@@ -1158,6 +1165,48 @@ function MessageListInner(props: MessageListProps): React.JSX.Element {
     [activeSessionId, markProgrammaticScroll]
   )
 
+  const loadOlderMessages = React.useCallback(async (): Promise<number> => {
+    if (!activeSessionId || isLoadingOlderMessages || loadedRangeStart <= 0) return 0
+
+    const ref = listRef.current
+    const previousScrollHeight = ref?.scrollHeight ?? 0
+    const previousScrollTop = ref?.scrollTop ?? 0
+
+    autoScrollModeRef.current = 'off'
+    setIsLoadingOlderMessages(true)
+    try {
+      const loaded = await useChatStore.getState().loadOlderSessionMessages(activeSessionId)
+      if (loaded <= 0) return 0
+
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => resolve())
+        })
+      })
+
+      const nextRef = listRef.current
+      if (nextRef) {
+        const scrollDelta = nextRef.scrollHeight - previousScrollHeight
+        if (scrollDelta !== 0) {
+          markProgrammaticScroll()
+          nextRef.scrollTop = Math.max(0, previousScrollTop + scrollDelta)
+        }
+      }
+      syncBottomState()
+      syncActiveUserLocator()
+      return loaded
+    } finally {
+      setIsLoadingOlderMessages(false)
+    }
+  }, [
+    activeSessionId,
+    isLoadingOlderMessages,
+    loadedRangeStart,
+    markProgrammaticScroll,
+    syncActiveUserLocator,
+    syncBottomState
+  ])
+
   const requestScrollToBottom = React.useCallback(
     ({
       behavior = 'auto',
@@ -1217,7 +1266,22 @@ function MessageListInner(props: MessageListProps): React.JSX.Element {
   const handleListScroll = React.useCallback(() => {
     syncBottomState()
     syncActiveUserLocator()
-  }, [syncActiveUserLocator, syncBottomState])
+    const ref = listRef.current
+    if (
+      ref &&
+      !isLoadingOlderMessages &&
+      loadedRangeStart > 0 &&
+      ref.scrollTop <= OLDER_MESSAGE_LOAD_SCROLL_THRESHOLD
+    ) {
+      void loadOlderMessages()
+    }
+  }, [
+    isLoadingOlderMessages,
+    loadOlderMessages,
+    loadedRangeStart,
+    syncActiveUserLocator,
+    syncBottomState
+  ])
 
   React.useEffect(() => {
     if (!activeSessionId) return
@@ -1277,6 +1341,19 @@ function MessageListInner(props: MessageListProps): React.JSX.Element {
   }, [canAutoScroll, pendingAskUserQuestion, requestScrollToBottom, rows.length])
 
   React.useEffect(() => {
+    if (!activeSessionId || isAwaitingInitialMessages || isLoadingOlderMessages) return
+    if (loadedRangeStart <= 0 || renderableMessages.length >= MIN_RENDERABLE_HISTORY_ROWS) return
+    void loadOlderMessages()
+  }, [
+    activeSessionId,
+    isAwaitingInitialMessages,
+    isLoadingOlderMessages,
+    loadOlderMessages,
+    loadedRangeStart,
+    renderableMessages.length
+  ])
+
+  React.useEffect(() => {
     syncActiveUserLocator()
   }, [syncActiveUserLocator])
 
@@ -1317,11 +1394,6 @@ function MessageListInner(props: MessageListProps): React.JSX.Element {
       editor.focus()
     }
   }, [])
-
-  const isAwaitingInitialMessages =
-    Boolean(activeSessionId) &&
-    messages.length === 0 &&
-    (!activeSessionLoaded || activeSessionMessageCount > 0 || loadedRangeStart > 0)
 
   if (isAwaitingInitialMessages) {
     return (
@@ -1449,6 +1521,20 @@ function MessageListInner(props: MessageListProps): React.JSX.Element {
         style={{ overflowAnchor: 'none' }}
         onScroll={handleListScroll}
       >
+        {loadedRangeStart > 0 && (
+          <div className={`${MESSAGE_COLUMN_CLASS} flex justify-center pb-3 pt-3`}>
+            <button
+              type="button"
+              className="rounded-full border border-border/70 bg-background/92 px-3 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-70"
+              onClick={() => void loadOlderMessages()}
+              disabled={isLoadingOlderMessages}
+            >
+              {isLoadingOlderMessages
+                ? t('messageList.loadingOlder')
+                : t('messageList.loadOlder', { count: loadedRangeStart })}
+            </button>
+          </div>
+        )}
         {(() => {
           const liveCutoffIndex = Math.max(0, lastMessageRowIndex - TAIL_LIVE_MESSAGE_COUNT)
 

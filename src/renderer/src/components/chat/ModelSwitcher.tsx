@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import {
   Check,
   Search,
@@ -237,6 +238,20 @@ function selectModel(
       })
     }
   }
+  setOpen(false)
+}
+
+function selectFastModel(
+  provider: AIProvider,
+  modelId: string,
+  activeFastProviderId: string | null,
+  setActiveFastProvider: (id: string) => void,
+  setActiveFastModel: (id: string) => void,
+  setOpen: (v: boolean) => void
+): void {
+  const pid = provider.id
+  if (pid !== activeFastProviderId) setActiveFastProvider(pid)
+  setActiveFastModel(modelId)
   setOpen(false)
 }
 
@@ -670,10 +685,15 @@ function ModelSettingsPopover({
   )
 }
 
-export function ModelSwitcher(): React.JSX.Element {
+export function ModelSwitcher({
+  modelRoute = 'main'
+}: {
+  modelRoute?: 'main' | 'fast'
+}): React.JSX.Element {
   const { t } = useTranslation('layout')
   const { t: tChat } = useTranslation('chat')
   const { t: tSettings } = useTranslation('settings')
+  const isFastRoute = modelRoute === 'fast'
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -683,9 +703,23 @@ export function ModelSwitcher(): React.JSX.Element {
   const hasAutoScrolledToSelectionRef = useRef(false)
   const activeProviderId = useProviderStore((s) => s.activeProviderId)
   const activeModelId = useProviderStore((s) => s.activeModelId)
+  const activeFastProviderId = useProviderStore((s) => s.activeFastProviderId)
+  const activeFastModelId = useProviderStore((s) => s.activeFastModelId)
   const providers = useProviderStore((s) => s.providers)
   const setActiveProvider = useProviderStore((s) => s.setActiveProvider)
   const setActiveModel = useProviderStore((s) => s.setActiveModel)
+  const setActiveFastProvider = useProviderStore((s) => s.setActiveFastProvider)
+  const setActiveFastModel = useProviderStore((s) => s.setActiveFastModel)
+  const fastSelection = useProviderStore(
+    useShallow((s) => {
+      if (!isFastRoute) return { providerId: null as string | null, modelId: '' }
+      const config = s.getFastProviderConfig()
+      return {
+        providerId: config?.providerId ?? null,
+        modelId: config?.model ?? ''
+      }
+    })
+  )
   const quotaByKey = useQuotaStore((s) => s.quotaByKey)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const sessions = useChatStore((s) => s.sessions)
@@ -703,12 +737,16 @@ export function ModelSwitcher(): React.JSX.Element {
   const activeSession = sessions.find((item) => item.id === activeSessionId)
   const sessionProviderId = activeSession?.providerId ?? null
   const sessionModelId = activeSession?.modelId ?? null
-  const isSessionBound = Boolean(sessionProviderId && sessionModelId)
-  const displayProviderId = sessionProviderId ?? activeProviderId
-  const displayModelId = sessionModelId ?? activeModelId
+  const isSessionBound = !isFastRoute && Boolean(sessionProviderId && sessionModelId)
+  const displayProviderId = isFastRoute
+    ? (fastSelection.providerId ?? activeFastProviderId ?? activeProviderId)
+    : (sessionProviderId ?? activeProviderId)
+  const displayModelId = isFastRoute
+    ? fastSelection.modelId || activeFastModelId || activeModelId
+    : (sessionModelId ?? activeModelId)
   const displayProvider = providers.find((p) => p.id === displayProviderId)
   const displayModel = displayProvider?.models.find((m) => m.id === displayModelId)
-  const isAutoModeActive = !isSessionBound && mainModelSelectionMode === 'auto'
+  const isAutoModeActive = !isFastRoute && !isSessionBound && mainModelSelectionMode === 'auto'
   const autoResolvedProvider = autoSelection?.providerId
     ? providers.find((provider) => provider.id === autoSelection.providerId)
     : null
@@ -798,6 +836,7 @@ export function ModelSwitcher(): React.JSX.Element {
       .map((provider) => {
         const models = provider.models.filter((m) => {
           if (!m.enabled) return false
+          if (isFastRoute && (m.category ?? 'chat') !== 'chat') return false
           if (!q) return true
           const name = (m.name || m.id).toLowerCase()
           return name.includes(q) || provider.name.toLowerCase().includes(q)
@@ -805,7 +844,7 @@ export function ModelSwitcher(): React.JSX.Element {
         return { provider, models }
       })
       .filter((g) => g.models.length > 0)
-  }, [enabledProviders, search])
+  }, [enabledProviders, isFastRoute, search])
 
   useEffect(() => {
     if (!open) {
@@ -898,58 +937,61 @@ export function ModelSwitcher(): React.JSX.Element {
             />
           </div>
           <div ref={listRef} className="max-h-[360px] overflow-y-auto p-1">
-            <button
-              ref={autoModelRef}
-              className={cn(
-                'mb-2 flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-muted/60 transition-colors group',
-                isAutoModeActive && 'bg-primary/5'
-              )}
-              onClick={() => selectAutoModel(setOpen)}
-            >
-              <span className="mt-0.5 flex size-5 items-center justify-center shrink-0">
-                {isAutoModeActive ? (
-                  <span className="flex size-5 items-center justify-center rounded-full bg-primary/10">
-                    <Check className="size-3 text-primary" />
-                  </span>
-                ) : (
-                  <AutoModelIcon size={18} />
+            {!isFastRoute && (
+              <button
+                ref={autoModelRef}
+                className={cn(
+                  'mb-2 flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-muted/60 transition-colors group',
+                  isAutoModeActive && 'bg-primary/5'
                 )}
-              </span>
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span
-                  className={cn(
-                    'truncate text-xs',
-                    isAutoModeActive
-                      ? 'font-semibold text-primary'
-                      : 'text-foreground/80 group-hover:text-foreground'
+                onClick={() => selectAutoModel(setOpen)}
+              >
+                <span className="mt-0.5 flex size-5 items-center justify-center shrink-0">
+                  {isAutoModeActive ? (
+                    <span className="flex size-5 items-center justify-center rounded-full bg-primary/10">
+                      <Check className="size-3 text-primary" />
+                    </span>
+                  ) : (
+                    <AutoModelIcon size={18} />
                   )}
-                >
-                  {t('topbar.autoModel')}
                 </span>
-                <span className="text-[10px] text-muted-foreground">
-                  {autoRoutingState === 'routing'
-                    ? t('topbar.autoModelRouting')
-                    : autoSelection?.modelName
-                      ? t('topbar.autoModelTooltip', {
-                          route: t(
-                            autoSelection.target === 'main'
-                              ? 'topbar.autoModelMain'
-                              : 'topbar.autoModelFast'
-                          ),
-                          model: autoSelection.modelName,
-                          taskType: autoSelection.taskType ?? t('topbar.autoModelTaskTypeUnknown'),
-                          confidence:
-                            autoSelection.confidence ?? t('topbar.autoModelConfidenceUnknown'),
-                          reason: autoSelection.fallbackReason
-                            ? t(`topbar.autoModelFallback.${autoSelection.fallbackReason}`, {
-                                defaultValue: autoSelection.fallbackReason
-                              })
-                            : ''
-                        })
-                      : t('topbar.autoModelDesc')}
-                </span>
-              </div>
-            </button>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span
+                    className={cn(
+                      'truncate text-xs',
+                      isAutoModeActive
+                        ? 'font-semibold text-primary'
+                        : 'text-foreground/80 group-hover:text-foreground'
+                    )}
+                  >
+                    {t('topbar.autoModel')}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {autoRoutingState === 'routing'
+                      ? t('topbar.autoModelRouting')
+                      : autoSelection?.modelName
+                        ? t('topbar.autoModelTooltip', {
+                            route: t(
+                              autoSelection.target === 'main'
+                                ? 'topbar.autoModelMain'
+                                : 'topbar.autoModelFast'
+                            ),
+                            model: autoSelection.modelName,
+                            taskType:
+                              autoSelection.taskType ?? t('topbar.autoModelTaskTypeUnknown'),
+                            confidence:
+                              autoSelection.confidence ?? t('topbar.autoModelConfidenceUnknown'),
+                            reason: autoSelection.fallbackReason
+                              ? t(`topbar.autoModelFallback.${autoSelection.fallbackReason}`, {
+                                  defaultValue: autoSelection.fallbackReason
+                                })
+                              : ''
+                          })
+                        : t('topbar.autoModelDesc')}
+                  </span>
+                </div>
+              </button>
+            )}
             {groups.length === 0 ? (
               <div className="px-3 py-6 text-center text-xs text-muted-foreground/50">
                 {enabledProviders.length === 0 ? t('topbar.noProviders') : t('topbar.noModels')}
@@ -975,14 +1017,23 @@ export function ModelSwitcher(): React.JSX.Element {
                           isActive && 'bg-primary/5'
                         )}
                         onClick={() =>
-                          selectModel(
-                            provider,
-                            m.id,
-                            activeProviderId,
-                            setActiveProvider,
-                            setActiveModel,
-                            setOpen
-                          )
+                          isFastRoute
+                            ? selectFastModel(
+                                provider,
+                                m.id,
+                                activeFastProviderId,
+                                setActiveFastProvider,
+                                setActiveFastModel,
+                                setOpen
+                              )
+                            : selectModel(
+                                provider,
+                                m.id,
+                                activeProviderId,
+                                setActiveProvider,
+                                setActiveModel,
+                                setOpen
+                              )
                         }
                       >
                         <span className="mt-0.5 shrink-0">

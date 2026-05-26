@@ -379,7 +379,6 @@ export function WorkspaceSidebar(): React.JSX.Element {
   const updateSessionIcon = useChatStore((state) => state.updateSessionIcon)
   const duplicateSession = useChatStore((state) => state.duplicateSession)
   const clearSessionMessages = useChatStore((state) => state.clearSessionMessages)
-  const clearAllSessions = useChatStore((state) => state.clearAllSessions)
   const togglePinSession = useChatStore((state) => state.togglePinSession)
   const importSession = useChatStore((state) => state.importSession)
   const importProjectArchive = useChatStore((state) => state.importProjectArchive)
@@ -555,16 +554,20 @@ export function WorkspaceSidebar(): React.JSX.Element {
   const openChatHome = useCallback(() => {
     const chatStore = useChatStore.getState()
     const uiStore = useUIStore.getState()
-    chatStore.setActiveSession(null)
+    chatStore.setActiveProject(null)
     uiStore.setMode('chat')
     uiStore.navigateToHome()
   }, [])
 
   const openProjectHome = useCallback((projectId: string) => {
     const chatStore = useChatStore.getState()
+    const uiStore = useUIStore.getState()
     chatStore.setActiveProject(projectId)
     chatStore.setActiveSession(null)
-    useUIStore.getState().navigateToProject(projectId)
+    if (uiStore.mode === 'chat') {
+      uiStore.setMode('cowork')
+    }
+    uiStore.navigateToProject(projectId)
   }, [])
 
   const handleCreateChatSession = useCallback(() => {
@@ -685,8 +688,12 @@ export function WorkspaceSidebar(): React.JSX.Element {
     useUIStore.getState().setChangelogDialogOpen(true)
   }, [])
 
-  const handleClearAllSessions = useCallback(async () => {
-    const total = useChatStore.getState().sessions.length
+  const handleClearChatSessions = useCallback(async () => {
+    const chatSessionIds = useChatStore
+      .getState()
+      .sessions.filter((session) => !session.projectId)
+      .map((session) => session.id)
+    const total = chatSessionIds.length
     if (total === 0) {
       toast.info(t('sidebar.noConversations'))
       return
@@ -696,10 +703,12 @@ export function WorkspaceSidebar(): React.JSX.Element {
       variant: 'destructive'
     })
     if (!ok) return
-    clearAllSessions()
-    useUIStore.getState().navigateToHome()
+    for (const sessionId of chatSessionIds) {
+      clearPendingSessionMessages(sessionId)
+      deleteSession(sessionId)
+    }
     toast.success(t('sidebar_toast.allDeleted'))
-  }, [clearAllSessions, t])
+  }, [deleteSession, t])
 
   const confirmClearSessionMessages = useCallback(() => {
     if (!clearSessionTarget) return
@@ -1779,8 +1788,8 @@ export function WorkspaceSidebar(): React.JSX.Element {
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         variant="destructive"
-                        onSelect={() => deferDropdownAction(() => void handleClearAllSessions())}
-                        disabled={sessions.length === 0}
+                        onSelect={() => deferDropdownAction(() => void handleClearChatSessions())}
+                        disabled={chatSessions.length === 0}
                       >
                         <Trash2 className="size-4" />
                         {t('sidebar.deleteAllSessions')}

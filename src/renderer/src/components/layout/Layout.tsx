@@ -157,7 +157,7 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
   const handleCreateChatSession = useCallback((): void => {
     const store = useChatStore.getState()
     const uiStore = useUIStore.getState()
-    store.setActiveSession(null)
+    store.setActiveProject(null)
     uiStore.setMode('chat')
     uiStore.navigateToHome()
   }, [])

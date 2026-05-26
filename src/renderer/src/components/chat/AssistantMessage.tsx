@@ -37,6 +37,7 @@ import { AgentErrorCard } from './AgentErrorCard'
 import { ImagePreview } from './ImagePreview'
 import { ImagePluginToolCard } from './ImagePluginToolCard'
 import { DesktopActionToolCard } from './DesktopActionToolCard'
+import { BrowserToolCard } from './BrowserToolCard'
 import { useChatStore } from '@renderer/stores/chat-store'
 import { useAgentStore } from '@renderer/stores/agent-store'
 import type { AgentRunChangeSet, AgentRunFileChange } from '@renderer/stores/agent-store'
@@ -86,6 +87,7 @@ import {
   DESKTOP_WAIT_TOOL_NAME,
   IMAGE_GENERATE_TOOL_NAME
 } from '@renderer/lib/app-plugin/types'
+import { isBrowserToolName } from '@renderer/lib/app-plugin/browser-tool-names'
 import { LazySyntaxHighlighter } from './LazySyntaxHighlighter'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@renderer/components/ui/dialog'
 import { aggregateDisplayableRunFileChanges } from './file-change-utils'
@@ -1779,6 +1781,25 @@ export function AssistantMessage({
           </ScaleIn>
         )
       }
+      if (isBrowserToolName(block.name)) {
+        if (toolsCollapsed) return null
+        const toolCallState = buildToolCallRenderState(block, {
+          isStreaming,
+          toolResults,
+          liveToolCallMap: effectiveLiveToolCallMap
+        })
+        return (
+          <ScaleIn key={key} className={liveScaleInClassName}>
+            <BrowserToolCard
+              name={toolCallState.name}
+              input={toolCallState.input}
+              output={toolCallState.output}
+              status={toolCallState.status}
+              error={toolCallState.error}
+            />
+          </ScaleIn>
+        )
+      }
       if (
         block.name === DESKTOP_SCREENSHOT_TOOL_NAME ||
         block.name === DESKTOP_CLICK_TOOL_NAME ||
@@ -2046,6 +2067,18 @@ export function AssistantMessage({
                 collapsible={groupBlocks.length > 1}
               >
                 {groupToolCalls.map((toolCall) => {
+                  if (isBrowserToolName(toolCall.name)) {
+                    return (
+                      <BrowserToolCard
+                        key={toolCall.toolUseId}
+                        name={toolCall.name}
+                        input={toolCall.input}
+                        output={toolCall.output}
+                        status={toolCall.status}
+                        error={toolCall.error}
+                      />
+                    )
+                  }
                   return (
                     <ToolCallCard
                       key={toolCall.toolUseId}

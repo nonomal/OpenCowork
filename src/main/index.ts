@@ -44,6 +44,7 @@ import { registerCommandsHandlers } from './ipc/commands-handlers'
 import { registerProcessManagerHandlers, killAllManagedProcesses } from './ipc/process-manager'
 import { registerTerminalHandlers, killAllTerminalSessions } from './ipc/terminal-handlers'
 import { registerDbHandlers } from './ipc/db-handlers'
+import { registerGoalRuntimeHandlers } from './ipc/goal-runtime-handlers'
 import { registerMemoryAutomationHandlers } from './ipc/memory-automation-handlers'
 import { registerConfigHandlers } from './ipc/secure-key-store'
 import { registerChannelHandlers, autoStartChannels } from './ipc/channel-handlers'
@@ -73,6 +74,7 @@ import { safeSendToWindow } from './window-ipc'
 import * as sessionsDao from './db/sessions-dao'
 import {
   configureBuiltInBrowserSession,
+  flushBuiltInBrowserStorage,
   resolveBrowserSessionStorageMode
 } from './browser/browser-emulation'
 
@@ -1009,6 +1011,7 @@ app.on('child-process-gone', (_event, details) => {
 
 app.on('before-quit', () => {
   isQuiting = true
+  flushBuiltInBrowserStorage()
   flushSettingsSync()
 })
 
@@ -1105,6 +1108,7 @@ if (gotSingleInstanceLock) {
         closeDetachedSessionWindow(sessionId)
       }
     })
+    registerGoalRuntimeHandlers()
     registerMemoryAutomationHandlers()
     registerConfigHandlers()
     registerSshHandlers()

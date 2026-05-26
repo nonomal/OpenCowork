@@ -41,11 +41,12 @@ import {
   type SessionGoalEvent,
   type SessionGoalEventType
 } from '@renderer/stores/goal-store'
-import { useChatActions } from '@renderer/hooks/use-chat-actions'
 
 const BLOCKER_EVENT_TYPES = new Set<SessionGoalEventType>([
+  'usage_limited',
   'budget_limited',
   'completion_deferred',
+  'blocked',
   'stall_paused',
   'auto_continue_blocked'
 ])
@@ -92,6 +93,10 @@ function statusTone(status?: SessionGoal['status']): string {
       return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
     case 'paused':
       return 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300'
+    case 'blocked':
+      return 'border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-300'
+    case 'usage_limited':
+      return 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-300'
     case 'budget_limited':
       return 'border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300'
     case 'complete':
@@ -111,11 +116,18 @@ function GoalStatusBadge({ status }: { status?: SessionGoal['status'] }): React.
   )
 }
 
-function GoalUsageLine({ goal }: { goal?: SessionGoal }): React.JSX.Element {
+function GoalUsageLine({
+  goal,
+  timeUsedSeconds
+}: {
+  goal?: SessionGoal
+  timeUsedSeconds?: number
+}): React.JSX.Element {
   const { t } = useTranslation('chat')
   if (!goal) {
     return <span>{t('goal.noUsage')}</span>
   }
+  const displayTimeUsedSeconds = timeUsedSeconds ?? goal.timeUsedSeconds
   const tokenText =
     goal.tokenBudget !== undefined && goal.tokenBudget !== null
       ? t('goal.tokensWithBudget', {
@@ -125,10 +137,29 @@ function GoalUsageLine({ goal }: { goal?: SessionGoal }): React.JSX.Element {
       : t('goal.tokensOnly', { tokens: formatGoalTokens(goal.tokensUsed) })
   return (
     <>
-      <span>{formatGoalElapsedSeconds(goal.timeUsedSeconds)}</span>
+      <span>{formatGoalElapsedSeconds(displayTimeUsedSeconds)}</span>
       <span>{tokenText}</span>
     </>
   )
+}
+
+function useLiveGoalElapsedSeconds(goal?: SessionGoal, activeRunStartedAt?: number | null): number {
+  const [now, setNow] = React.useState(() => Date.now())
+
+  React.useEffect(() => {
+    if (!activeRunStartedAt) return
+    const tick = (): void => setNow(Date.now())
+    tick()
+    const interval = window.setInterval(tick, 1000)
+    return () => window.clearInterval(interval)
+  }, [activeRunStartedAt])
+
+  if (!goal) return 0
+  const activeRunSeconds =
+    goal.status === 'active' && activeRunStartedAt
+      ? Math.max(0, Math.floor((now - activeRunStartedAt) / 1000))
+      : 0
+  return goal.timeUsedSeconds + activeRunSeconds
 }
 
 function formatGoalEvent(
@@ -239,21 +270,11 @@ function useGoalActions(
 } {
   const { t } = useTranslation('chat')
   const { t: tCommon } = useTranslation('common')
-  const { sendMessage } = useChatActions()
   const [open, setOpen] = React.useState(false)
   const [objectiveDraft, setObjectiveDraft] = React.useState('')
   const [tokenBudgetDraft, setTokenBudgetDraft] = React.useState('')
   const [saving, setSaving] = React.useState(false)
   const [clearing, setClearing] = React.useState(false)
-
-  const continueGoal = React.useCallback(
-    (targetSessionId: string): void => {
-      queueMicrotask(() => {
-        void sendMessage('', undefined, 'continue', targetSessionId, null)
-      })
-    },
-    [sendMessage]
-  )
 
   const openManager = React.useCallback(() => {
     setObjectiveDraft(goal?.objective ?? '')
@@ -291,13 +312,9 @@ function useGoalActions(
         toast.info(t('goal.toasts.budgetStillExhausted'), {
           description: t('goal.toasts.increaseBudget')
         })
-        return
-      }
-      if (status === 'active' && result.goal?.status === 'active') {
-        continueGoal(sessionId)
       }
     },
-    [continueGoal, sessionId, t]
+    [sessionId, t]
   )
 
   const clearGoal = React.useCallback(async (): Promise<void> => {
@@ -354,10 +371,7 @@ function useGoalActions(
       return
     }
     setOpen(false)
-    if (result.goal?.status === 'active') {
-      continueGoal(sessionId)
-    }
-  }, [continueGoal, goal, objectiveDraft, parseGoalTokenBudget, sessionId, t])
+  }, [goal, objectiveDraft, parseGoalTokenBudget, sessionId, t])
 
   return {
     open,
@@ -556,6 +570,12 @@ export function GoalSessionBar({
   const { goal, events } = useGoalSession(sessionId)
   const actions = useGoalActions(sessionId, goal)
   const [expanded, setExpanded] = React.useState(true)
+  const activeRunStartedAt = useGoalStore((s) => {
+    if (!sessionId || !goal) return null
+    const activeRun = s.activeGoalRunsBySession[sessionId]
+    return activeRun?.goalId === goal.goalId ? activeRun.startedAt : null
+  })
+  const liveTimeUsedSeconds = useLiveGoalElapsedSeconds(goal, activeRunStartedAt)
 
   React.useEffect(() => {
     setExpanded(true)
@@ -568,9 +588,13 @@ export function GoalSessionBar({
       ? t('goal.runningTitle', { defaultValue: 'Pursuing goal' })
       : goal.status === 'paused'
         ? t('goal.pausedTitle', { defaultValue: 'Paused goal' })
-        : goal.status === 'complete'
-          ? t('goal.completedTitle', { defaultValue: 'Completed goal' })
-          : t('goal.limitedTitle', { defaultValue: 'Budget-limited goal' })
+        : goal.status === 'blocked'
+          ? t('goal.blockedTitle', { defaultValue: 'Blocked goal' })
+          : goal.status === 'usage_limited'
+            ? t('goal.usageLimitedTitle', { defaultValue: 'Usage-limited goal' })
+            : goal.status === 'complete'
+              ? t('goal.completedTitle', { defaultValue: 'Completed goal' })
+              : t('goal.limitedTitle', { defaultValue: 'Budget-limited goal' })
   const hasBlockerNotice = events.some((event) => BLOCKER_EVENT_TYPES.has(event.eventType))
 
   return (
@@ -590,7 +614,7 @@ export function GoalSessionBar({
                   </span>
                 )}
                 <span className="shrink-0 text-[11px] text-muted-foreground">
-                  {formatGoalElapsedSeconds(goal.timeUsedSeconds)}
+                  {formatGoalElapsedSeconds(liveTimeUsedSeconds)}
                 </span>
               </div>
               {expanded && (
@@ -682,6 +706,12 @@ export function GoalPanelCard({
   const { t } = useTranslation('chat')
   const { goal, events } = useGoalSession(sessionId)
   const actions = useGoalActions(sessionId, goal)
+  const activeRunStartedAt = useGoalStore((s) => {
+    if (!sessionId || !goal) return null
+    const activeRun = s.activeGoalRunsBySession[sessionId]
+    return activeRun?.goalId === goal.goalId ? activeRun.startedAt : null
+  })
+  const liveTimeUsedSeconds = useLiveGoalElapsedSeconds(goal, activeRunStartedAt)
 
   if (!sessionId) return null
 
@@ -701,7 +731,7 @@ export function GoalPanelCard({
               {goal.objective}
             </p>
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-              <GoalUsageLine goal={goal} />
+              <GoalUsageLine goal={goal} timeUsedSeconds={liveTimeUsedSeconds} />
             </div>
             <LatestGoalNotice events={events} />
           </>

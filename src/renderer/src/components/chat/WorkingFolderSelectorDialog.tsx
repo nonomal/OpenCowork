@@ -289,6 +289,171 @@ export function WorkingFolderSelectorDialog({
     pendingSelection?.kind === 'ssh'
       ? sshConnections.find((item) => item.id === pendingSelection.connectionId)
       : null
+  const localFolderSection = (
+    <>
+      {createMode ? (
+        <button
+          className="group mb-3 flex w-full items-center gap-3 rounded-lg border border-primary/25 bg-primary/5 px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/10"
+          onClick={() => void handleSelectOtherFolder()}
+        >
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <FolderOpen className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-foreground">
+              {t('input.selectLocalProjectFolder', {
+                defaultValue: 'Select local working folder'
+              })}
+            </div>
+            <div className="text-[10px] text-muted-foreground/70">
+              {t('input.selectLocalProjectFolderHint', {
+                defaultValue:
+                  'Open the system folder picker. It starts from your last/default project location.'
+              })}
+            </div>
+          </div>
+          <ArrowRight className="size-4 shrink-0 text-primary/70 transition-transform group-hover:translate-x-0.5" />
+        </button>
+      ) : null}
+
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-[10px] font-medium text-muted-foreground/70">
+          {t('input.desktopFolders')}
+        </p>
+        <button
+          className="text-[10px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
+          onClick={() => void loadDesktopDirectories()}
+        >
+          {tLayout('refresh')}
+        </button>
+      </div>
+
+      <div
+        className={cn(
+          'max-h-40 overflow-y-auto pr-1',
+          createMode ? 'grid grid-cols-2 gap-1.5' : 'flex flex-wrap gap-1.5'
+        )}
+      >
+        {desktopDirectoriesLoading ? (
+          <span className="text-[11px] text-muted-foreground/60">{t('input.loadingFolders')}</span>
+        ) : desktopDirectories.length > 0 ? (
+          desktopDirectories.map((directory) => {
+            const selected = directory.path.toLowerCase() === normalizedWorkingFolder
+            return (
+              <button
+                key={directory.path}
+                className={cn(
+                  'inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-[11px] transition-colors',
+                  createMode ? 'justify-start' : '',
+                  selected
+                    ? 'border-primary/60 bg-primary/10 text-primary'
+                    : 'border-border/70 bg-muted/20 text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                )}
+                onClick={() => void handleSelectDesktopFolder(directory.path)}
+                title={directory.path}
+              >
+                <FolderOpen className="size-3 shrink-0" />
+                <span className="truncate">{directory.name}</span>
+              </button>
+            )
+          })
+        ) : (
+          <span className="text-[11px] text-muted-foreground/60">
+            {t('input.noDesktopFolders')}
+          </span>
+        )}
+
+        {!createMode ? (
+          <button
+            className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            onClick={() => void handleSelectOtherFolder()}
+          >
+            <FolderOpen className="size-3 shrink-0" />
+            {t('input.selectOtherFolder')}
+          </button>
+        ) : null}
+      </div>
+
+      {createMode ? (
+        <p className="mt-2 truncate text-[10px] text-muted-foreground/60">
+          {t('input.pickerDefaultLocation', {
+            defaultValue: 'Picker opens at: {{path}}',
+            path: preferredDirectoryLabel
+          })}
+        </p>
+      ) : null}
+    </>
+  )
+  const sshConnectionSection = (
+    <div className={cn('border-t pt-3', createMode ? 'mt-0' : 'mt-3')}>
+      <p className="mb-2 flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground/70">
+        <Monitor className="size-3" />
+        {t('input.sshConnections')}
+      </p>
+      {sshConnections.length > 0 ? (
+        <div className="space-y-1.5">
+          {sshConnections.map((conn) => {
+            const isSelected = activeSshConnectionId === conn.id
+            const dirValue = sshDirInputs[conn.id] ?? conn.defaultDirectory ?? DEFAULT_SSH_WORKDIR
+            return (
+              <div
+                key={conn.id}
+                className={cn(
+                  'flex flex-col gap-2 rounded-md border px-2 py-2 transition-colors sm:flex-row sm:items-center',
+                  isSelected
+                    ? 'border-primary/60 bg-primary/10'
+                    : 'border-border/70 bg-muted/20 hover:bg-muted/50'
+                )}
+              >
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <Server className="size-3 shrink-0 text-muted-foreground/60" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[11px] font-medium">{conn.name}</div>
+                    <div className="truncate text-[9px] text-muted-foreground/50">
+                      {conn.username}@{conn.host}:{conn.port}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 sm:w-64">
+                  <Input
+                    aria-label={t('input.sshDirectory')}
+                    value={dirValue}
+                    onChange={(event) =>
+                      setSshDirInputs((prev) => ({
+                        ...prev,
+                        [conn.id]: event.target.value
+                      }))
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') void handleSelectSshFolder(conn.id)
+                    }}
+                    placeholder={t('input.sshDirectoryPlaceholder', {
+                      defaultValue: '/home/user/project'
+                    })}
+                    className="h-7 min-w-0 flex-1 bg-background/60 text-[10px]"
+                  />
+                  <button
+                    className="shrink-0 rounded-md border border-primary/50 bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/15"
+                    onClick={() => void handleSelectSshFolder(conn.id)}
+                  >
+                    {t('input.sshSelect', {
+                      defaultValue: 'Select'
+                    })}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <span className="text-[11px] text-muted-foreground/60">
+          {t('input.noSshConnections', {
+            defaultValue: 'No SSH connections configured'
+          })}
+        </span>
+      )}
+    </div>
+  )
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -321,25 +486,34 @@ export function WorkingFolderSelectorDialog({
                   <p className="text-[10px] text-muted-foreground/70">
                     {t('input.projectSource', { defaultValue: 'Project source' })}
                   </p>
-                  <div className="mt-1 grid grid-cols-2 rounded-lg border border-border/70 bg-muted/20 p-0.5">
+                  <div className="relative mt-1 grid grid-cols-2 rounded-lg border border-border/70 bg-muted/20 p-0.5">
+                    <motion.span
+                      className="absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-md bg-background shadow-sm"
+                      animate={{ x: showSshSection ? '100%' : '0%' }}
+                      transition={SOURCE_TAB_TRANSITION}
+                    />
                     <button
                       className={cn(
-                        'rounded-md px-2 py-1 text-[11px] transition-colors',
+                        'relative z-10 rounded-md px-2 py-1 text-[11px] transition-colors duration-150',
                         showLocalSection
-                          ? 'bg-background text-foreground shadow-sm'
+                          ? 'text-foreground'
                           : 'text-muted-foreground hover:text-foreground'
                       )}
+                      type="button"
+                      aria-pressed={showLocalSection}
                       onClick={() => handleChangeSection('local')}
                     >
                       {t('input.sourceLocal', { defaultValue: 'Local' })}
                     </button>
                     <button
                       className={cn(
-                        'rounded-md px-2 py-1 text-[11px] transition-colors',
+                        'relative z-10 rounded-md px-2 py-1 text-[11px] transition-colors duration-150',
                         showSshSection
-                          ? 'bg-background text-foreground shadow-sm'
+                          ? 'text-foreground'
                           : 'text-muted-foreground hover:text-foreground'
                       )}
+                      type="button"
+                      aria-pressed={showSshSection}
                       onClick={() => handleChangeSection('ssh')}
                     >
                       {t('input.sourceSsh', { defaultValue: 'SSH' })}
@@ -362,175 +536,24 @@ export function WorkingFolderSelectorDialog({
             </div>
           )}
 
-          {createMode && showLocalSection ? (
-            <button
-              className="group mb-3 flex w-full items-center gap-3 rounded-lg border border-primary/25 bg-primary/5 px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/10"
-              onClick={() => void handleSelectOtherFolder()}
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <FolderOpen className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="text-[12px] font-medium text-foreground">
-                  {t('input.selectLocalProjectFolder', {
-                    defaultValue: 'Select local working folder'
-                  })}
-                </div>
-                <div className="text-[10px] text-muted-foreground/70">
-                  {t('input.selectLocalProjectFolderHint', {
-                    defaultValue:
-                      'Open the system folder picker. It starts from your last/default project location.'
-                  })}
-                </div>
-              </div>
-              <ArrowRight className="size-4 shrink-0 text-primary/70 transition-transform group-hover:translate-x-0.5" />
-            </button>
-          ) : null}
-
-          {!createMode || showLocalSection ? (
-            <>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="text-[10px] font-medium text-muted-foreground/70">
-                  {t('input.desktopFolders')}
-                </p>
-                <button
-                  className="text-[10px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
-                  onClick={() => void loadDesktopDirectories()}
-                >
-                  {tLayout('refresh')}
-                </button>
-              </div>
-
-              <div
-                className={cn(
-                  'max-h-40 overflow-y-auto pr-1',
-                  createMode ? 'grid grid-cols-2 gap-1.5' : 'flex flex-wrap gap-1.5'
-                )}
+          {createMode ? (
+            <AnimatePresence initial={false} mode="wait">
+              <motion.div
+                key={activeSection}
+                initial={{ opacity: 0, x: showLocalSection ? -8 : 8 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: showLocalSection ? 8 : -8 }}
+                transition={SOURCE_PANEL_TRANSITION}
               >
-                {desktopDirectoriesLoading ? (
-                  <span className="text-[11px] text-muted-foreground/60">
-                    {t('input.loadingFolders')}
-                  </span>
-                ) : desktopDirectories.length > 0 ? (
-                  desktopDirectories.map((directory) => {
-                    const selected = directory.path.toLowerCase() === normalizedWorkingFolder
-                    return (
-                      <button
-                        key={directory.path}
-                        className={cn(
-                          'inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-[11px] transition-colors',
-                          createMode ? 'justify-start' : '',
-                          selected
-                            ? 'border-primary/60 bg-primary/10 text-primary'
-                            : 'border-border/70 bg-muted/20 text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-                        )}
-                        onClick={() => void handleSelectDesktopFolder(directory.path)}
-                        title={directory.path}
-                      >
-                        <FolderOpen className="size-3 shrink-0" />
-                        <span className="truncate">{directory.name}</span>
-                      </button>
-                    )
-                  })
-                ) : (
-                  <span className="text-[11px] text-muted-foreground/60">
-                    {t('input.noDesktopFolders')}
-                  </span>
-                )}
-
-                {!createMode ? (
-                  <button
-                    className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-                    onClick={() => void handleSelectOtherFolder()}
-                  >
-                    <FolderOpen className="size-3 shrink-0" />
-                    {t('input.selectOtherFolder')}
-                  </button>
-                ) : null}
-              </div>
-
-              {createMode ? (
-                <p className="mt-2 truncate text-[10px] text-muted-foreground/60">
-                  {t('input.pickerDefaultLocation', {
-                    defaultValue: 'Picker opens at: {{path}}',
-                    path: preferredDirectoryLabel
-                  })}
-                </p>
-              ) : null}
+                {showLocalSection ? localFolderSection : sshConnectionSection}
+              </motion.div>
+            </AnimatePresence>
+          ) : (
+            <>
+              {localFolderSection}
+              {sshConnectionSection}
             </>
-          ) : null}
-
-          {!createMode || showSshSection ? (
-            <div className={cn('border-t pt-3', createMode ? 'mt-0' : 'mt-3')}>
-              <p className="mb-2 flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground/70">
-                <Monitor className="size-3" />
-                {t('input.sshConnections')}
-              </p>
-              {sshConnections.length > 0 ? (
-                <div className="space-y-1.5">
-                  {sshConnections.map((conn) => {
-                    const isSelected = activeSshConnectionId === conn.id
-                    const dirValue =
-                      sshDirInputs[conn.id] ?? conn.defaultDirectory ?? DEFAULT_SSH_WORKDIR
-                    return (
-                      <div
-                        key={conn.id}
-                        className={cn(
-                          'flex flex-col gap-2 rounded-md border px-2 py-2 transition-colors sm:flex-row sm:items-center',
-                          isSelected
-                            ? 'border-primary/60 bg-primary/10'
-                            : 'border-border/70 bg-muted/20 hover:bg-muted/50'
-                        )}
-                      >
-                        <div className="flex min-w-0 flex-1 items-center gap-2">
-                          <Server className="size-3 shrink-0 text-muted-foreground/60" />
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-[11px] font-medium">{conn.name}</div>
-                            <div className="truncate text-[9px] text-muted-foreground/50">
-                              {conn.username}@{conn.host}:{conn.port}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 sm:w-64">
-                          <Input
-                            aria-label={t('input.sshDirectory')}
-                            value={dirValue}
-                            onChange={(event) =>
-                              setSshDirInputs((prev) => ({
-                                ...prev,
-                                [conn.id]: event.target.value
-                              }))
-                            }
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') void handleSelectSshFolder(conn.id)
-                            }}
-                            placeholder={t('input.sshDirectoryPlaceholder', {
-                              defaultValue: '/home/user/project'
-                            })}
-                            className="h-7 min-w-0 flex-1 bg-background/60 text-[10px]"
-                          />
-                          <button
-                            className="shrink-0 rounded-md border border-primary/50 bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/15"
-                            onClick={() => void handleSelectSshFolder(conn.id)}
-                          >
-                            {t('input.sshSelect', {
-                              defaultValue: 'Select'
-                            })}
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <span className="text-[11px] text-muted-foreground/60">
-                  {t('input.noSshConnections', {
-                    defaultValue: 'No SSH connections configured'
-                  })}
-                </span>
-              )}
-            </div>
-          ) : null}
+          )}
 
           {createMode ? (
             <div className="mt-3 border-t pt-3">

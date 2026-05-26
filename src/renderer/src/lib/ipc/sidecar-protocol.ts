@@ -149,6 +149,7 @@ export interface SidecarAgentRunRequest {
   sessionMode?: 'agent' | 'chat'
   planMode?: boolean
   planModeAllowedTools?: string[]
+  goalRunSource?: 'user_turn' | 'continue'
   pluginId?: string
   pluginChatId?: string
   pluginChatType?: 'p2p' | 'group'
@@ -379,6 +380,7 @@ export function buildSidecarAgentRunRequest(args: {
   sessionMode?: 'agent' | 'chat'
   planMode?: boolean
   planModeAllowedTools?: readonly string[]
+  goalRunSource?: 'user_turn' | 'continue'
   pluginId?: string
   pluginChatId?: string
   pluginChatType?: 'p2p' | 'group'
@@ -414,6 +416,7 @@ export function buildSidecarAgentRunRequest(args: {
     ...(args.planModeAllowedTools && args.planModeAllowedTools.length > 0
       ? { planModeAllowedTools: [...args.planModeAllowedTools] }
       : {}),
+    ...(args.goalRunSource ? { goalRunSource: args.goalRunSource } : {}),
     ...(args.pluginId ? { pluginId: args.pluginId } : {}),
     ...(args.pluginChatId ? { pluginChatId: args.pluginChatId } : {}),
     ...(args.pluginChatType ? { pluginChatType: args.pluginChatType } : {}),

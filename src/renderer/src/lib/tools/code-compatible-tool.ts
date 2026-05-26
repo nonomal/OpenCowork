@@ -167,33 +167,6 @@ const toolSearchHandler: ToolHandler = {
   requiresApproval: () => false
 }
 
-const lspHandler: ToolHandler = {
-  definition: {
-    name: 'LSP',
-    description: 'Language-server code intelligence. Returns unavailable until an LSP backend is configured.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          description:
-            'Requested action: definition, references, diagnostics, symbols, hover, implementations, call_hierarchy'
-        },
-        file_path: { type: 'string', description: 'Target file' },
-        line: { type: 'number', description: 'One-based line' },
-        column: { type: 'number', description: 'One-based column' },
-        query: { type: 'string', description: 'Symbol query' }
-      }
-    }
-  },
-  execute: async () =>
-    unavailable(
-      'LSP',
-      'No language-server backend is registered yet. Use Grep/Glob/Read or an MCP language server.'
-    ),
-  requiresApproval: () => false
-}
-
 const powerShellHandler: ToolHandler = {
   definition: {
     name: 'PowerShell',
@@ -255,67 +228,14 @@ const monitorHandler: ToolHandler = {
   requiresApproval: () => true
 }
 
-const enterWorktreeHandler: ToolHandler = {
-  definition: {
-    name: 'EnterWorktree',
-    description: 'Create or switch to a git worktree. Returns the target path for the user to select.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: 'Existing or new worktree path' },
-        branch: { type: 'string', description: 'Branch name for a new worktree' }
-      },
-      required: ['path']
-    }
-  },
-  execute: async (input, ctx) => {
-    const targetPath = String(input.path ?? '').trim()
-    if (!targetPath) return encodeToolError('EnterWorktree requires path')
-    const branch = typeof input.branch === 'string' && input.branch.trim() ? input.branch.trim() : ''
-    const command = branch
-      ? `git worktree add ${JSON.stringify(targetPath)} ${JSON.stringify(branch)}`
-      : `git worktree list --porcelain`
-    const result = await ctx.ipc.invoke(IPC.SHELL_EXEC, {
-      command,
-      cwd: ctx.workingFolder,
-      timeout: 120_000
-    })
-    return encodeStructuredToolResult({
-      targetPath,
-      branch: branch || null,
-      result,
-      message:
-        'Worktree command completed. OpenCowork does not automatically switch the session working folder yet.'
-    })
-  },
-  requiresApproval: () => true
-}
-
-const exitWorktreeHandler: ToolHandler = {
-  definition: {
-    name: 'ExitWorktree',
-    description: 'Code-agent-compatible worktree exit placeholder.',
-    inputSchema: { type: 'object', properties: {} }
-  },
-  execute: async () =>
-    unavailable(
-      'ExitWorktree',
-      'OpenCowork sessions do not currently maintain a separate worktree stack to exit.'
-    ),
-  requiresApproval: () => false
-}
-
 export function registerCodeCompatibleTools(): void {
   toolRegistry.register(agentHandler)
   toolRegistry.register(todoWriteHandler)
   toolRegistry.register(listMcpResourcesHandler)
   toolRegistry.register(readMcpResourceHandler)
   toolRegistry.register(toolSearchHandler)
-  toolRegistry.register(lspHandler)
   if (window.electron.process.platform === 'win32') {
     toolRegistry.register(powerShellHandler)
   }
   toolRegistry.register(monitorHandler)
-  toolRegistry.register(enterWorktreeHandler)
-  toolRegistry.register(exitWorktreeHandler)
 }

@@ -96,6 +96,7 @@
     "queueRunningHint": "当前回合结束后按顺序发送",
     "queueResume": "继续发送",
     "queueEditing": "编辑排队消息",
+    "queueQuote": "引用",
     "queueImageCount": "{{count}} 张图片",
     "queueImageOnly": "[仅图片]",
     "queueCleared": "已清空排队消息",
@@ -282,6 +283,8 @@
     "title": "Goal",
     "runningTitle": "进行中的目标",
     "pausedTitle": "已暂停的目标",
+    "blockedTitle": "已阻塞的目标",
+    "usageLimitedTitle": "受配额限制的目标",
     "completedTitle": "已完成的目标",
     "limitedTitle": "预算受限的目标",
     "notSet": "未设置",
@@ -319,6 +322,8 @@
     "status": {
       "active": "进行中",
       "paused": "已暂停",
+      "blocked": "已阻塞",
+      "usage_limited": "受配额限制",
       "budget_limited": "预算耗尽",
       "complete": "已完成"
     },
@@ -342,8 +347,10 @@
       "budget_updated": "预算已更新",
       "status_changed": "状态已变化",
       "usage_accounted": "本轮用量已记账",
+      "usage_limited": "触发配额限制",
       "budget_limited": "预算已耗尽",
       "completion_deferred": "完成被暂缓",
+      "blocked": "Goal 已阻塞",
       "completed": "Goal 已完成",
       "stall_paused": "因停滞保护暂停",
       "auto_continue_blocked": "自动续跑等待中",
@@ -354,6 +361,8 @@
     "runtime": {
       "budgetReached": "Goal 预算已耗尽。我已停止为这个目标启动新工作；提高预算或替换目标后可以继续。",
       "completionDeferred": "Goal 完成被暂缓。完成门禁发现：{{blockers}}。目标仍保持 active。",
+      "blocked": "同一阻塞已连续多轮出现，Goal 已转为 blocked：{{blockers}}。",
+      "usageLimited": "Goal 因 provider 或 runtime 的配额限制而暂停：{{details}}。",
       "complete": "Goal 已完成。最终审计：{{usage}}；没有未完成任务、失败工具、排队用户消息或待处理 Plan gate。",
       "stallPaused": "Goal 已被停滞保护暂停：连续 {{count}} 轮续跑没有工具或任务进展。检查目标后可手动继续。",
       "autoContinueBlocked": "Goal 自动续跑正在等待：{{blockers}}。"
@@ -534,6 +543,62 @@
       "type": {
         "summary": "模式：{{mode}}"
       }
+    },
+    "browser": {
+      "running": "浏览器操作执行中",
+      "completed": "浏览器操作已完成",
+      "failed": "浏览器操作失败",
+      "executing": "正在执行浏览器操作...",
+      "input": "输入",
+      "output": "输出",
+      "notes": "补充说明",
+      "screenshotPreview": "截图预览",
+      "contentPreview": "内容预览",
+      "elementsPreview": "可交互元素",
+      "previewTruncated": "前 {{count}} 个字符",
+      "BrowserNavigate": {
+        "title": "浏览器导航"
+      },
+      "BrowserGetContent": {
+        "title": "浏览器内容"
+      },
+      "BrowserScreenshot": {
+        "title": "浏览器截图"
+      },
+      "BrowserSnapshot": {
+        "title": "浏览器快照"
+      },
+      "BrowserClick": {
+        "title": "浏览器点击"
+      },
+      "BrowserType": {
+        "title": "浏览器输入"
+      },
+      "BrowserScroll": {
+        "title": "浏览器滚动"
+      },
+      "fields": {
+        "title": "标题",
+        "url": "URL",
+        "type": "类型",
+        "clicked": "已点击",
+        "element": "元素",
+        "value": "值",
+        "scrollY": "滚动 Y",
+        "scrollHeight": "滚动高度",
+        "viewport": "视口",
+        "elements": "元素"
+      },
+      "summary": {
+        "content": "{{type}} · {{count}} 字符",
+        "screenshot": "{{width}} × {{height}}",
+        "image": "图片",
+        "elements": "{{count}} 个元素",
+        "snapshot": "可交互元素",
+        "type": "输入文本",
+        "typeSubmit": "{{selector}} · 提交",
+        "scrollY": "Y {{value}}"
+      }
     }
   },
   "subAgent": {
@@ -640,6 +705,8 @@
     "exporting": "导出中...",
     "copyAll": "复制全部",
     "copied": "已复制！",
+    "loadOlder": "加载更早消息（还有 {{count}} 条）",
+    "loadingOlder": "正在加载更早消息...",
     "scrollToBottom": "滚动到底部",
     "userLocator": {
       "title": "用户消息",

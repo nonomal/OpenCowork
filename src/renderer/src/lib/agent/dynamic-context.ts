@@ -81,6 +81,12 @@ function buildSessionStateContext(sessionId: string): string | null {
     if (goal.status === 'paused') {
       parts.push('  Reminder: The goal is paused. Do not auto-continue it until resumed.')
     }
+    if (goal.status === 'blocked') {
+      parts.push('  Reminder: The goal is blocked. Do not claim it is unblocked without new input.')
+    }
+    if (goal.status === 'usage_limited') {
+      parts.push('  Reminder: The goal is usage-limited. Wait for resume before continuing.')
+    }
     if (goal.status === 'budget_limited') {
       parts.push('  Reminder: The goal is budget-limited. Wrap up instead of starting new work.')
     }
@@ -236,38 +242,36 @@ function appendMemoryContext(
   const settings = useSettingsStore.getState()
   const memoryUseMemories = settings.memoryUseMemories
   const memorySummaryBudget = Math.max(1000, settings.memorySummaryBudgetTokens)
-  const effectiveGlobalMemory =
-    globalMemorySummary
+  const effectiveGlobalMemory = globalMemorySummary
+    ? {
+        content: globalMemorySummary,
+        path: globalMemorySummaryPath,
+        summarizedFromPath: globalMemoryPath
+      }
+    : globalMemory && estimateTokens(globalMemory) <= memorySummaryBudget
       ? {
-          content: globalMemorySummary,
-          path: globalMemorySummaryPath,
-          summarizedFromPath: globalMemoryPath
+          content: globalMemory,
+          path: globalMemoryPath
         }
-      : globalMemory && estimateTokens(globalMemory) <= memorySummaryBudget
-        ? {
-            content: globalMemory,
-            path: globalMemoryPath
-          }
-        : {
-            content: undefined,
-            path: undefined
-          }
-  const effectiveProjectMemory =
-    projectMemorySummary
+      : {
+          content: undefined,
+          path: undefined
+        }
+  const effectiveProjectMemory = projectMemorySummary
+    ? {
+        content: projectMemorySummary,
+        path: projectMemorySummaryPath,
+        summarizedFromPath: snapshot.projectMemory?.path
+      }
+    : projectMemory && estimateTokens(projectMemory) <= memorySummaryBudget
       ? {
-          content: projectMemorySummary,
-          path: projectMemorySummaryPath,
-          summarizedFromPath: snapshot.projectMemory?.path
+          content: projectMemory,
+          path: snapshot.projectMemory?.path
         }
-      : projectMemory && estimateTokens(projectMemory) <= memorySummaryBudget
-        ? {
-            content: projectMemory,
-            path: snapshot.projectMemory?.path
-          }
-        : {
-            content: undefined,
-            path: undefined
-          }
+      : {
+          content: undefined,
+          path: undefined
+        }
 
   if (sessionScope === 'main' && memoryUseMemories) {
     parts.push(

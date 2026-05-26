@@ -78,8 +78,7 @@ function resolveSubAgentProviderConfig(
   const settings = useSettingsStore.getState()
   const fastProvider = providerStore.getFastProviderConfig()
   const baseProvider = hasUsableProviderConfig(fastProvider) ? fastProvider : parentProvider
-  const modelOverride = definition.model?.trim()
-  const model = modelOverride || baseProvider.model
+  const model = baseProvider.model
 
   return {
     ...baseProvider,

@@ -475,7 +475,7 @@ export function createTaskTool(providerGetter: () => ProviderConfig): ToolHandle
               model: {
                 type: 'string',
                 description:
-                  'Optional model override for this agent. If not specified, uses the configured fast model.'
+                  'Deprecated and ignored. Synchronous sub-agents always use the configured fast model.'
               }
             },
             required: ['description', 'prompt', 'subagent_type'],
@@ -566,7 +566,6 @@ export function createTaskTool(providerGetter: () => ProviderConfig): ToolHandle
           tools: ['*'],
           disallowedTools: ['Task', 'AskUserQuestion'],
           maxTurns: DEFAULT_SUB_AGENT_MAX_TURNS,
-          ...(typeof input.model === 'string' && input.model ? { model: input.model } : {}),
           inputSchema: { type: 'object', properties: {} }
         }
       } else {

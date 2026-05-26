@@ -37,6 +37,79 @@ function ensureColumn(
   database.exec(`ALTER TABLE "${safeTable}" ADD COLUMN "${safeColumn}" ${definition}`)
 }
 
+function tableDefinitionIncludes(
+  database: Database.Database,
+  tableName: string,
+  fragment: string
+): boolean {
+  try {
+    const row = database
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`)
+      .get(tableName) as { sql?: string | null } | undefined
+    return row?.sql?.includes(fragment) ?? false
+  } catch {
+    return false
+  }
+}
+
+function migrateSessionGoalsStatusSchema(database: Database.Database): void {
+  if (!tableDefinitionIncludes(database, 'session_goals', `'usage_limited'`)) {
+    database.exec(`
+      ALTER TABLE session_goals RENAME TO session_goals_legacy;
+
+      CREATE TABLE session_goals (
+        session_id TEXT PRIMARY KEY NOT NULL,
+        goal_id TEXT NOT NULL,
+        objective TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(
+          status IN (
+            'active',
+            'paused',
+            'blocked',
+            'usage_limited',
+            'budget_limited',
+            'complete'
+          )
+        ),
+        token_budget INTEGER,
+        tokens_used INTEGER NOT NULL DEFAULT 0,
+        time_used_seconds INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      );
+
+      INSERT INTO session_goals (
+        session_id,
+        goal_id,
+        objective,
+        status,
+        token_budget,
+        tokens_used,
+        time_used_seconds,
+        created_at,
+        updated_at
+      )
+      SELECT
+        session_id,
+        goal_id,
+        objective,
+        status,
+        token_budget,
+        tokens_used,
+        time_used_seconds,
+        created_at,
+        updated_at
+      FROM session_goals_legacy;
+
+      DROP TABLE session_goals_legacy;
+
+      CREATE INDEX IF NOT EXISTS idx_session_goals_status
+        ON session_goals(status);
+    `)
+  }
+}
+
 function sanitizeProjectName(rawName: string): string {
   const cleaned = rawName
     .replace(/[<>:"/\\|?*]/g, ' ')
@@ -507,7 +580,16 @@ export function getDb(): Database.Database {
       session_id TEXT PRIMARY KEY NOT NULL,
       goal_id TEXT NOT NULL,
       objective TEXT NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'budget_limited', 'complete')),
+      status TEXT NOT NULL CHECK(
+        status IN (
+          'active',
+          'paused',
+          'blocked',
+          'usage_limited',
+          'budget_limited',
+          'complete'
+        )
+      ),
       token_budget INTEGER,
       tokens_used INTEGER NOT NULL DEFAULT 0,
       time_used_seconds INTEGER NOT NULL DEFAULT 0,
@@ -536,6 +618,7 @@ export function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_session_goal_events_goal_created
       ON session_goal_events(goal_id, created_at DESC);
   `)
+  migrateSessionGoalsStatusSchema(db)
 
   // Migration: add icon column if missing
   try {

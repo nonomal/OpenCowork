@@ -96,6 +96,7 @@
     "queueRunningHint": "Sent in order after the current turn completes",
     "queueResume": "Resume",
     "queueEditing": "Edit queued message",
+    "queueQuote": "Quote",
     "queueImageCount": "{{count}} images",
     "queueImageOnly": "[Images only]",
     "queueCleared": "Queued messages cleared",
@@ -282,6 +283,8 @@
     "title": "Goal",
     "runningTitle": "Pursuing goal",
     "pausedTitle": "Paused goal",
+    "blockedTitle": "Blocked goal",
+    "usageLimitedTitle": "Usage-limited goal",
     "completedTitle": "Completed goal",
     "limitedTitle": "Budget-limited goal",
     "notSet": "not set",
@@ -319,6 +322,8 @@
     "status": {
       "active": "active",
       "paused": "paused",
+      "blocked": "blocked",
+      "usage_limited": "limited by usage",
       "budget_limited": "limited by budget",
       "complete": "complete"
     },
@@ -342,8 +347,10 @@
       "budget_updated": "Budget updated",
       "status_changed": "Status changed",
       "usage_accounted": "Run accounted",
+      "usage_limited": "Usage limit reached",
       "budget_limited": "Budget reached",
       "completion_deferred": "Completion deferred",
+      "blocked": "Goal blocked",
       "completed": "Goal completed",
       "stall_paused": "Paused by stall guard",
       "auto_continue_blocked": "Auto-continue waiting",
@@ -354,6 +361,8 @@
     "runtime": {
       "budgetReached": "Goal budget reached. I stopped starting new work for this goal; increase the budget or replace the goal to continue.",
       "completionDeferred": "Goal completion deferred. Completion gate found: {{blockers}}. The goal remains active.",
+      "blocked": "Goal blocked after the same blocker recurred across consecutive goal turns: {{blockers}}.",
+      "usageLimited": "Goal paused by a provider or runtime usage limit: {{details}}.",
       "complete": "Goal complete. Final audit: {{usage}}; no unfinished tasks, failed tools, queued user messages, or pending plan gate.",
       "stallPaused": "Goal paused by the stall guard after {{count}} continuation rounds without tool or task progress. Review the goal or resume it when ready.",
       "autoContinueBlocked": "Goal auto-continue is waiting: {{blockers}}."
@@ -534,6 +543,62 @@
       "type": {
         "summary": "Mode: {{mode}}"
       }
+    },
+    "browser": {
+      "running": "Browser action in progress",
+      "completed": "Browser action completed",
+      "failed": "Browser action failed",
+      "executing": "Executing browser action...",
+      "input": "Input",
+      "output": "Output",
+      "notes": "Notes",
+      "screenshotPreview": "Screenshot preview",
+      "contentPreview": "Content preview",
+      "elementsPreview": "Elements",
+      "previewTruncated": "first {{count}} chars",
+      "BrowserNavigate": {
+        "title": "Browser Navigate"
+      },
+      "BrowserGetContent": {
+        "title": "Browser Content"
+      },
+      "BrowserScreenshot": {
+        "title": "Browser Screenshot"
+      },
+      "BrowserSnapshot": {
+        "title": "Browser Snapshot"
+      },
+      "BrowserClick": {
+        "title": "Browser Click"
+      },
+      "BrowserType": {
+        "title": "Browser Type"
+      },
+      "BrowserScroll": {
+        "title": "Browser Scroll"
+      },
+      "fields": {
+        "title": "Title",
+        "url": "URL",
+        "type": "Type",
+        "clicked": "Clicked",
+        "element": "Element",
+        "value": "Value",
+        "scrollY": "Scroll Y",
+        "scrollHeight": "Scroll Height",
+        "viewport": "Viewport",
+        "elements": "Elements"
+      },
+      "summary": {
+        "content": "{{type}} · {{count}} chars",
+        "screenshot": "{{width}} × {{height}}",
+        "image": "image",
+        "elements": "{{count}} elements",
+        "snapshot": "interactive elements",
+        "type": "type text",
+        "typeSubmit": "{{selector}} · submit",
+        "scrollY": "Y {{value}}"
+      }
     }
   },
   "subAgent": {
@@ -640,6 +705,8 @@
     "exporting": "Exporting...",
     "copyAll": "Copy All",
     "copied": "Copied!",
+    "loadOlder": "Load earlier messages ({{count}} hidden)",
+    "loadingOlder": "Loading earlier messages...",
     "scrollToBottom": "Scroll to bottom",
     "userLocator": {
       "title": "User messages",

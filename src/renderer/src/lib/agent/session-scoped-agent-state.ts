@@ -120,21 +120,38 @@ function getSessionLiveSubAgents(
   sessionId: string
 ): SessionSubAgentLiveState {
   const cached = state.sessionSubAgentLiveCache[sessionId]
-  if (cached) return cached
 
-  let active = EMPTY_SUBAGENT_MAP
-  let completed = EMPTY_SUBAGENT_MAP
+  let active = cached?.active ?? EMPTY_SUBAGENT_MAP
+  let completed = cached?.completed ?? EMPTY_SUBAGENT_MAP
+
+  const ensureActiveCopy = (): Record<string, SubAgentState> => {
+    if (active === EMPTY_SUBAGENT_MAP || active === cached?.active) {
+      active = { ...active }
+    }
+    return active
+  }
+
+  const ensureCompletedCopy = (): Record<string, SubAgentState> => {
+    if (completed === EMPTY_SUBAGENT_MAP || completed === cached?.completed) {
+      completed = { ...completed }
+    }
+    return completed
+  }
 
   for (const [key, subAgent] of Object.entries(state.activeSubAgents)) {
     if (subAgent.sessionId !== sessionId) continue
-    if (active === EMPTY_SUBAGENT_MAP) active = {}
-    active[key] = subAgent
+    ensureActiveCopy()[key] = subAgent
+    if (completed[key]) {
+      delete ensureCompletedCopy()[key]
+    }
   }
 
   for (const [key, subAgent] of Object.entries(state.completedSubAgents)) {
     if (subAgent.sessionId !== sessionId) continue
-    if (completed === EMPTY_SUBAGENT_MAP) completed = {}
-    completed[key] = subAgent
+    ensureCompletedCopy()[key] = subAgent
+    if (active[key]) {
+      delete ensureActiveCopy()[key]
+    }
   }
 
   return { active, completed }

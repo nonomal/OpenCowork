@@ -1,7 +1,13 @@
 import { create } from 'zustand'
 import { ipcClient } from '../lib/ipc/ipc-client'
 
-export type SessionGoalStatus = 'active' | 'paused' | 'budget_limited' | 'complete'
+export type SessionGoalStatus =
+  | 'active'
+  | 'paused'
+  | 'blocked'
+  | 'usage_limited'
+  | 'budget_limited'
+  | 'complete'
 export type SessionGoalEventType =
   | 'created'
   | 'replaced'
@@ -9,8 +15,10 @@ export type SessionGoalEventType =
   | 'budget_updated'
   | 'status_changed'
   | 'usage_accounted'
+  | 'usage_limited'
   | 'budget_limited'
   | 'completion_deferred'
+  | 'blocked'
   | 'completed'
   | 'stall_paused'
   | 'auto_continue_blocked'
@@ -36,6 +44,11 @@ export interface SessionGoalEvent {
   message?: string | null
   metadata?: Record<string, unknown> | null
   createdAt: number
+}
+
+export interface ActiveGoalRun {
+  goalId: string
+  startedAt: number
 }
 
 export const EMPTY_SESSION_GOAL_EVENTS: SessionGoalEvent[] = []
@@ -85,6 +98,7 @@ interface AccountGoalUsageInput {
 interface GoalStore {
   goalsBySession: Record<string, SessionGoal>
   goalEventsBySession: Record<string, SessionGoalEvent[]>
+  activeGoalRunsBySession: Record<string, ActiveGoalRun>
   _loaded: boolean
 
   loadGoalsFromDb: () => Promise<void>
@@ -121,6 +135,8 @@ interface GoalStore {
     message?: string | null
     metadata?: Record<string, unknown> | null
   }) => Promise<{ success: boolean; event?: SessionGoalEvent; error?: string }>
+  startGoalRun: (sessionId: string, goalId: string, startedAt?: number) => void
+  finishGoalRun: (sessionId: string, goalId?: string | null) => void
   applySyncedGoal: (goal: SessionGoal) => void
   applySyncedGoalClear: (sessionId: string) => void
   applySyncedGoalEvent: (event: SessionGoalEvent) => void
@@ -230,6 +246,7 @@ function upsertGoalEvent(setState: GoalStoreSetter, event: SessionGoalEvent): vo
 export const useGoalStore = create<GoalStore>((set, get) => ({
   goalsBySession: {},
   goalEventsBySession: {},
+  activeGoalRunsBySession: {},
   _loaded: false,
 
   loadGoalsFromDb: async () => {
@@ -398,6 +415,26 @@ export const useGoalStore = create<GoalStore>((set, get) => ({
     }
   },
 
+  startGoalRun: (sessionId, goalId, startedAt = Date.now()) => {
+    set((state) => ({
+      activeGoalRunsBySession: {
+        ...state.activeGoalRunsBySession,
+        [sessionId]: { goalId, startedAt }
+      }
+    }))
+  },
+
+  finishGoalRun: (sessionId, goalId) => {
+    set((state) => {
+      const existing = state.activeGoalRunsBySession[sessionId]
+      if (!existing) return {}
+      if (goalId && existing.goalId !== goalId) return {}
+      const next = { ...state.activeGoalRunsBySession }
+      delete next[sessionId]
+      return { activeGoalRunsBySession: next }
+    })
+  },
+
   applySyncedGoal: (goal) => {
     upsertGoal(set, goal)
     void get().loadGoalEventsForSession(goal.sessionId, { goalId: goal.goalId, force: true })
@@ -406,8 +443,10 @@ export const useGoalStore = create<GoalStore>((set, get) => ({
   applySyncedGoalClear: (sessionId) => {
     set((state) => {
       const next = { ...state.goalsBySession }
+      const nextActiveRuns = { ...state.activeGoalRunsBySession }
       delete next[sessionId]
-      return { goalsBySession: next }
+      delete nextActiveRuns[sessionId]
+      return { goalsBySession: next, activeGoalRunsBySession: nextActiveRuns }
     })
     void get().loadGoalEventsForSession(sessionId, { force: true })
   },
@@ -444,9 +483,37 @@ export function installGoalSyncListener(): () => void {
     useGoalStore.getState().applySyncedGoalEvent(rowToEvent(row))
   })
 
+  const offRunState = ipcClient.on('goal:run-state', (payload: unknown) => {
+    const record =
+      payload && typeof payload === 'object'
+        ? (payload as {
+            sessionId?: unknown
+            active?: unknown
+            goalId?: unknown
+            startedAt?: unknown
+          })
+        : null
+    const sessionId = typeof record?.sessionId === 'string' ? record.sessionId : ''
+    if (!sessionId) return
+    if (record?.active === true && typeof record.goalId === 'string' && record.goalId.trim()) {
+      useGoalStore
+        .getState()
+        .startGoalRun(
+          sessionId,
+          record.goalId.trim(),
+          typeof record.startedAt === 'number' ? record.startedAt : Date.now()
+        )
+      return
+    }
+    useGoalStore
+      .getState()
+      .finishGoalRun(sessionId, typeof record?.goalId === 'string' ? record.goalId : undefined)
+  })
+
   return () => {
     offUpdated()
     offCleared()
     offEventAdded()
+    offRunState()
   }
 }
