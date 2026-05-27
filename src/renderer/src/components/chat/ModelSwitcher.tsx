@@ -1041,6 +1041,8 @@ export function ModelSwitcher({
                           isSelected && 'bg-background shadow-sm',
                           isDisplayProvider && !isSelected && 'text-primary'
                         )}
+                        onFocus={() => setSelectedProviderId(provider.id)}
+                        onMouseEnter={() => setSelectedProviderId(provider.id)}
                         onClick={() => setSelectedProviderId(provider.id)}
                       >
                         <ProviderIcon builtinId={provider.builtinId} size={16} />

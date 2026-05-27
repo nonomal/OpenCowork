@@ -3223,6 +3223,50 @@ export function registerFsHandlers(): void {
     return { success: true }
   })
 
+  // Directory watching
+  const dirWatchers = new Map<string, fs.FSWatcher>()
+  const dirDebounceTimers = new Map<string, NodeJS.Timeout>()
+
+  ipcMain.handle('fs:watch-dir', async (_event, args: { path: string }) => {
+    const dirPath = args.path
+    if (dirWatchers.has(dirPath)) return { success: true }
+    try {
+      const watcher = fs.watch(dirPath, { recursive: false }, () => {
+        const existing = dirDebounceTimers.get(dirPath)
+        if (existing) clearTimeout(existing)
+        dirDebounceTimers.set(
+          dirPath,
+          setTimeout(() => {
+            dirDebounceTimers.delete(dirPath)
+            const win = BrowserWindow.getAllWindows()[0]
+            if (win) {
+              safeSendToWindow(win, 'fs:dir-changed', { path: dirPath })
+            }
+          }, 300)
+        )
+      })
+      dirWatchers.set(dirPath, watcher)
+      return { success: true }
+    } catch (err) {
+      return { error: String(err) }
+    }
+  })
+
+  ipcMain.handle('fs:unwatch-dir', async (_event, args: { path: string }) => {
+    const dirPath = args.path
+    const watcher = dirWatchers.get(dirPath)
+    if (watcher) {
+      watcher.close()
+      dirWatchers.delete(dirPath)
+    }
+    const timer = dirDebounceTimers.get(dirPath)
+    if (timer) {
+      clearTimeout(timer)
+      dirDebounceTimers.delete(dirPath)
+    }
+    return { success: true }
+  })
+
   ipcMain.handle(
     'fs:select-file',
     async (_event, args?: { filters?: Electron.FileFilter[]; multiSelections?: boolean }) => {

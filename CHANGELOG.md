@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.110] - 2026-05-27
+
+### Added
+
+- Unlocked Chat-mode tool selection so models can now use file, terminal, MCP, and other tools when available, while preserving approval flow constraints.
+- Added automatic default working directory creation for Chat sessions without a project context, preventing ambiguity in file-based tasks.
+- Improved manual context compression with more aggressive shrinking based on actual compressible message count and recent input token estimation.
+- Enhanced model switcher to display models grouped by provider for better readability and navigation in long lists.
+
+### Fixed
+
+- Fixed sub-agent event handling for background sessions by removing foreground session checks and using session-scoped state lookup.
+- Delegated sub-agent cleanup to session-aware state synchronization for more reliable background session management.
+
 ## [0.9.109] - 2026-05-26
 
 ### Added

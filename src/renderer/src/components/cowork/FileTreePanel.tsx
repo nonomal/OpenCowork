@@ -249,6 +249,7 @@ interface TreeActions {
   onNewFolder: (dirPath: string) => void
   onNewItemConfirm: (value: string) => void
   onNewItemCancel: () => void
+  onRefresh: (dirPath: string) => void
 }
 
 function TreeItem({
@@ -411,6 +412,12 @@ function TreeItem({
                 onSelect={() => actions.onNewFolder(node.path)}
               >
                 <FolderPlus className="size-3.5" /> {t('fileTree.newFolder')}
+              </ContextMenuItem>
+              <ContextMenuItem
+                className="gap-2 text-xs"
+                onSelect={() => actions.onRefresh(node.path)}
+              >
+                <RefreshCw className="size-3.5" /> {t('action.refresh', { ns: 'common' })}
               </ContextMenuItem>
               <ContextMenuSeparator />
             </>
@@ -577,6 +584,57 @@ export function FileTreePanel({
     loadRoot()
   }, [loadRoot])
 
+  // Refresh all expanded directories in the tree (for file system watcher)
+  const refreshExpandedDirs = useCallback(async () => {
+    const refreshAll = async (nodes: TreeNode[]): Promise<TreeNode[]> => {
+      return Promise.all(
+        nodes.map(async (n) => {
+          if (n.type === 'directory' && n.expanded && n.loaded) {
+            try {
+              const children = await loadDir(n.path)
+              return { ...n, children: children.length > 0 ? await refreshAll(children) : children }
+            } catch {
+              return n
+            }
+          }
+          if (n.children) return { ...n, children: await refreshAll(n.children) }
+          return n
+        })
+      )
+    }
+    setTree(await refreshAll(tree))
+  }, [tree, loadDir])
+
+  // Watch working directory for changes and auto-refresh
+  useEffect(() => {
+    if (!workingFolder || sshConnectionId) return
+
+    let mounted = true
+    let refreshTimer: NodeJS.Timeout | null = null
+    const handleDirChanged = (_event: unknown, _data: { path: string }) => {
+      if (!mounted) return
+      // Debounce refresh to avoid excessive updates
+      if (refreshTimer) clearTimeout(refreshTimer)
+      refreshTimer = setTimeout(() => {
+        if (!mounted) return
+        void refreshExpandedDirs()
+      }, 500)
+    }
+
+    // Start watching the working directory
+    void ipcClient.invoke(IPC.FS_WATCH_DIR, { path: workingFolder })
+
+    // Listen for directory change events
+    const cleanup = window.electron.ipcRenderer.on('fs:dir-changed', handleDirChanged)
+
+    return () => {
+      mounted = false
+      if (refreshTimer) clearTimeout(refreshTimer)
+      cleanup()
+      void ipcClient.invoke(IPC.FS_UNWATCH_DIR, { path: workingFolder })
+    }
+  }, [workingFolder, sshConnectionId, refreshExpandedDirs])
+
   useEffect(() => {
     const query = searchQuery.trim()
     if (!workingFolder || !query) {
@@ -646,15 +704,13 @@ export function FileTreePanel({
               if (n.expanded) {
                 return { ...n, expanded: false }
               }
-              if (!n.loaded) {
-                try {
-                  const children = await loadDir(dirPath)
-                  return { ...n, expanded: true, loaded: true, children }
-                } catch {
-                  return { ...n, expanded: true, loaded: true, children: [] }
-                }
+              // Always reload directory contents when expanding to ensure fresh data
+              try {
+                const children = await loadDir(dirPath)
+                return { ...n, expanded: true, loaded: true, children }
+              } catch {
+                return { ...n, expanded: true, loaded: true, children: [] }
               }
-              return { ...n, expanded: true }
             }
             if (n.children) {
               return { ...n, children: await toggleNode(n.children) }
@@ -849,6 +905,13 @@ export function FileTreePanel({
 
   const handleNewItemCancel = useCallback(() => setNewItemParent(null), [])
 
+  const handleRefresh = useCallback(
+    async (dirPath: string) => {
+      await refreshDir(dirPath)
+    },
+    [refreshDir]
+  )
+
   const activePath = previewPanelState?.source === 'file' ? previewPanelState.filePath : null
   const treeStats = useMemo(() => countTreeStats(tree), [tree])
   const normalizedSearchQuery = searchQuery.trim().toLowerCase()
@@ -863,7 +926,8 @@ export function FileTreePanel({
     onNewFile: handleNewFile,
     onNewFolder: handleNewFolder,
     onNewItemConfirm: handleNewItemConfirm,
-    onNewItemCancel: handleNewItemCancel
+    onNewItemCancel: handleNewItemCancel,
+    onRefresh: handleRefresh
   }
 
   const handlePreview = useCallback(

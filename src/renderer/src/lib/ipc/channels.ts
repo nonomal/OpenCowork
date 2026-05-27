@@ -33,6 +33,9 @@ export const IPC = {
   FS_WATCH_FILE: 'fs:watch-file',
   FS_UNWATCH_FILE: 'fs:unwatch-file',
   FS_FILE_CHANGED: 'fs:file-changed',
+  FS_WATCH_DIR: 'fs:watch-dir',
+  FS_UNWATCH_DIR: 'fs:unwatch-dir',
+  FS_DIR_CHANGED: 'fs:dir-changed',
   FS_READ_FILE_BINARY: 'fs:read-file-binary',
   FS_WRITE_FILE_BINARY: 'fs:write-file-binary',
 
