@@ -327,9 +327,21 @@ function trimSubAgentHistory(history: SubAgentState[]): void {
   history.splice(0, history.length - MAX_SUBAGENT_HISTORY)
 }
 
-const MAX_HISTORY_TRANSCRIPT_MESSAGES = 20
+const MAX_HISTORY_TRANSCRIPT_MESSAGES = MAX_SUBAGENT_TRANSCRIPT_MESSAGES
 const MAX_HISTORY_TOOL_CALLS = 30
 const MAX_HISTORY_REPORT_CHARS = 4_000
+
+function compactSubAgentTranscriptForHistory(transcript: UnifiedMessage[]): UnifiedMessage[] {
+  if (transcript.length <= MAX_HISTORY_TRANSCRIPT_MESSAGES) return transcript
+
+  const first = transcript[0]
+  const tail = transcript.slice(-(MAX_HISTORY_TRANSCRIPT_MESSAGES - 1))
+  if (!first || tail.some((message) => message.id === first.id)) {
+    return transcript.slice(-MAX_HISTORY_TRANSCRIPT_MESSAGES)
+  }
+
+  return [first, ...tail]
+}
 
 function compactSubAgentForHistory(sa: SubAgentState): SubAgentState {
   return {
@@ -343,10 +355,7 @@ function compactSubAgentForHistory(sa: SubAgentState): SubAgentState {
       sa.toolCalls.length > MAX_HISTORY_TOOL_CALLS
         ? sa.toolCalls.slice(-MAX_HISTORY_TOOL_CALLS)
         : sa.toolCalls,
-    transcript:
-      sa.transcript.length > MAX_HISTORY_TRANSCRIPT_MESSAGES
-        ? sa.transcript.slice(-MAX_HISTORY_TRANSCRIPT_MESSAGES)
-        : sa.transcript
+    transcript: compactSubAgentTranscriptForHistory(sa.transcript)
   }
 }
 
@@ -611,6 +620,45 @@ function ensureSessionSubAgentLiveState(
   const created: SessionSubAgentLiveState = { active: {}, completed: {} }
   state.sessionSubAgentLiveCache[sessionId] = created
   return created
+}
+
+function syncSessionSubAgentState(
+  state: { sessionSubAgentLiveCache: Record<string, SessionSubAgentLiveState> },
+  sessionId: string | undefined,
+  id: string,
+  subAgent: SubAgentState
+): void {
+  if (!sessionId) return
+  const liveState = ensureSessionSubAgentLiveState(state, sessionId)
+  if (subAgent.isRunning) {
+    liveState.active[id] = subAgent
+    delete liveState.completed[id]
+    return
+  }
+
+  delete liveState.active[id]
+  liveState.completed[id] = subAgent
+  trimCompletedSubAgentsMap(liveState.completed)
+}
+
+function findSubAgentState(
+  state: {
+    activeSubAgents: Record<string, SubAgentState>
+    completedSubAgents: Record<string, SubAgentState>
+    sessionSubAgentLiveCache: Record<string, SessionSubAgentLiveState>
+  },
+  id: string,
+  sessionId?: string
+): SubAgentState | null {
+  const direct = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+  if (direct) {
+    syncSessionSubAgentState(state, sessionId, id, direct)
+    return direct
+  }
+
+  if (!sessionId) return null
+  const liveState = ensureSessionSubAgentLiveState(state, sessionId)
+  return liveState.active[id] ?? liveState.completed[id] ?? null
 }
 
 function normalizePersistedAgentRecord(raw: string | null): Record<string, unknown> | null {
@@ -1716,7 +1764,7 @@ export const useAgentStore = create<AgentStore>()(
         let shouldPersistSubAgentHistory = false
         set((state) => {
           const id = event.toolUseId
-          const existing = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+          const existing = findSubAgentState(state, id, sessionId)
           switch (event.type) {
             case 'sub_agent_start': {
               if (existing?.isRunning) return
@@ -1748,9 +1796,7 @@ export const useAgentStore = create<AgentStore>()(
                 completedAt: null
               }
               if (sessionId) {
-                const liveState = ensureSessionSubAgentLiveState(state, sessionId)
-                liveState.active[id] = state.activeSubAgents[id]
-                delete liveState.completed[id]
+                syncSessionSubAgentState(state, sessionId, id, state.activeSubAgents[id])
                 const previous = state.sessionSubAgentSummaries[sessionId] ?? []
                 state.sessionSubAgentSummaries[sessionId] = [
                   buildSubAgentSummary(state.activeSubAgents[id]),
@@ -1762,7 +1808,7 @@ export const useAgentStore = create<AgentStore>()(
               break
             }
             case 'sub_agent_iteration': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) {
                 sa.iteration = event.iteration
                 const currentAssistant = sa.currentAssistantMessageId
@@ -1776,12 +1822,12 @@ export const useAgentStore = create<AgentStore>()(
               break
             }
             case 'sub_agent_thinking_delta': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) appendThinkingToSubAgent(sa, event.thinking)
               break
             }
             case 'sub_agent_thinking_encrypted': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) {
                 appendThinkingEncryptedToSubAgent(
                   sa,
@@ -1792,7 +1838,7 @@ export const useAgentStore = create<AgentStore>()(
               break
             }
             case 'sub_agent_tool_use_streaming_start': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) {
                 upsertToolUseBlockInSubAgent(sa, {
                   type: 'tool_use',
@@ -1807,22 +1853,22 @@ export const useAgentStore = create<AgentStore>()(
               break
             }
             case 'sub_agent_tool_use_args_delta': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) updateToolUseInputInSubAgent(sa, event.toolCallId, event.partialInput)
               break
             }
             case 'sub_agent_tool_use_generated': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) upsertToolUseBlockInSubAgent(sa, event.toolUseBlock)
               break
             }
             case 'sub_agent_image_generated': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) appendBlockToSubAgent(sa, event.imageBlock)
               break
             }
             case 'sub_agent_image_error': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) {
                 appendBlockToSubAgent(sa, {
                   type: 'image_error',
@@ -1833,7 +1879,7 @@ export const useAgentStore = create<AgentStore>()(
               break
             }
             case 'sub_agent_message_end': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) {
                 finalizeAssistantMessage(sa, event.usage, event.providerResponseId, false)
                 if (event.usage) {
@@ -1843,7 +1889,7 @@ export const useAgentStore = create<AgentStore>()(
               break
             }
             case 'sub_agent_tool_result_message': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) {
                 sa.transcript.push(event.message)
                 trimSubAgentTranscript(sa)
@@ -1853,7 +1899,7 @@ export const useAgentStore = create<AgentStore>()(
               break
             }
             case 'sub_agent_user_message': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) {
                 finalizeAssistantMessage(sa)
                 sa.transcript.push(event.message)
@@ -1864,7 +1910,7 @@ export const useAgentStore = create<AgentStore>()(
               break
             }
             case 'sub_agent_report_update': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) {
                 sa.report = event.report
                 sa.reportStatus = event.status
@@ -1874,7 +1920,7 @@ export const useAgentStore = create<AgentStore>()(
               break
             }
             case 'sub_agent_tool_call': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) {
                 const normalizedToolCall = normalizeToolCall(event.toolCall)
                 upsertToolUseBlockInSubAgent(sa, {
@@ -1899,7 +1945,7 @@ export const useAgentStore = create<AgentStore>()(
               break
             }
             case 'sub_agent_text_delta': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) {
                 sa.streamingText = truncateText(
                   sa.streamingText + event.text,
@@ -1910,7 +1956,7 @@ export const useAgentStore = create<AgentStore>()(
               break
             }
             case 'sub_agent_end': {
-              const sa = state.activeSubAgents[id] ?? state.completedSubAgents[id]
+              const sa = findSubAgentState(state, id, sessionId)
               if (sa) {
                 sa.isRunning = false
                 sa.success = event.result.success
@@ -1925,10 +1971,7 @@ export const useAgentStore = create<AgentStore>()(
                 state.completedSubAgents[id] = sa
                 const targetSessionId = sa.sessionId ?? sessionId
                 if (targetSessionId) {
-                  const liveState = ensureSessionSubAgentLiveState(state, targetSessionId)
-                  delete liveState.active[id]
-                  liveState.completed[id] = sa
-                  trimCompletedSubAgentsMap(liveState.completed)
+                  syncSessionSubAgentState(state, targetSessionId, id, sa)
                   const previous = state.sessionSubAgentSummaries[targetSessionId] ?? []
                   state.sessionSubAgentSummaries[targetSessionId] = [
                     buildSubAgentSummary(sa),
