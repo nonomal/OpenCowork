@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.2] - 2026-07-01
+
+### Changed
+
+- Improved native worker development selection and publish flow so ready debug builds are preferred and failed native publishes do not wipe bundled resources.
+- Updated Electron Builder metadata by removing invalid and deprecated Windows build version fields.
+
+### Fixed
+
+- Ensured AI API requests always carry a non-empty versioned `User-Agent` header such as `OpenCowork/1.0.2` across renderer, main proxy, cron, sidecar, native worker, image, audio, skills, souls, and WebSocket request paths.
+- Normalized legacy default `User-Agent` placeholders like `OpenCowork` to the versioned app header while preserving provider-specific custom values.
+
 ## [1.0.1] - 2026-07-01
 
 ### Added
