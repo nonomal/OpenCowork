@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1] - 2026-07-01
+
+### Added
+
+- Added native MessagePack sidecar transport and native worker runtime coverage for agent tools, database, file, Git, shell, SSH, terminal, sync, extension, memory, goal, task, cron, and provider execution paths.
+- Added request stop support for agent runs, including shared run identifiers and stop-aware provider/runtime models.
+- Added message windowing, stable long-context handling, and richer export output for chat transcripts.
+- Added Luckin Coffee extension resources and bundled native worker publishing for platform-specific release artifacts.
+
+### Changed
+
+- Improved live tool-call rendering with streaming tool argument updates, foreground/background session synchronization, and session change summaries.
+- Updated release CI to publish the native worker per target runtime and include .NET setup in Windows, Linux, and macOS packaging jobs.
+- Refined the user-message locator into a compact right-edge marker with hover previews for faster navigation in long conversations.
+- Default command-tool live previews to the session working folder when no explicit `cwd` is provided.
+
+### Fixed
+
+- Forwarded native and SSH shell output chunks through `shell:output` so terminal/tool cards update while commands are still running.
+- Reduced stale shell-output listener buildup by using a single native worker forwarding listener.
+
 ## [1.0.0] - 2026-06-26
 
 ### Added

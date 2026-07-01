@@ -96,6 +96,8 @@ interface NativeShellAbortResult {
   error?: string | null
 }
 
+let shellOutputForwardingRegistered = false
+
 type OpenWithAppId = 'vscode'
 
 type ShellExecArgs = {
@@ -367,10 +369,29 @@ function isNativeShellOutputEvent(value: unknown): value is NativeShellOutputEve
 }
 
 export function registerShellHandlers(): void {
+  const nativeWorker = getNativeWorker()
   const runningShellProcesses = new Map<
     string,
     { terminalId: string; abort: (reason?: 'user' | 'timeout') => void }
   >()
+
+  if (!shellOutputForwardingRegistered) {
+    shellOutputForwardingRegistered = true
+    nativeWorker.onEvent('shell/output', (params) => {
+      if (!isNativeShellOutputEvent(params)) return
+      const execId = typeof params.execId === 'string' ? params.execId.trim() : ''
+      if (!execId || typeof params.chunk !== 'string') return
+      const payload = {
+        execId,
+        chunk: params.chunk,
+        stream: params.stream === 'stderr' ? 'stderr' : 'stdout'
+      }
+      for (const targetWindow of BrowserWindow.getAllWindows()) {
+        if (targetWindow.isDestroyed()) continue
+        safeSendMessagePackToWindow(targetWindow, 'shell:output', payload)
+      }
+    })
+  }
 
   registerMessagePackHandler<ShellExecArgs>('shell:exec', async (args, event) => {
     const DEFAULT_TIMEOUT = 600_000
@@ -380,7 +401,6 @@ export function registerShellHandlers(): void {
     const startedAt = Date.now()
     const ownerWindow =
       BrowserWindow.fromWebContents(event.sender) ?? BrowserWindow.getAllWindows()[0] ?? null
-    const nativeWorker = getNativeWorker()
 
     const cleanupStarted = nativeWorker.onEvent('shell/started', (params) => {
       if (!execId || !ownerWindow || !isNativeShellStartedEvent(params)) return
@@ -399,17 +419,6 @@ export function registerShellHandlers(): void {
         }
       })
       safeSendMessagePackToWindow(ownerWindow, 'shell:started', payload)
-    })
-
-    const cleanupOutput = nativeWorker.onEvent('shell/output', (params) => {
-      if (!execId || !ownerWindow || !isNativeShellOutputEvent(params)) return
-      if (params.execId !== execId || typeof params.chunk !== 'string') return
-      const payload = {
-        execId,
-        chunk: params.chunk,
-        stream: params.stream === 'stderr' ? 'stderr' : 'stdout'
-      }
-      safeSendMessagePackToWindow(ownerWindow, 'shell:output', payload)
     })
 
     if (execId) {
@@ -471,7 +480,6 @@ export function registerShellHandlers(): void {
       })
     } finally {
       cleanupStarted()
-      cleanupOutput()
       if (execId) runningShellProcesses.delete(execId)
     }
   })

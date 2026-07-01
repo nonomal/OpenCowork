@@ -3,20 +3,13 @@ import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import {
-  MessageSquare,
-  CircleHelp,
-  Briefcase,
-  Code2,
-  ShieldCheck,
-  ArrowDown,
-  MessagesSquare
-} from 'lucide-react'
+import { MessageSquare, CircleHelp, Briefcase, Code2, ShieldCheck, ArrowDown } from 'lucide-react'
 import type { ContentBlock, ToolResultContent, UnifiedMessage } from '@renderer/lib/api/types'
 import { useChatStore } from '@renderer/stores/chat-store'
 import { useUIStore } from '@renderer/stores/ui-store'
 import { useAgentStore } from '@renderer/stores/agent-store'
 import { useTeamStore, type ActiveTeam } from '@renderer/stores/team-store'
+import { cn } from '@renderer/lib/utils'
 import { MessageItem } from './MessageItem'
 import { SessionChangeSummaryCard } from './SessionChangeSummaryCard'
 import {
@@ -523,13 +516,34 @@ function countImageBlocks(content: UnifiedMessage['content']): number {
   return content.filter((block) => block.type === 'image' || block.type === 'image_error').length
 }
 
-function getLocatorMarkerTop(position: number): string {
-  const clampedPosition = Math.min(1, Math.max(0, position))
-  return `${6 + clampedPosition * 88}%`
+function getCompactLocatorMarkerTop(index: number, total: number): string {
+  const safeTotal = Math.max(1, total)
+  if (safeTotal === 1) return '50%'
+
+  const gapPx = Math.max(3.5, Math.min(9, 176 / (safeTotal - 1)))
+  const offsetPx = (index - (safeTotal - 1) / 2) * gapPx
+
+  return `calc(50% + ${Number(offsetPx.toFixed(2))}px)`
 }
 
 function formatLocatorTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function splitLocatorPreview(preview: string): { title: string; detail: string | null } {
+  const normalized = preview.trim()
+  if (normalized.length <= 30) return { title: normalized, detail: null }
+
+  const sentenceEnd = normalized.search(/[。.!！?？]/)
+  const splitOnSentence = sentenceEnd >= 12 && sentenceEnd <= 34
+  const titleEnd = splitOnSentence ? sentenceEnd + 1 : Math.min(30, normalized.length)
+  const title = normalized.slice(0, titleEnd).trim()
+  const detail = normalized.slice(titleEnd).trim()
+
+  return {
+    title: !splitOnSentence && title.length < normalized.length ? `${title}...` : title,
+    detail: detail || normalized
+  }
 }
 
 function parseLocatorContent(rawContent: string): UnifiedMessage['content'] {
@@ -595,15 +609,48 @@ function UserMessageLocator({
   onJump: (item: UserMessageLocatorItem) => void
 }): React.JSX.Element | null {
   const { t } = useTranslation('chat')
+  const [previewMessageId, setPreviewMessageId] = React.useState<string | null>(null)
 
   if (items.length < 2) return null
 
+  const previewItem = previewMessageId
+    ? (items.find((item) => item.id === previewMessageId) ?? null)
+    : null
+  const previewItemIndex = previewItem ? items.findIndex((item) => item.id === previewItem.id) : -1
+  const previewCopy = previewItem ? splitLocatorPreview(previewItem.preview) : null
+  const previewTop =
+    previewItemIndex >= 0 ? getCompactLocatorMarkerTop(previewItemIndex, items.length) : '50%'
+
   return (
-    <div className="absolute right-1 top-1/2 z-20 hidden -translate-y-1/2 md:block">
-      <div className="group/user-locator relative flex h-[min(52vh,24rem)] items-center justify-end pl-7">
-        <div className="relative h-full w-1.5 rounded-full bg-muted-foreground/10 transition-all duration-200 group-hover/user-locator:w-2 group-hover/user-locator:bg-background/80 group-hover/user-locator:ring-1 group-hover/user-locator:ring-border/60">
-          {items.map((item) => {
+    <div className="absolute right-2 top-1/2 z-20 hidden -translate-y-1/2 md:block">
+      <div className="pointer-events-none relative h-[min(52vh,24rem)] w-[min(324px,calc(100vw-3rem))]">
+        {previewItem && previewCopy ? (
+          <>
+            <div
+              className="absolute right-12 w-[min(276px,calc(100vw-5rem))] -translate-y-1/2 animate-in fade-in-0 slide-in-from-right-1 duration-150"
+              style={{ top: previewTop }}
+            >
+              <div className="overflow-hidden rounded-xl border border-border/70 bg-popover/95 px-3 py-2.5 text-popover-foreground shadow-xl backdrop-blur-xl">
+                <div className="line-clamp-1 text-[12px] font-semibold leading-5">
+                  {previewCopy.title}
+                </div>
+                {previewCopy.detail ? (
+                  <div className="mt-0.5 line-clamp-2 text-[11px] leading-[18px] text-muted-foreground">
+                    {previewCopy.detail}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        <div
+          className="pointer-events-auto absolute right-0 top-0 h-full w-11"
+          onPointerLeave={() => setPreviewMessageId(null)}
+        >
+          {items.map((item, itemIndex) => {
             const active = activeMessageId === item.id
+            const previewing = previewMessageId === item.id
             return (
               <button
                 key={item.id}
@@ -614,65 +661,23 @@ function UserMessageLocator({
                   defaultValue: 'Jump to user message {{index}}: {{preview}}'
                 })}
                 title={item.preview}
-                className={`absolute right-0 h-1.5 -translate-y-1/2 rounded-full transition-all duration-200 ${
-                  active
-                    ? 'w-3 bg-primary ring-1 ring-primary/25'
-                    : 'w-1.5 bg-muted-foreground/35 hover:w-3 hover:bg-primary/80'
-                }`}
-                style={{ top: getLocatorMarkerTop(item.position) }}
+                className="group/marker absolute right-0 flex h-6 w-11 -translate-y-1/2 items-center justify-end rounded-sm outline-none"
+                style={{ top: getCompactLocatorMarkerTop(itemIndex, items.length) }}
+                onPointerEnter={() => setPreviewMessageId(item.id)}
+                onFocus={() => setPreviewMessageId(item.id)}
+                onBlur={() => setPreviewMessageId(null)}
                 onClick={() => onJump(item)}
-              />
+              >
+                <span
+                  className={cn(
+                    'block h-px rounded-full bg-muted-foreground/35 transition-all duration-150 group-hover/marker:bg-foreground/80 group-focus-visible/marker:bg-foreground/90',
+                    active ? 'w-4 bg-muted-foreground/70' : 'w-2.5',
+                    previewing && 'h-0.5 w-8 bg-foreground/95'
+                  )}
+                />
+              </button>
             )
           })}
-        </div>
-
-        <div className="pointer-events-none absolute right-3.5 top-1/2 w-[min(230px,calc(100vw-5rem))] -translate-y-1/2 translate-x-1.5 opacity-0 transition-all duration-200 group-hover/user-locator:pointer-events-auto group-hover/user-locator:translate-x-0 group-hover/user-locator:opacity-100">
-          <div className="overflow-hidden rounded-md border border-border/70 bg-popover/95 text-popover-foreground shadow-lg backdrop-blur-xl">
-            <div className="flex items-center gap-1.5 border-b border-border/60 px-2.5 py-1.5">
-              <MessagesSquare className="size-3 text-primary" />
-              <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                {t('messageList.userLocator.title', {
-                  defaultValue: 'User messages'
-                })}
-              </span>
-              <span className="text-[10px] tabular-nums text-muted-foreground/70">
-                {items.length}
-              </span>
-            </div>
-            <div className="max-h-[min(44vh,18rem)] overflow-y-auto p-1">
-              {items.map((item) => {
-                const active = activeMessageId === item.id
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`flex w-full items-start gap-1.5 rounded-md px-1.5 py-[5px] text-left transition-colors ${
-                      active
-                        ? 'bg-primary/10 text-foreground'
-                        : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                    }`}
-                    onClick={() => onJump(item)}
-                  >
-                    <span
-                      className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-sm text-[9px] tabular-nums ${
-                        active
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-muted text-muted-foreground'
-                      }`}
-                    >
-                      {item.index}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[11px] leading-4">{item.preview}</span>
-                      <span className="block text-[9px] leading-3 text-muted-foreground/65">
-                        {item.time}
-                      </span>
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
         </div>
       </div>
     </div>

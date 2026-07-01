@@ -1023,6 +1023,7 @@ function reconcileSubAgentCompletionFromTaskToolCall(
 
 const LONG_RUNNING_COMPLETION_RE =
   /(全部(?:任务|工作|事项).{0,12}(?:完成|已完成)|任务(?:已|已经)?全部完成|all tasks? (?:are )?(?:complete|completed)|work is complete|completed successfully|finished successfully|no further action(?:s)? needed)/i
+const COMMAND_TOOL_NAMES = new Set(['Bash', 'Shell', 'PowerShell'])
 
 function assistantLooksComplete(message?: UnifiedMessage): boolean {
   return LONG_RUNNING_COMPLETION_RE.test(extractMessagePlainText(message))
@@ -4715,6 +4716,16 @@ export function useChatActions(): {
               }
             }
 
+            const withResolvedCommandCwd = (
+              toolName: string,
+              input: Record<string, unknown>
+            ): Record<string, unknown> => {
+              if (!COMMAND_TOOL_NAMES.has(toolName) || !sessionWorkingFolder) return input
+              const cwd = input.cwd
+              if (typeof cwd === 'string' && cwd.trim()) return input
+              return { ...input, cwd: sessionWorkingFolder }
+            }
+
             const getPendingLiveToolInput = (
               toolCallId: string,
               toolName = liveToolNames.get(toolCallId) ?? ''
@@ -4724,7 +4735,8 @@ export function useChatActions(): {
 
               if (!entry.pendingSummary || !entry.pendingSignature) {
                 const startedAt = performance.now()
-                const summary = summarizeToolInputForLiveCard(toolName, entry.pendingRaw, {
+                const normalizedInput = withResolvedCommandCwd(toolName, entry.pendingRaw)
+                const summary = summarizeToolInputForLiveCard(toolName, normalizedInput, {
                   lineCountCache: entry.lineCountCache,
                   cacheKeyPrefix: `${toolCallId}:${toolName || 'unknown'}`
                 })
@@ -4734,7 +4746,7 @@ export function useChatActions(): {
                 recordStreamingToolArgsDuration(performance.now() - startedAt, {
                   toolCallId,
                   toolName,
-                  inputKeys: Object.keys(entry.pendingRaw).length,
+                  inputKeys: Object.keys(normalizedInput).length,
                   outputKeys: Object.keys(summary).length
                 })
               }
@@ -4752,14 +4764,15 @@ export function useChatActions(): {
             ): Record<string, unknown> => {
               const entry = getLiveToolInputEntry(toolCallId)
               const startedAt = performance.now()
-              const summary = summarizeToolInputForLiveCard(toolName, input, {
+              const normalizedInput = withResolvedCommandCwd(toolName, input)
+              const summary = summarizeToolInputForLiveCard(toolName, normalizedInput, {
                 lineCountCache: entry.lineCountCache,
                 cacheKeyPrefix: `${toolCallId}:${toolName || 'unknown'}`
               })
               recordStreamingToolArgsDuration(performance.now() - startedAt, {
                 toolCallId,
                 toolName,
-                inputKeys: Object.keys(input).length,
+                inputKeys: Object.keys(normalizedInput).length,
                 outputKeys: Object.keys(summary).length,
                 immediate: true
               })

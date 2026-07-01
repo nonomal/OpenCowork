@@ -958,6 +958,9 @@ internal static class AgentRuntimeNativeToolExecutor
             stdout,
             combinedOutput,
             outputLock,
+            call.Id,
+            "stdout",
+            context,
             EmitLiveUpdateAsync,
             linkedCts.Token);
         var stderrTask = ReadShellStreamAsync(
@@ -965,6 +968,9 @@ internal static class AgentRuntimeNativeToolExecutor
             stderr,
             combinedOutput,
             outputLock,
+            call.Id,
+            "stderr",
+            context,
             EmitLiveUpdateAsync,
             linkedCts.Token);
         var timedOut = false;
@@ -1038,6 +1044,9 @@ internal static class AgentRuntimeNativeToolExecutor
         ShellOutputCollector streamOutput,
         ShellOutputCollector combinedOutput,
         object outputLock,
+        string execId,
+        string streamName,
+        WorkerRequestContext context,
         Func<Task> emitUpdateAsync,
         CancellationToken cancellationToken)
     {
@@ -1060,6 +1069,14 @@ internal static class AgentRuntimeNativeToolExecutor
             }
 
             var chunk = new string(buffer, 0, read);
+            if (!string.IsNullOrWhiteSpace(execId))
+            {
+                await context.EmitEventAsync(
+                    "shell/output",
+                    new ShellOutputEvent(execId, chunk, streamName),
+                    WorkerJsonContext.Default.ShellOutputEvent);
+            }
+
             bool changed;
             lock (outputLock)
             {

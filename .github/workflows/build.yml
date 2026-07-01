@@ -135,18 +135,22 @@ jobs:
             platform: win
             build_arch: x64
             artifact_arch: amd64
+            native_worker_rid: win-x64
           - os: windows-11-arm
             platform: win
             build_arch: arm64
             artifact_arch: arm64
+            native_worker_rid: win-arm64
           - os: ubuntu-latest
             platform: linux
             build_arch: x64
             artifact_arch: amd64
+            native_worker_rid: linux-x64
           - os: ubuntu-24.04-arm
             platform: linux
             build_arch: arm64
             artifact_arch: arm64
+            native_worker_rid: linux-arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -162,10 +166,15 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
       # Linux 需要构建原生模块的依赖
       - name: Install Linux build dependencies
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y build-essential libx11-dev libxtst-dev libpng++-dev
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang zlib1g-dev libx11-dev libxtst-dev libpng++-dev
 
       - name: Install dependencies
         run: npm ci
@@ -173,6 +182,11 @@ jobs:
       # 将 Release 版本号同步写入 package.json
       - name: Sync version to package.json
         run: npm version ${{ needs.prepare.outputs.version }} --no-git-tag-version --allow-same-version
+
+      - name: Publish native worker (${{ matrix.native_worker_rid }})
+        run: npm run native:publish
+        env:
+          OPEN_COWORK_NATIVE_WORKER_RID: ${{ matrix.native_worker_rid }}
 
       - name: Download compiled app
         uses: actions/download-artifact@v6
@@ -351,10 +365,12 @@ jobs:
             platform: mac
             build_arch: arm64
             artifact_arch: arm64
+            native_worker_rid: osx-arm64
           - os: macos-15-intel
             platform: mac
             build_arch: x64
             artifact_arch: amd64
+            native_worker_rid: osx-x64
 
     runs-on: ${{ matrix.os }}
 
@@ -370,12 +386,22 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
       - name: Install dependencies
         run: npm ci
 
       # 将 Release 版本号同步写入 package.json
       - name: Sync version to package.json
         run: npm version ${{ needs.prepare.outputs.version }} --no-git-tag-version --allow-same-version
+
+      - name: Publish native worker (${{ matrix.native_worker_rid }})
+        run: npm run native:publish
+        env:
+          OPEN_COWORK_NATIVE_WORKER_RID: ${{ matrix.native_worker_rid }}
 
       - name: Download compiled app
         uses: actions/download-artifact@v6

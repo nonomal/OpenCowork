@@ -563,6 +563,7 @@ internal static class AgentRuntimeSshToolExecutor
 
         async ValueTask HandleStdoutChunkAsync(string chunk)
         {
+            await EmitTerminalOutputChunkAsync(chunk, "stdout");
             bool changed;
             lock (outputLock)
             {
@@ -577,6 +578,7 @@ internal static class AgentRuntimeSshToolExecutor
 
         async ValueTask HandleStderrChunkAsync(string chunk)
         {
+            await EmitTerminalOutputChunkAsync(chunk, "stderr");
             bool changed;
             lock (outputLock)
             {
@@ -587,6 +589,19 @@ internal static class AgentRuntimeSshToolExecutor
             {
                 await EmitLiveUpdateAsync();
             }
+        }
+
+        async ValueTask EmitTerminalOutputChunkAsync(string chunk, string streamName)
+        {
+            if (string.IsNullOrEmpty(chunk))
+            {
+                return;
+            }
+
+            await context.EmitEventAsync(
+                "shell/output",
+                new ShellOutputEvent(call.Id, chunk, streamName),
+                WorkerJsonContext.Default.ShellOutputEvent);
         }
 
         await EmitLiveUpdateAsync();
