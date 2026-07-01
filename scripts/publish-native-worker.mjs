@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, rmSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 
-const repoRoot = resolve(new URL('..', import.meta.url).pathname)
+const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const projectPath = join(
   repoRoot,
   'sidecars',
