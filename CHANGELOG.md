@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.8] - 2026-07-05
+
+### Added
+
+- Added an install-confirmation step to the auto-updater: downloaded updates now wait for the user to choose "Update now" (restart and install) or "Update later" instead of restarting automatically.
+- Introduced `update:status` and `update:install` IPC handlers so the renderer can query whether a downloaded update is ready and trigger installation on demand.
+- Added a "ready to install" update state in the title bar and settings, with matching UI strings across all supported locales.
+
+### Changed
+
+- Deferred `quitAndInstall` until the user confirms; install failures now surface an `update:error` back to the window instead of force-quitting the app.
+- Clarified the auto-update setting description to reflect that updates download automatically but ask before restarting to install.
+- Refined the context-memory compression description to reflect model-aware compression thresholds and summary-based history preservation.
+
 ## [1.0.7] - 2026-07-04
 
 ### Added
