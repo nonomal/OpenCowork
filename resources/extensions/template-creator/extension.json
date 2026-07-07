@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "template-creator",
+  "name": "Template Creator",
+  "version": "1.0.0",
+  "description": "Create and update personal artifact template skills. Turn DOCX, PPTX, and XLSX references into reusable personal template skills, or update an existing personal artifact template.",
+  "entry": "index.js",
+  "skills": ".",
+  "state": true,
+  "tools": [
+    {
+      "name": "template_creator_guide",
+      "description": "Explain what the Template Creator plugin does and how to use its template-creator skill (create or update a personal artifact template from a DOCX, PPTX, or XLSX reference). Call this to orient before starting a Template Creator task.",
+      "kind": "js",
+      "handler": "guide",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "interface": {
+    "displayName": "Template Creator",
+    "category": "Productivity",
+    "brandColor": "#10A37F",
+    "defaultPrompt": [
+      "Create a personal template from this document",
+      "Create a personal template from this presentation",
+      "Create a personal template from this spreadsheet",
+      "Update this personal artifact template"
+    ]
+  }
+}

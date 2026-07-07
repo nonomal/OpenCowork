@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "hyperframes",
+  "name": "HyperFrames",
+  "version": "1.0.0",
+  "description": "Write HTML, render video. Compositions, GSAP animations, captions, voiceovers, audio-reactive visuals, and website-to-video capture for HyperFrames.",
+  "entry": "index.js",
+  "skills": "./skills/",
+  "state": true,
+  "tools": [
+    {
+      "name": "hyperframes_guide",
+      "description": "Explain what the HyperFrames plugin does and how to use its skills (compose, cli, registry, gsap, website-to-hyperframes). Call this to orient before starting a HyperFrames task.",
+      "kind": "js",
+      "handler": "guide",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "interface": {
+    "displayName": "HyperFrames",
+    "category": "Creativity",
+    "brandColor": "#0a0a0a",
+    "defaultPrompt": [
+      "Help me get started with HyperFrames",
+      "Turn this website into a 20-second product promo",
+      "Create an animated title card with kinetic type",
+      "Add synced captions to this voiceover"
+    ]
+  }
+}

@@ -1,7 +1,10 @@
 import { BrowserWindow, type WebContents } from 'electron'
+import { homedir } from 'os'
+import { randomUUID } from 'crypto'
+import { statSync } from 'fs'
+import { spawn, type IPty } from 'node-pty'
 import { safeSendMessagePackToWindow } from '../window-ipc'
-import { getNativeWorker } from '../lib/native-worker'
-import { buildShellEnvironment } from './shell-environment'
+import { buildShellEnvironment, isExecutableFile } from './shell-environment'
 import { registerMessagePackHandler } from './messagepack-handler'
 
 interface CreateTerminalSessionArgs {
@@ -56,21 +59,42 @@ interface TerminalSessionListEntry {
   buffer?: TerminalOutputChunk[]
 }
 
-interface NativeTerminalMutationResult {
-  success: boolean
-  error?: string | null
+interface TerminalShellLaunch {
+  shell: string
+  args: string[]
 }
 
-interface NativeTerminalSnapshotResult {
-  success: boolean
-  session?: TerminalSessionListEntry | null
-  error?: string | null
+interface TerminalSession {
+  id: string
+  pty: IPty
+  shell: string
+  cwd: string
+  cols: number
+  rows: number
+  createdAt: number
+  title: string
+  command?: string
+  exitCode?: number
+  exitSignal?: number
+  exitedAt?: number
+  buffer: TerminalOutputChunk[]
+  bufferBytes: number
+  nextSeq: number
+  ownerWindowId: number | null
+  signalFirstOutput: () => void
 }
 
-const terminalWindowIds = new Map<string, number | null>()
+const DEFAULT_COLS = 80
+const DEFAULT_ROWS = 24
+const MIN_COLS = 20
+const MIN_ROWS = 5
+const MAX_OUTPUT_BUFFER_BYTES = 64 * 1024
+const EXITED_SESSION_RETENTION_MS = 120_000
+const INITIAL_OUTPUT_WAIT_MS = 120
+
+const terminalSessions = new Map<string, TerminalSession>()
 const terminalOutputListeners = new Set<(event: TerminalOutputEvent) => void>()
 const terminalExitListeners = new Set<(event: TerminalExitEvent) => void>()
-let nativeTerminalEventsRegistered = false
 
 function resolveOwnerWindowId(sender?: WebContents | null): number | null {
   return sender ? (BrowserWindow.fromWebContents(sender)?.id ?? null) : null
@@ -104,89 +128,222 @@ function serializeShellEnvironment(): Record<string, string> {
   return serialized
 }
 
-function isNativeTerminalOutputEvent(value: unknown): value is TerminalOutputEvent {
+function isUsableDirectory(dirPath?: string): dirPath is string {
+  if (!dirPath?.trim()) return false
+  try {
+    return statSync(dirPath).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+function resolveCwd(cwd?: string): string {
+  if (isUsableDirectory(cwd)) return cwd
+  const home = homedir()
+  if (isUsableDirectory(home)) return home
+  return process.cwd()
+}
+
+function isPowerShell(shell: string): boolean {
+  const name = shell.split(/[\\/]/).pop()?.toLowerCase()
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as TerminalOutputEvent).id === 'string' &&
-    typeof (value as TerminalOutputEvent).data === 'string' &&
-    typeof (value as TerminalOutputEvent).seq === 'number'
+    name === 'powershell.exe' || name === 'powershell' || name === 'pwsh.exe' || name === 'pwsh'
   )
 }
 
-function isNativeTerminalExitEvent(value: unknown): value is TerminalExitEvent {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as TerminalExitEvent).id === 'string' &&
-    typeof (value as TerminalExitEvent).exitCode === 'number'
-  )
-}
+function getShellLaunchCandidates(
+  preferredShell: string | undefined,
+  env: Record<string, string>
+): TerminalShellLaunch[] {
+  const preferred = preferredShell?.trim()
 
-function ensureNativeTerminalEventBridge(): void {
-  if (nativeTerminalEventsRegistered) return
-  nativeTerminalEventsRegistered = true
-  const nativeWorker = getNativeWorker()
-
-  nativeWorker.onEvent('terminal/output', (params) => {
-    if (!isNativeTerminalOutputEvent(params)) return
-    createWindowEvent(terminalWindowIds.get(params.id) ?? null, 'terminal:output', params)
-    emitTerminalOutput(params)
-  })
-
-  nativeWorker.onEvent('terminal/exit', (params) => {
-    if (!isNativeTerminalExitEvent(params)) return
-    createWindowEvent(terminalWindowIds.get(params.id) ?? null, 'terminal:exit', params)
-    emitTerminalExit(params)
-  })
-}
-
-function toCreatedEvent(result: CreateTerminalSessionResult): TerminalSessionListEntry | null {
-  if (!result.id || !result.shell || !result.cwd || !result.createdAt || !result.title) {
-    return null
+  if (process.platform === 'win32') {
+    const shells = [
+      preferred,
+      env.ComSpec || env.COMSPEC || 'cmd.exe',
+      'powershell.exe',
+      'pwsh.exe'
+    ]
+    return shells
+      .filter(
+        (candidate, index, list): candidate is string =>
+          Boolean(candidate) && list.indexOf(candidate) === index
+      )
+      .map((shell) => ({ shell, args: [] }))
   }
 
+  const shells = [preferred, env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(
+    (candidate, index, list): candidate is string =>
+      Boolean(candidate) && list.indexOf(candidate) === index
+  )
+
+  const launches = shells
+    .filter((candidate) => isExecutableFile(candidate))
+    .map((shell) => ({ shell, args: shell === '/bin/sh' ? [] : ['-i'] }))
+
+  return launches.length > 0 ? launches : [{ shell: '/bin/sh', args: [] }]
+}
+
+function getLaunchArgs(launch: TerminalShellLaunch, command?: string): string[] {
+  if (process.platform === 'win32') {
+    if (!command) {
+      return isPowerShell(launch.shell) ? ['-NoLogo'] : []
+    }
+    return isPowerShell(launch.shell)
+      ? ['-NoLogo', '-NoProfile', '-Command', command]
+      : ['/d', '/s', '/c', command]
+  }
+  return command ? ['-lc', command] : launch.args
+}
+
+function appendSessionOutput(session: TerminalSession, data: string): TerminalOutputChunk {
+  session.nextSeq += 1
+  const chunk: TerminalOutputChunk = { seq: session.nextSeq, data }
+  session.buffer.push(chunk)
+  session.bufferBytes += Buffer.byteLength(data, 'utf8')
+  while (session.bufferBytes > MAX_OUTPUT_BUFFER_BYTES && session.buffer.length > 1) {
+    const dropped = session.buffer.shift()
+    if (!dropped) break
+    session.bufferBytes -= Buffer.byteLength(dropped.data, 'utf8')
+  }
+  return chunk
+}
+
+function toSessionRecord(
+  session: TerminalSession,
+  includeBuffer: boolean
+): TerminalSessionListEntry {
   return {
-    id: result.id,
-    shell: result.shell,
-    cwd: result.cwd,
-    cols: result.cols ?? 80,
-    rows: result.rows ?? 24,
-    createdAt: result.createdAt,
-    title: result.title,
-    ...(result.command ? { command: result.command } : {})
+    id: session.id,
+    shell: session.shell,
+    cwd: session.cwd,
+    cols: session.cols,
+    rows: session.rows,
+    createdAt: session.createdAt,
+    title: session.title,
+    ...(session.command ? { command: session.command } : {}),
+    ...(session.exitCode !== undefined ? { exitCode: session.exitCode } : {}),
+    ...(session.exitSignal !== undefined ? { exitSignal: session.exitSignal } : {}),
+    ...(includeBuffer ? { buffer: session.buffer.slice() } : {})
   }
+}
+
+function pruneExpiredExitedSessions(): void {
+  const now = Date.now()
+  for (const [id, session] of terminalSessions) {
+    if (session.exitedAt !== undefined && now - session.exitedAt > EXITED_SESSION_RETENTION_MS) {
+      terminalSessions.delete(id)
+    }
+  }
+}
+
+function waitForInitialOutput(session: TerminalSession, timeoutMs: number): Promise<void> {
+  if (session.buffer.length > 0 || session.exitCode !== undefined) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      session.signalFirstOutput = () => {}
+      resolve()
+    }, timeoutMs)
+    session.signalFirstOutput = () => {
+      clearTimeout(timer)
+      session.signalFirstOutput = () => {}
+      resolve()
+    }
+  })
 }
 
 export async function createTerminalSession(
   args: CreateTerminalSessionArgs,
   sender?: WebContents | null
 ): Promise<CreateTerminalSessionResult> {
-  ensureNativeTerminalEventBridge()
+  pruneExpiredExitedSessions()
   const ownerWindowId = resolveOwnerWindowId(sender)
-  const result = await getNativeWorker().request<CreateTerminalSessionResult>(
-    'terminal/create',
-    {
-      cwd: args.cwd || process.cwd(),
-      ...(args.shell ? { shell: args.shell } : {}),
-      cols: Math.max(20, Math.floor(args.cols ?? 80)),
-      rows: Math.max(5, Math.floor(args.rows ?? 24)),
-      ...(args.title ? { title: args.title } : {}),
-      ...(args.command ? { command: args.command } : {}),
-      env: serializeShellEnvironment()
-    },
-    120_000
-  )
+  const env = serializeShellEnvironment()
+  const requestedCwd = args.cwd?.trim()
+  const cwd = resolveCwd(requestedCwd)
+  const cols = Math.max(MIN_COLS, Math.floor(args.cols ?? DEFAULT_COLS))
+  const rows = Math.max(MIN_ROWS, Math.floor(args.rows ?? DEFAULT_ROWS))
+  const command = args.command?.trim() || undefined
+  let lastError = 'Unknown error'
 
-  if (result.id) {
-    terminalWindowIds.set(result.id, ownerWindowId)
-    const created = toCreatedEvent(result)
-    if (created) {
-      createWindowEvent(ownerWindowId, 'terminal:created', created)
+  for (const launch of getShellLaunchCandidates(args.shell, env)) {
+    try {
+      const pty = spawn(launch.shell, getLaunchArgs(launch, command), {
+        name: 'xterm-256color',
+        cols,
+        rows,
+        cwd,
+        env: {
+          ...env,
+          TERM: env.TERM?.trim() || 'xterm-256color'
+        }
+      })
+
+      const id = `term-${randomUUID()}`
+      const session: TerminalSession = {
+        id,
+        pty,
+        shell: launch.shell,
+        cwd,
+        cols,
+        rows,
+        createdAt: Date.now(),
+        title: args.title?.trim() || launch.shell.split(/[\\/]/).pop() || launch.shell,
+        ...(command ? { command } : {}),
+        buffer: [],
+        bufferBytes: 0,
+        nextSeq: 0,
+        ownerWindowId,
+        signalFirstOutput: () => {}
+      }
+      terminalSessions.set(id, session)
+
+      pty.onData((data) => {
+        const chunk = appendSessionOutput(session, data)
+        session.signalFirstOutput()
+        const event: TerminalOutputEvent = { id, data, seq: chunk.seq }
+        createWindowEvent(session.ownerWindowId, 'terminal:output', event)
+        emitTerminalOutput(event)
+      })
+
+      pty.onExit(({ exitCode, signal }) => {
+        session.exitCode = exitCode
+        session.exitSignal = signal
+        session.exitedAt = Date.now()
+        session.signalFirstOutput()
+        const event: TerminalExitEvent = {
+          id,
+          exitCode,
+          ...(signal !== undefined ? { signal } : {})
+        }
+        createWindowEvent(session.ownerWindowId, 'terminal:exit', event)
+        emitTerminalExit(event)
+      })
+
+      await waitForInitialOutput(session, INITIAL_OUTPUT_WAIT_MS)
+
+      createWindowEvent(ownerWindowId, 'terminal:created', toSessionRecord(session, false))
+
+      return {
+        id,
+        shell: session.shell,
+        cwd,
+        cols,
+        rows,
+        createdAt: session.createdAt,
+        title: session.title,
+        ...(command ? { command } : {})
+      }
+    } catch (error) {
+      lastError = `${launch.shell}: ${error instanceof Error ? error.message : String(error)}`
     }
   }
 
-  return result
+  const cwdHint =
+    requestedCwd && requestedCwd !== cwd
+      ? ` Requested cwd: ${requestedCwd}. Fallback cwd: ${cwd}.`
+      : ` Cwd: ${cwd}.`
+  return { error: `Failed to start terminal shell.${cwdHint} Last error: ${lastError}` }
 }
 
 export function onTerminalSessionOutput(
@@ -202,14 +359,9 @@ export function onTerminalSessionExit(listener: (event: TerminalExitEvent) => vo
 }
 
 export function registerTerminalHandlers(): void {
-  ensureNativeTerminalEventBridge()
-
-  registerMessagePackHandler<CreateTerminalSessionArgs>(
-    'terminal:create',
-    async (args, event) => {
-      return await createTerminalSession(args, event.sender)
-    }
-  )
+  registerMessagePackHandler<CreateTerminalSessionArgs>('terminal:create', async (args, event) => {
+    return await createTerminalSession(args, event.sender)
+  })
 
   registerMessagePackHandler<{ id: string; data: string }>('terminal:input', async (args) => {
     return await writeTerminalSession(args.id, args.data)
@@ -218,18 +370,20 @@ export function registerTerminalHandlers(): void {
   registerMessagePackHandler<{ id: string; cols: number; rows: number }>(
     'terminal:resize',
     async (args) => {
-      const result = await getNativeWorker().request<NativeTerminalMutationResult>(
-        'terminal/resize',
-        {
-          id: args.id,
-          cols: Math.max(20, Math.floor(args.cols)),
-          rows: Math.max(5, Math.floor(args.rows))
-        },
-        30_000
-      )
-      return result.success
-        ? { success: true }
-        : { error: result.error ?? 'Terminal resize failed' }
+      pruneExpiredExitedSessions()
+      const session = terminalSessions.get(args.id)
+      if (!session) return { error: 'Terminal not found' }
+      if (session.exitCode !== undefined) return { success: true }
+      try {
+        const cols = Math.max(MIN_COLS, Math.floor(args.cols))
+        const rows = Math.max(MIN_ROWS, Math.floor(args.rows))
+        session.pty.resize(cols, rows)
+        session.cols = cols
+        session.rows = rows
+        return { success: true }
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) }
+      }
     }
   )
 
@@ -239,60 +393,62 @@ export function registerTerminalHandlers(): void {
 
   registerMessagePackHandler<{ id: string }>('terminal:get', async (args) => {
     const session = await getTerminalSessionSnapshot(args.id)
-    return session
-      ? { success: true, session }
-      : { success: false, error: 'Terminal not found' }
+    return session ? { success: true, session } : { success: false, error: 'Terminal not found' }
   })
 
   registerMessagePackHandler<undefined>('terminal:list', async () => {
-    ensureNativeTerminalEventBridge()
-    return await getNativeWorker().request<TerminalSessionListEntry[]>('terminal/list', {}, 30_000)
+    pruneExpiredExitedSessions()
+    return Array.from(terminalSessions.values())
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((session) => toSessionRecord(session, true))
   })
 }
 
 export async function getTerminalSessionSnapshot(
   id: string
 ): Promise<TerminalSessionListEntry | undefined> {
-  ensureNativeTerminalEventBridge()
-  const result = await getNativeWorker().request<NativeTerminalSnapshotResult>(
-    'terminal/get',
-    { id },
-    30_000
-  )
-  return result.success ? (result.session ?? undefined) : undefined
+  pruneExpiredExitedSessions()
+  const session = terminalSessions.get(id)
+  return session ? toSessionRecord(session, true) : undefined
 }
 
 export async function writeTerminalSession(
   id: string,
   data: string
 ): Promise<{ success?: true; error?: string }> {
-  ensureNativeTerminalEventBridge()
-  const result = await getNativeWorker().request<NativeTerminalMutationResult>(
-    'terminal/input',
-    { id, data },
-    30_000
-  )
-  return result.success ? { success: true } : { error: result.error ?? 'Terminal input failed' }
+  pruneExpiredExitedSessions()
+  const session = terminalSessions.get(id)
+  if (!session) return { error: 'Terminal not found' }
+  if (session.exitCode !== undefined) return { error: 'Terminal already exited' }
+  try {
+    session.pty.write(data)
+    return { success: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 export async function killTerminalSession(id: string): Promise<{ success?: true; error?: string }> {
-  ensureNativeTerminalEventBridge()
-  const result = await getNativeWorker().request<NativeTerminalMutationResult>(
-    'terminal/kill',
-    { id },
-    30_000
-  )
-  if (result.success) {
-    terminalWindowIds.delete(id)
+  pruneExpiredExitedSessions()
+  const session = terminalSessions.get(id)
+  if (!session) return { error: 'Terminal not found' }
+  if (session.exitCode !== undefined) return { success: true }
+  try {
+    session.pty.kill()
     return { success: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
   }
-  return { error: result.error ?? 'Terminal kill failed' }
 }
 
 export function killAllTerminalSessions(): void {
-  if (!nativeTerminalEventsRegistered) return
-  terminalWindowIds.clear()
-  void getNativeWorker()
-    .request<NativeTerminalMutationResult>('terminal/kill-all', {}, 30_000)
-    .catch((error) => console.warn('[Terminal] Native kill-all failed:', error))
+  terminalSessions.forEach((session) => {
+    if (session.exitCode !== undefined) return
+    try {
+      session.pty.kill()
+    } catch {
+      // ignore
+    }
+  })
+  terminalSessions.clear()
 }

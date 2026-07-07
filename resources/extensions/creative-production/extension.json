@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "creative-production",
+  "name": "Creative Production",
+  "version": "1.0.0",
+  "description": "Turn a brief, product image, offer, or existing asset into marketing visuals the team can review. Explore campaign ideas, concept images, mood boards, product placements, ad directions, listing images, social posts, logos, and reusable styles, then adapt the chosen direction for the channels you need.",
+  "entry": "index.js",
+  "skills": "./skills/",
+  "state": true,
+  "tools": [
+    {
+      "name": "creative_production_guide",
+      "description": "Explain what the Creative Production plugin does and how to use its skills.",
+      "kind": "js",
+      "handler": "guide",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "mcpServers": {
+    "creative_production_mcp": {
+      "command": "node",
+      "args": ["./mcp/server.bundle.mjs"],
+      "cwd": ".",
+      "description": "Creative Production widgets MCP server"
+    }
+  },
+  "interface": {
+    "displayName": "Creative Production",
+    "category": "Creativity",
+    "brandColor": "#924FF7",
+    "defaultPrompt": [
+      "Build a mood board from this campaign brief",
+      "Generate concept images for this visual brief as a mood board",
+      "Explore ad directions and product-placement scenes for this offer"
+    ]
+  }
+}

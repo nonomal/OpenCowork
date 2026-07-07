@@ -6,7 +6,7 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        external: ['better-sqlite3', '@jitsi/robotjs']
+        external: ['better-sqlite3', '@jitsi/robotjs', 'node-pty']
       }
     },
     assetsInclude: ['**/*.ico']

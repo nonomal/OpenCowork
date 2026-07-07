@@ -94,6 +94,7 @@ files:
   - '!node_modules/**/*.map'
 asarUnpack:
   - resources/**
+  - node_modules/node-pty/**
   - node_modules/ssh2/**
   - node_modules/cpu-features/**
   - node_modules/@jitsi/robotjs/**

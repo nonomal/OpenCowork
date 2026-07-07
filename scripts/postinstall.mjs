@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
-import { readFile } from 'node:fs/promises'
+import { chmod, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import { rebuild } from '@electron/rebuild'
@@ -12,6 +12,32 @@ async function readInstalledElectronVersion(projectDir) {
   const electronPackagePath = path.join(projectDir, 'node_modules', 'electron', 'package.json')
   const packageJson = JSON.parse(await readFile(electronPackagePath, 'utf8'))
   return packageJson.version
+}
+
+/**
+ * npm install does not preserve the executable bit on node-pty's prebuilt spawn-helper,
+ * which makes every pty spawn fail on macOS with "posix_spawnp failed".
+ * @param {string} projectDir
+ * @returns {Promise<void>}
+ */
+async function ensurePtySpawnHelperExecutable(projectDir) {
+  if (process.platform === 'win32') return
+  const prebuildsDir = path.join(projectDir, 'node_modules', 'node-pty', 'prebuilds')
+  let entries = []
+  try {
+    entries = await readdir(prebuildsDir)
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    const helperPath = path.join(prebuildsDir, entry, 'spawn-helper')
+    try {
+      await chmod(helperPath, 0o755)
+      console.log(`> Restored executable bit on ${path.relative(projectDir, helperPath)}`)
+    } catch {
+      // this platform directory ships no spawn-helper
+    }
+  }
 }
 
 /**
@@ -58,6 +84,7 @@ async function main() {
   })
 
   await rebuildResult
+  await ensurePtySpawnHelperExecutable(projectDir)
 }
 
 main().catch((error) => {
