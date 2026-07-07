@@ -162,24 +162,28 @@ async function getBuiltinSkillNames(): Promise<Set<string>> {
   return new Set()
 }
 
-// An imported Codex plugin is one wrapper skill whose focused workflow skills
-// are nested under `<wrapper>/skills/*/SKILL.md`. Return those workflow names so
-// the UI can show what the plugin actually provides beyond its single router.
+// A router skill may bundle focused workflow skills nested under
+// `<wrapper>/workflows/*/SKILL.md` (or `<wrapper>/skills/*/SKILL.md`). Return
+// those workflow names so the UI can show what the plugin provides beyond its
+// single router.
 async function listNestedWorkflowNames(wrapperFolder: string): Promise<string[]> {
-  const nestedRoot = path.join(wrapperFolder, 'skills')
-  const entries = await fs.readdir(nestedRoot, { withFileTypes: true }).catch(() => [])
   const names: string[] = []
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    const skillMd = path.join(nestedRoot, entry.name, 'SKILL.md')
-    if (
-      await fs
-        .access(skillMd)
-        .then(() => true)
-        .catch(() => false)
-    ) {
-      names.push(await readSkillName(path.join(nestedRoot, entry.name)))
+  for (const subdir of ['workflows', 'skills']) {
+    const nestedRoot = path.join(wrapperFolder, subdir)
+    const entries = await fs.readdir(nestedRoot, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const skillMd = path.join(nestedRoot, entry.name, 'SKILL.md')
+      if (
+        await fs
+          .access(skillMd)
+          .then(() => true)
+          .catch(() => false)
+      ) {
+        names.push(await readSkillName(path.join(nestedRoot, entry.name)))
+      }
     }
+    if (names.length > 0) break
   }
   return names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
 }

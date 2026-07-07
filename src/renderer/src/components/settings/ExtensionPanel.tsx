@@ -1,16 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import {
-  Eye,
-  EyeOff,
-  FolderPlus,
-  FolderOpen,
-  Trash2,
-  Puzzle,
-  Save,
-  Shapes
-} from 'lucide-react'
+import { Eye, EyeOff, FolderPlus, FolderOpen, Trash2, Puzzle, Save, Shapes } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Badge } from '@renderer/components/ui/badge'
 import { Input } from '@renderer/components/ui/input'

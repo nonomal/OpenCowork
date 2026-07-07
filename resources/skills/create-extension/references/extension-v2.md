@@ -89,17 +89,5 @@ Follow the router pattern for multi-skill extensions:
 - SKILL.md frontmatter requires `name` and `description`; `compatibility` and `license` are
   optional.
 
-## Codex Plugin Import
-
-Settings -> Extensions -> "Import Codex plugins" scans `~/.codex/plugins` and converts each Codex
-plugin (`.codex-plugin/plugin.json`) into an aggregate extension automatically:
-
-- The whole plugin tree (skills, references, scripts, templates, assets) becomes one wrapper
-  skill with a generated router `SKILL.md`, so the plugin's internal relative links keep working.
-- `.mcp.json` servers map to `mcpServers`.
-- `$CODEX_HOME` and `~/.codex` references are rewritten to `~/.open-cowork`, so plugin state
-  lands in `~/.open-cowork/state/plugins/<id>/`.
-- Codex `interface` metadata maps to the extension `interface` field.
-
 If the host rejects the converted extension manifest, the importer falls back to installing the
 wrapper skill directly and registering the MCP servers standalone.

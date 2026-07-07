@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "product-design",
+  "name": "Product Design",
+  "version": "1.0.0",
+  "description": "Turn early product ideas, live URLs, and static screenshots into prototypes teams can review. Research user friction, audit product flows, ideate visual directions, prototype from a URL or image, run design QA, and share a runnable prototype.",
+  "entry": "index.js",
+  "skills": "./skills/",
+  "state": true,
+  "tools": [
+    {
+      "name": "product_design_guide",
+      "description": "Explain what the Product Design plugin does and how to use its workflows (research, audit, ideate, prototype, url-to-code, image-to-code, design-qa, share, user-context). Call this to orient before starting a Product Design task.",
+      "kind": "js",
+      "handler": "guide",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "interface": {
+    "displayName": "Product Design",
+    "category": "Creativity",
+    "brandColor": "#FF66AD",
+    "defaultPrompt": [
+      "Help me get started with Product Design",
+      "Turn this product idea into three visual directions",
+      "Clone this URL into an editable prototype",
+      "Audit this onboarding flow for UX and accessibility issues"
+    ]
+  }
+}
