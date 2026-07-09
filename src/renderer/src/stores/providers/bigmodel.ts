@@ -82,6 +82,7 @@ export const bigmodelPreset: BuiltinProviderPreset = {
   homepage: 'https://bigmodel.cn',
   apiKeyUrl: 'https://bigmodel.cn/usercenter/apikeys',
   defaultModel: 'glm-5.2',
+  deprecatedModelIds: ['glm-z1-airx', 'glm-z1-air', 'glm-z1-flash'],
   defaultModels: [
     // GLM-5 series
     {
@@ -394,37 +395,7 @@ export const bigmodelPreset: BuiltinProviderPreset = {
       maxOutputTokens: 1_000,
       supportsVision: true,
       supportsFunctionCall: false
-    },
-    // GLM-Z1 series (deprecated by BigModel on 2025-11-15, kept for existing users)
-    {
-      id: 'glm-z1-airx',
-      name: 'GLM-Z1 AirX (极速版)',
-      icon: 'bigmodel',
-      enabled: true,
-      contextLength: 128_000,
-      maxOutputTokens: 8_192,
-      supportsVision: false,
-      supportsFunctionCall: true
-    },
-    {
-      id: 'glm-z1-air',
-      name: 'GLM-Z1 Air (高性价比版)',
-      icon: 'bigmodel',
-      enabled: true,
-      contextLength: 128_000,
-      maxOutputTokens: 8_192,
-      supportsVision: false,
-      supportsFunctionCall: true
-    },
-    {
-      id: 'glm-z1-flash',
-      name: 'GLM-Z1 Flash (免费版)',
-      icon: 'bigmodel',
-      enabled: true,
-      contextLength: 128_000,
-      maxOutputTokens: 8_192,
-      supportsVision: false,
-      supportsFunctionCall: true
     }
+    // GLM-Z1 series retired by BigModel on 2025-11-15; see deprecatedModelIds above
   ]
 }

@@ -183,6 +183,35 @@ export const qwenPreset: BuiltinProviderPreset = {
   homepage: 'https://dashscope.aliyun.com',
   apiKeyUrl: 'https://dashscope.console.aliyun.com/apiKey',
   defaultModels: [
+    // Qwen3.7 series (2026-05 flagship refresh)
+    {
+      id: 'qwen3.7-max',
+      name: 'Qwen3.7 Max',
+      icon: 'qwen',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 32_768,
+      supportsVision: false,
+      supportsFunctionCall: true,
+      inputPrice: 1.25,
+      outputPrice: 3.75,
+      supportsThinking: true,
+      thinkingConfig: { bodyParams: { enable_thinking: true } }
+    },
+    {
+      id: 'qwen3.7-plus',
+      name: 'Qwen3.7 Plus',
+      icon: 'qwen',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 65_536,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 0.32,
+      outputPrice: 1.28,
+      supportsThinking: true,
+      thinkingConfig: { bodyParams: { enable_thinking: true } }
+    },
     // Qwen3 series (tiered pricing, base tier ≤32K/≤256K shown)
     {
       id: 'qwen3-max',
@@ -225,7 +254,7 @@ export const qwenPreset: BuiltinProviderPreset = {
       inputPrice: 1.6,
       outputPrice: 6.4
     },
-    // Qwen-Flash (free tier available)
+    // Qwen-Flash (low-cost tier; free trial ended 2026-04-15)
     {
       id: 'qwen-flash',
       name: 'Qwen Flash',
@@ -235,8 +264,8 @@ export const qwenPreset: BuiltinProviderPreset = {
       maxOutputTokens: 32_768,
       supportsVision: false,
       supportsFunctionCall: true,
-      inputPrice: 0,
-      outputPrice: 0,
+      inputPrice: 0.05,
+      outputPrice: 0.4,
       supportsThinking: true,
       thinkingConfig: { bodyParams: { enable_thinking: true } }
     }

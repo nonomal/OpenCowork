@@ -7,6 +7,16 @@ export const openrouterPreset: BuiltinProviderPreset = {
   defaultBaseUrl: 'https://openrouter.ai/api/v1',
   homepage: 'https://openrouter.ai',
   apiKeyUrl: 'https://openrouter.ai/keys',
+  deprecatedModelIds: [
+    'openai/gpt-5.2',
+    'openai/gpt-5.2-codex',
+    'anthropic/claude-sonnet-4',
+    'anthropic/claude-opus-4.6',
+    'x-ai/grok-4',
+    'x-ai/grok-4.1-fast',
+    'x-ai/grok-4-fast',
+    'x-ai/grok-code-fast-1'
+  ],
   defaultModels: [
     // ── Anthropic ──
     {
@@ -22,6 +32,34 @@ export const openrouterPreset: BuiltinProviderPreset = {
       outputPrice: 25,
       cacheCreationPrice: 6.25,
       cacheHitPrice: 0.5
+    },
+    {
+      id: 'anthropic/claude-opus-4.7',
+      name: 'Claude Opus 4.7',
+      icon: 'claude',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 32_768,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 5,
+      outputPrice: 25,
+      cacheCreationPrice: 6.25,
+      cacheHitPrice: 0.5
+    },
+    {
+      id: 'anthropic/claude-sonnet-5',
+      name: 'Claude Sonnet 5',
+      icon: 'claude',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 16_384,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 2,
+      outputPrice: 10,
+      cacheCreationPrice: 2.5,
+      cacheHitPrice: 0.2
     },
     {
       id: 'anthropic/claude-sonnet-4.6',
@@ -52,20 +90,6 @@ export const openrouterPreset: BuiltinProviderPreset = {
       cacheHitPrice: 0.1
     },
     {
-      id: 'anthropic/claude-opus-4.6',
-      name: 'Claude Opus 4.6',
-      icon: 'claude',
-      enabled: true,
-      contextLength: 1_000_000,
-      maxOutputTokens: 16_384,
-      supportsVision: true,
-      supportsFunctionCall: true,
-      inputPrice: 5,
-      outputPrice: 25,
-      cacheCreationPrice: 6.25,
-      cacheHitPrice: 0.5
-    },
-    {
       id: 'anthropic/claude-opus-4.5',
       name: 'Claude Opus 4.5',
       icon: 'claude',
@@ -79,76 +103,8 @@ export const openrouterPreset: BuiltinProviderPreset = {
       cacheCreationPrice: 6.25,
       cacheHitPrice: 0.5
     },
-    {
-      id: 'anthropic/claude-haiku-4.5',
-      name: 'Claude Haiku 4.5',
-      icon: 'claude',
-      enabled: true,
-      contextLength: 200_000,
-      maxOutputTokens: 8_192,
-      supportsVision: true,
-      supportsFunctionCall: true,
-      inputPrice: 1,
-      outputPrice: 5,
-      cacheCreationPrice: 1.25,
-      cacheHitPrice: 0.1
-    },
-    {
-      id: 'anthropic/claude-sonnet-4',
-      name: 'Claude Sonnet 4',
-      icon: 'claude',
-      enabled: true,
-      contextLength: 200_000,
-      maxOutputTokens: 16_384,
-      supportsVision: true,
-      supportsFunctionCall: true,
-      inputPrice: 3,
-      outputPrice: 15,
-      cacheCreationPrice: 3.75,
-      cacheHitPrice: 0.3
-    },
 
     // ── OpenAI — GPT-5 family ──
-    {
-      id: 'openai/gpt-5.2',
-      name: 'GPT-5.2',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 1_048_576,
-      maxOutputTokens: 32_768,
-      supportsVision: true,
-      supportsFunctionCall: true,
-      inputPrice: 1.75,
-      outputPrice: 14,
-      cacheCreationPrice: 1.75,
-      cacheHitPrice: 0.175,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: { reasoning_effort: 'medium' },
-        reasoningEffortLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
-        defaultReasoningEffort: 'medium'
-      }
-    },
-    {
-      id: 'openai/gpt-5.2-codex',
-      name: 'GPT-5.2 Codex',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 1_048_576,
-      maxOutputTokens: 32_768,
-      supportsVision: true,
-      supportsFunctionCall: true,
-      inputPrice: 1.75,
-      outputPrice: 14,
-      cacheCreationPrice: 1.75,
-      cacheHitPrice: 0.175,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: { reasoning_effort: 'medium' },
-        reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh'],
-        defaultReasoningEffort: 'medium'
-      }
-    },
     {
       id: 'openai/gpt-5.1',
       name: 'GPT-5.1',
@@ -422,6 +378,36 @@ export const openrouterPreset: BuiltinProviderPreset = {
 
     // ── Google Gemini ──
     {
+      id: 'google/gemini-3.1-pro-preview',
+      name: 'Gemini 3.1 Pro Preview',
+      icon: 'gemini',
+      enabled: true,
+      contextLength: 1_048_576,
+      maxOutputTokens: 65_536,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 2,
+      outputPrice: 12,
+      cacheHitPrice: 0.2,
+      supportsThinking: true,
+      thinkingConfig: { bodyParams: { reasoning_effort: 'medium' } }
+    },
+    {
+      id: 'google/gemini-3.5-flash',
+      name: 'Gemini 3.5 Flash',
+      icon: 'gemini',
+      enabled: true,
+      contextLength: 1_048_576,
+      maxOutputTokens: 65_536,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 1.5,
+      outputPrice: 9,
+      cacheHitPrice: 0.15,
+      supportsThinking: true,
+      thinkingConfig: { bodyParams: { reasoning_effort: 'medium' } }
+    },
+    {
       id: 'google/gemini-3-flash-preview',
       name: 'Gemini 3 Flash Preview',
       icon: 'gemini',
@@ -491,6 +477,20 @@ export const openrouterPreset: BuiltinProviderPreset = {
 
     // ── DeepSeek ──
     {
+      id: 'deepseek/deepseek-v4-pro',
+      name: 'DeepSeek V4 Pro',
+      icon: 'deepseek',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 8_192,
+      supportsVision: false,
+      supportsFunctionCall: true,
+      inputPrice: 0.435,
+      outputPrice: 0.87,
+      supportsThinking: true,
+      thinkingConfig: { bodyParams: { enable_thinking: true } }
+    },
+    {
       id: 'deepseek/deepseek-v3.2',
       name: 'DeepSeek V3.2',
       icon: 'deepseek',
@@ -534,6 +534,24 @@ export const openrouterPreset: BuiltinProviderPreset = {
 
     // ── Moonshot / Kimi ──
     {
+      id: 'moonshotai/kimi-k2.6',
+      name: 'Kimi K2.6',
+      icon: 'kimi',
+      enabled: true,
+      contextLength: 262_144,
+      maxOutputTokens: 8_192,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 0.66,
+      outputPrice: 3.41,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: { thinking: { type: 'enabled' } },
+        disabledBodyParams: { thinking: { type: 'disabled' } },
+        forceTemperature: 1
+      }
+    },
+    {
       id: 'moonshotai/kimi-k2.5',
       name: 'Kimi K2.5',
       icon: 'kimi',
@@ -553,6 +571,18 @@ export const openrouterPreset: BuiltinProviderPreset = {
     },
 
     // ── MiniMax ──
+    {
+      id: 'minimax/minimax-m3',
+      name: 'MiniMax M3',
+      icon: 'minimax',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 16_384,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 0.3,
+      outputPrice: 1.2
+    },
     {
       id: 'minimax/minimax-m2.1',
       name: 'MiniMax M2.1',
@@ -593,55 +623,55 @@ export const openrouterPreset: BuiltinProviderPreset = {
 
     // ── xAI Grok ──
     {
-      id: 'x-ai/grok-4',
-      name: 'Grok 4',
+      id: 'x-ai/grok-4.3',
+      name: 'Grok 4.3',
+      icon: 'grok',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 32_768,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 1.25,
+      outputPrice: 2.5
+    },
+    {
+      id: 'x-ai/grok-4.20',
+      name: 'Grok 4.20',
+      icon: 'grok',
+      enabled: true,
+      contextLength: 2_000_000,
+      maxOutputTokens: 32_768,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 1.25,
+      outputPrice: 2.5
+    },
+    {
+      id: 'x-ai/grok-build-0.1',
+      name: 'Grok Build 0.1',
       icon: 'grok',
       enabled: true,
       contextLength: 256_000,
       maxOutputTokens: 32_768,
       supportsVision: true,
       supportsFunctionCall: true,
-      inputPrice: 3,
-      outputPrice: 15
-    },
-    {
-      id: 'x-ai/grok-4.1-fast',
-      name: 'Grok 4.1 Fast',
-      icon: 'grok',
-      enabled: true,
-      contextLength: 256_000,
-      maxOutputTokens: 32_768,
-      supportsVision: true,
-      supportsFunctionCall: true,
-      inputPrice: 0.2,
-      outputPrice: 0.5
-    },
-    {
-      id: 'x-ai/grok-4-fast',
-      name: 'Grok 4 Fast',
-      icon: 'grok',
-      enabled: true,
-      contextLength: 256_000,
-      maxOutputTokens: 32_768,
-      supportsVision: true,
-      supportsFunctionCall: true,
-      inputPrice: 0.2,
-      outputPrice: 0.5
-    },
-    {
-      id: 'x-ai/grok-code-fast-1',
-      name: 'Grok Code Fast',
-      icon: 'grok',
-      enabled: true,
-      contextLength: 256_000,
-      maxOutputTokens: 32_768,
-      supportsVision: false,
-      supportsFunctionCall: true,
-      inputPrice: 0.2,
-      outputPrice: 1.5
+      inputPrice: 1,
+      outputPrice: 2
     },
 
     // ── Z.AI / GLM (智谱) ──
+    {
+      id: 'z-ai/glm-5.2',
+      name: 'GLM-5.2',
+      icon: 'chatglm',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 8_192,
+      supportsVision: false,
+      supportsFunctionCall: true,
+      inputPrice: 0.9,
+      outputPrice: 2.86
+    },
     {
       id: 'z-ai/glm-4.7',
       name: 'GLM-4.7',
@@ -680,6 +710,18 @@ export const openrouterPreset: BuiltinProviderPreset = {
     },
 
     // ── Qwen ──
+    {
+      id: 'qwen/qwen3.7-max',
+      name: 'Qwen3.7 Max',
+      icon: 'qwen',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 32_768,
+      supportsVision: false,
+      supportsFunctionCall: true,
+      inputPrice: 1.25,
+      outputPrice: 3.75
+    },
     {
       id: 'qwen/qwen3-235b-a22b',
       name: 'Qwen3 235B',

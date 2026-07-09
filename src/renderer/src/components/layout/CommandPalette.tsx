@@ -70,9 +70,9 @@ const MODEL_PRESETS: Record<ProviderType, string[]> = {
     'gpt-5.1',
     'gpt-5.2',
     'gpt-5.2-mini',
-    'gpt-5.2-codex',
-    'gpt-5.1-codex-mini',
-    'gpt-5.3-codex'
+    'gpt-5.3-codex-spark',
+    'gpt-5.4-mini',
+    'gpt-5.5'
   ],
   'openai-images': ['dall-e-3', 'dall-e-2', 'gpt-image-1']
 }

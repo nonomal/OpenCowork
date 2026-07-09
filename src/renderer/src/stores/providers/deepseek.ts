@@ -46,36 +46,6 @@ export const deepseekPreset: BuiltinProviderPreset = {
         bodyParams: { enable_thinking: true },
         disabledBodyParams: { enable_thinking: false }
       }
-    },
-    {
-      id: 'deepseek-chat',
-      name: 'DeepSeek V4 Flash (Chat, Deprecated)',
-      icon: 'deepseek',
-      enabled: true,
-      contextLength: 1_000_000,
-      maxOutputTokens: 384_000,
-      supportsVision: false,
-      supportsFunctionCall: true,
-      inputPrice: 0.14,
-      outputPrice: 0.28,
-      cacheCreationPrice: 0.14,
-      cacheHitPrice: 0.0028
-    },
-    {
-      id: 'deepseek-reasoner',
-      name: 'DeepSeek V4 Flash (Reasoner, Deprecated)',
-      icon: 'deepseek',
-      enabled: true,
-      contextLength: 1_000_000,
-      maxOutputTokens: 384_000,
-      supportsVision: false,
-      supportsFunctionCall: true,
-      inputPrice: 0.14,
-      outputPrice: 0.28,
-      cacheCreationPrice: 0.14,
-      cacheHitPrice: 0.0028,
-      supportsThinking: true,
-      thinkingConfig: { bodyParams: { enable_thinking: true } }
     }
   ],
   deprecatedModelIds: ['deepseek-chat', 'deepseek-reasoner']

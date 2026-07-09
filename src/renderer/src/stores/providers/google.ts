@@ -7,6 +7,7 @@ export const googlePreset: BuiltinProviderPreset = {
   defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
   homepage: 'https://ai.google.dev',
   apiKeyUrl: 'https://aistudio.google.com/apikey',
+  deprecatedModelIds: ['gemini-2.0-flash'],
   defaultModels: [
     // Gemini 3.5 (stable)
     {
@@ -91,18 +92,20 @@ export const googlePreset: BuiltinProviderPreset = {
       supportsThinking: true,
       thinkingConfig: { bodyParams: { reasoning_effort: 'medium' } }
     },
-    // Gemini 2.0
+    // Gemini 3.1 Flash-Lite (stable — most cost-efficient current tier)
     {
-      id: 'gemini-2.0-flash',
-      name: 'Gemini 2.0 Flash',
+      id: 'gemini-3.1-flash-lite',
+      name: 'Gemini 3.1 Flash-Lite',
       icon: 'gemini',
       enabled: true,
       contextLength: 1_048_576,
-      maxOutputTokens: 8_192,
+      maxOutputTokens: 65_536,
       supportsVision: true,
       supportsFunctionCall: true,
-      inputPrice: 0.1,
-      outputPrice: 0.4
+      inputPrice: 0.25,
+      outputPrice: 1.5,
+      supportsThinking: true,
+      thinkingConfig: { bodyParams: { reasoning_effort: 'medium' } }
     },
     // Gemini image generation
     {

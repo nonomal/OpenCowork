@@ -10,6 +10,34 @@ export const siliconflowPreset: BuiltinProviderPreset = {
   defaultModels: [
     // ── DeepSeek ──
     {
+      id: 'deepseek-ai/DeepSeek-V4-Pro',
+      name: 'DeepSeek V4 Pro',
+      icon: 'deepseek',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 8_192,
+      supportsVision: false,
+      supportsFunctionCall: true,
+      inputPrice: 1.6,
+      outputPrice: 3.135,
+      supportsThinking: true,
+      thinkingConfig: { bodyParams: { enable_thinking: true } }
+    },
+    {
+      id: 'deepseek-ai/DeepSeek-V4-Flash',
+      name: 'DeepSeek V4 Flash',
+      icon: 'deepseek',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 8_192,
+      supportsVision: false,
+      supportsFunctionCall: true,
+      inputPrice: 0.13,
+      outputPrice: 0.28,
+      supportsThinking: true,
+      thinkingConfig: { bodyParams: { enable_thinking: true } }
+    },
+    {
       id: 'deepseek-ai/DeepSeek-V3.2',
       name: 'DeepSeek V3.2',
       icon: 'deepseek',
@@ -52,6 +80,20 @@ export const siliconflowPreset: BuiltinProviderPreset = {
       thinkingConfig: { bodyParams: { enable_thinking: true } }
     },
     // ── Qwen ──
+    {
+      id: 'Qwen/Qwen3.6-35B-A3B',
+      name: 'Qwen3.6 35B-A3B',
+      icon: 'qwen',
+      enabled: true,
+      contextLength: 262_144,
+      maxOutputTokens: 32_768,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 0.2,
+      outputPrice: 1.6,
+      supportsThinking: true,
+      thinkingConfig: { bodyParams: { enable_thinking: true } }
+    },
     {
       id: 'Qwen/Qwen3-235B-A22B',
       name: 'Qwen3 235B',
@@ -96,6 +138,18 @@ export const siliconflowPreset: BuiltinProviderPreset = {
     },
     // ── GLM (智谱) ──
     {
+      id: 'zai-org/GLM-5.2',
+      name: 'GLM-5.2',
+      icon: 'chatglm',
+      enabled: true,
+      contextLength: 1_048_576,
+      maxOutputTokens: 8_192,
+      supportsVision: false,
+      supportsFunctionCall: true,
+      inputPrice: 1.302,
+      outputPrice: 4.092
+    },
+    {
       id: 'THUDM/GLM-4.5-Air',
       name: 'GLM-4.5 Air',
       icon: 'chatglm',
@@ -120,6 +174,24 @@ export const siliconflowPreset: BuiltinProviderPreset = {
       outputPrice: 0.27
     },
     // ── Moonshot / Kimi ──
+    {
+      id: 'moonshotai/Kimi-K2.7-Code',
+      name: 'Kimi K2.7 Code',
+      icon: 'kimi',
+      enabled: true,
+      contextLength: 262_144,
+      maxOutputTokens: 8_192,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: { thinking: { type: 'enabled' } },
+        disabledBodyParams: { thinking: { type: 'disabled' } },
+        forceTemperature: 1
+      },
+      inputPrice: 0.94,
+      outputPrice: 4.0
+    },
     {
       id: 'moonshotai/Kimi-K2.6',
       name: 'Kimi K2.6',
@@ -182,6 +254,20 @@ export const siliconflowPreset: BuiltinProviderPreset = {
     },
     // ── MiniMax ──
     {
+      id: 'MiniMaxAI/MiniMax-M3',
+      name: 'MiniMax M3',
+      icon: 'minimax',
+      enabled: true,
+      contextLength: 1_048_576,
+      maxOutputTokens: 16_384,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      supportsThinking: true,
+      thinkingConfig: { bodyParams: { enable_thinking: true } },
+      inputPrice: 0.3,
+      outputPrice: 1.2
+    },
+    {
       id: 'MiniMaxAI/MiniMax-M2.1',
       name: 'MiniMax M2.1',
       icon: 'minimax',
@@ -209,19 +295,6 @@ export const siliconflowPreset: BuiltinProviderPreset = {
       inputPrice: 0.3,
       outputPrice: 1.2
     },
-    {
-      id: 'MiniMaxAI/MiniMax-M1-80k',
-      name: 'MiniMax M1 80K',
-      icon: 'minimax',
-      enabled: true,
-      contextLength: 131_072,
-      maxOutputTokens: 16_384,
-      supportsVision: false,
-      supportsFunctionCall: true,
-      inputPrice: 0.55,
-      outputPrice: 2.2
-    },
-    // ── OpenAI (开源) ──
     {
       id: 'MiniMaxAI/MiniMax-M1-80k',
       name: 'MiniMax M1 80K',

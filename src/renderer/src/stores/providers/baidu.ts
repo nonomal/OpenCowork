@@ -142,7 +142,35 @@ export const baiduPreset: BuiltinProviderPreset = {
   defaultBaseUrl: 'https://qianfan.baidubce.com/v2',
   homepage: 'https://cloud.baidu.com/product-s/qianfan_home',
   apiKeyUrl: 'https://cloud.baidu.com/doc/qianfan/s/wmh8l6tnf',
+  defaultModel: 'ernie-5.1',
   defaultModels: [
+    // ERNIE (native models)
+    {
+      id: 'ernie-5.1',
+      name: 'ERNIE 5.1',
+      icon: 'ernie',
+      enabled: true,
+      supportsFunctionCall: true
+    },
+    {
+      id: 'ernie-4.5-turbo-128k',
+      name: 'ERNIE 4.5 Turbo 128K',
+      icon: 'ernie',
+      enabled: true,
+      supportsFunctionCall: true
+    },
+    {
+      id: 'ernie-x1.1',
+      name: 'ERNIE X1.1',
+      icon: 'ernie',
+      enabled: true,
+      supportsFunctionCall: true,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: { enable_thinking: true },
+        disabledBodyParams: { enable_thinking: false }
+      }
+    },
     {
       id: 'deepseek-v3.2',
       name: 'DeepSeek V3.2',

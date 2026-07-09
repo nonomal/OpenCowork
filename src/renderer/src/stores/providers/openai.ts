@@ -7,6 +7,15 @@ export const openaiPreset: BuiltinProviderPreset = {
   defaultBaseUrl: 'https://api.openai.com/v1',
   homepage: 'https://openai.com',
   apiKeyUrl: 'https://platform.openai.com/api-keys',
+  deprecatedModelIds: [
+    'gpt-5-codex',
+    'gpt-5.1-codex',
+    'gpt-5.1-codex-max',
+    'gpt-5.1-codex-mini',
+    'gpt-5.2-codex',
+    'dall-e-2',
+    'dall-e-3'
+  ],
   defaultModels: [
     // GPT-5 family (cache: 90% off input)
     {
@@ -178,131 +187,6 @@ export const openaiPreset: BuiltinProviderPreset = {
     },
     // GPT-5 codex family (Responses API)
     {
-      id: 'gpt-5-codex',
-      name: 'GPT-5 Codex',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 400_000,
-      maxOutputTokens: 64_384,
-      supportsVision: true,
-      supportsFunctionCall: false,
-      inputPrice: 1.25,
-      outputPrice: 10,
-      cacheCreationPrice: 1.25,
-      cacheHitPrice: 0.125,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: {},
-        reasoningEffortLevels: ['minimal', 'low', 'medium', 'high'],
-        defaultReasoningEffort: 'medium'
-      },
-      responseSummary: 'detailed',
-      enablePromptCache: true,
-      enableSystemPromptCache: true,
-
-      type: 'openai-responses'
-    },
-    {
-      id: 'gpt-5.1-codex',
-      name: 'GPT-5.1 Codex',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 400_000,
-      maxOutputTokens: 64_384,
-      supportsVision: true,
-      supportsFunctionCall: false,
-      inputPrice: 1.25,
-      outputPrice: 10,
-      cacheCreationPrice: 1.25,
-      cacheHitPrice: 0.125,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: {},
-        reasoningEffortLevels: ['minimal', 'low', 'medium', 'high'],
-        defaultReasoningEffort: 'medium'
-      },
-      responseSummary: 'detailed',
-      enablePromptCache: true,
-      enableSystemPromptCache: true,
-
-      type: 'openai-responses'
-    },
-    {
-      id: 'gpt-5.1-codex-max',
-      name: 'GPT-5.1 Codex Max',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 400_000,
-      maxOutputTokens: 64_384,
-      supportsVision: true,
-      supportsFunctionCall: false,
-      inputPrice: 1.25,
-      outputPrice: 10,
-      cacheCreationPrice: 1.25,
-      cacheHitPrice: 0.125,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: {},
-        reasoningEffortLevels: ['minimal', 'low', 'medium', 'high'],
-        defaultReasoningEffort: 'medium'
-      },
-      responseSummary: 'detailed',
-      enablePromptCache: true,
-      enableSystemPromptCache: true,
-
-      type: 'openai-responses'
-    },
-    {
-      id: 'gpt-5.1-codex-mini',
-      name: 'GPT-5.1 Codex Mini',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 400_000,
-      maxOutputTokens: 64_384,
-      supportsVision: true,
-      supportsFunctionCall: false,
-      inputPrice: 0.25,
-      outputPrice: 2,
-      cacheCreationPrice: 0.25,
-      cacheHitPrice: 0.025,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: {},
-        reasoningEffortLevels: ['minimal', 'low', 'medium', 'high'],
-        defaultReasoningEffort: 'medium'
-      },
-      responseSummary: 'detailed',
-      enablePromptCache: true,
-      enableSystemPromptCache: true,
-
-      type: 'openai-responses'
-    },
-    {
-      id: 'gpt-5.2-codex',
-      name: 'GPT-5.2 Codex',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 400_000,
-      maxOutputTokens: 64_384,
-      supportsVision: true,
-      supportsFunctionCall: false,
-      inputPrice: 1.75,
-      outputPrice: 14,
-      cacheCreationPrice: 1.75,
-      cacheHitPrice: 0.175,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: {},
-        reasoningEffortLevels: ['minimal', 'low', 'medium', 'high', 'xhigh'],
-        defaultReasoningEffort: 'medium'
-      },
-      responseSummary: 'detailed',
-      enablePromptCache: true,
-      enableSystemPromptCache: true,
-
-      type: 'openai-responses'
-    },
-    {
       id: 'gpt-5.3-codex',
       name: 'GPT-5.3 Codex',
       icon: 'openai',
@@ -364,6 +248,155 @@ export const openaiPreset: BuiltinProviderPreset = {
       inputPrice: 2.5,
       outputPrice: 15,
       cacheHitPrice: 0.25,
+      supportsThinking: true,
+      supportsComputerUse: true,
+      thinkingConfig: {
+        bodyParams: {},
+        reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh'],
+        defaultReasoningEffort: 'medium'
+      },
+      responseSummary: 'detailed',
+      enablePromptCache: true,
+      enableSystemPromptCache: true,
+      type: 'openai-responses'
+    },
+    {
+      id: 'gpt-5.4-mini',
+      name: 'GPT 5.4 Mini',
+      icon: 'openai',
+      enabled: true,
+      serviceTier: 'priority',
+      contextLength: 400_000,
+      maxOutputTokens: 128_000,
+      supportsVision: true,
+      supportsFunctionCall: false,
+      inputPrice: 0.75,
+      outputPrice: 4.5,
+      cacheHitPrice: 0.075,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: {},
+        reasoningEffortLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
+        defaultReasoningEffort: 'medium'
+      },
+      responseSummary: 'detailed',
+      enablePromptCache: true,
+      enableSystemPromptCache: true,
+      type: 'openai-responses'
+    },
+    {
+      id: 'gpt-5.4-nano',
+      name: 'GPT 5.4 Nano',
+      icon: 'openai',
+      enabled: true,
+      serviceTier: 'priority',
+      contextLength: 400_000,
+      maxOutputTokens: 128_000,
+      supportsVision: true,
+      supportsFunctionCall: false,
+      inputPrice: 0.2,
+      outputPrice: 1.25,
+      cacheHitPrice: 0.02,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: {},
+        reasoningEffortLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
+        defaultReasoningEffort: 'medium'
+      },
+      responseSummary: 'detailed',
+      enablePromptCache: true,
+      enableSystemPromptCache: true,
+      type: 'openai-responses'
+    },
+    {
+      id: 'gpt-5.5',
+      name: 'GPT 5.5',
+      icon: 'openai',
+      enabled: true,
+      serviceTier: 'priority',
+      contextLength: 1_050_000,
+      maxOutputTokens: 128_000,
+      supportsVision: true,
+      supportsFunctionCall: false,
+      inputPrice: 5,
+      outputPrice: 30,
+      cacheHitPrice: 0.5,
+      supportsThinking: true,
+      supportsComputerUse: true,
+      thinkingConfig: {
+        bodyParams: {},
+        reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh'],
+        defaultReasoningEffort: 'medium'
+      },
+      responseSummary: 'detailed',
+      enablePromptCache: true,
+      enableSystemPromptCache: true,
+      type: 'openai-responses'
+    },
+    {
+      id: 'gpt-5.6-luna',
+      name: 'GPT 5.6 Luna',
+      icon: 'openai',
+      enabled: true,
+      serviceTier: 'priority',
+      contextLength: 400_000,
+      maxOutputTokens: 128_000,
+      supportsVision: true,
+      supportsFunctionCall: false,
+      inputPrice: 1,
+      outputPrice: 6,
+      cacheCreationPrice: 1.25,
+      cacheHitPrice: 0.1,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: {},
+        reasoningEffortLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
+        defaultReasoningEffort: 'medium'
+      },
+      responseSummary: 'detailed',
+      enablePromptCache: true,
+      enableSystemPromptCache: true,
+      type: 'openai-responses'
+    },
+    {
+      id: 'gpt-5.6-terra',
+      name: 'GPT 5.6 Terra',
+      icon: 'openai',
+      enabled: true,
+      serviceTier: 'priority',
+      contextLength: 1_050_000,
+      maxOutputTokens: 128_000,
+      supportsVision: true,
+      supportsFunctionCall: false,
+      inputPrice: 2.5,
+      outputPrice: 15,
+      cacheCreationPrice: 3.125,
+      cacheHitPrice: 0.25,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: {},
+        reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh'],
+        defaultReasoningEffort: 'medium'
+      },
+      responseSummary: 'detailed',
+      enablePromptCache: true,
+      enableSystemPromptCache: true,
+      type: 'openai-responses'
+    },
+    {
+      id: 'gpt-5.6-sol',
+      name: 'GPT 5.6 Sol',
+      icon: 'openai',
+      enabled: true,
+      serviceTier: 'priority',
+      contextLength: 1_050_000,
+      maxOutputTokens: 128_000,
+      supportsVision: true,
+      supportsFunctionCall: false,
+      inputPrice: 5,
+      outputPrice: 30,
+      cacheCreationPrice: 6.25,
+      cacheHitPrice: 0.5,
       supportsThinking: true,
       supportsComputerUse: true,
       thinkingConfig: {
@@ -571,28 +604,16 @@ export const openaiPreset: BuiltinProviderPreset = {
     },
     // Image generation models
     {
-      id: 'dall-e-3',
-      name: 'DALL-E 3',
+      id: 'gpt-image-2',
+      name: 'GPT-Image 2',
       icon: 'openai',
       enabled: true,
       category: 'image',
       type: 'openai-images',
       supportsVision: true,
       supportsFunctionCall: false,
-      inputPrice: 0.04,
-      outputPrice: 0.08
-    },
-    {
-      id: 'dall-e-2',
-      name: 'DALL-E 2',
-      icon: 'openai',
-      enabled: true,
-      category: 'image',
-      type: 'openai-images',
-      supportsVision: true,
-      supportsFunctionCall: false,
-      inputPrice: 0.02,
-      outputPrice: 0.02
+      inputPrice: 0.05,
+      outputPrice: 0.21
     },
     {
       id: 'gpt-image-1',

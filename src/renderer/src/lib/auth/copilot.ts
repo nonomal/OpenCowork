@@ -110,8 +110,9 @@ export function resolveCopilotModelId(modelId: string | undefined): string {
   const bare = normalized.split('/').pop()?.trim() || normalized
   const lower = bare.toLowerCase()
 
-  if (lower === 'gpt-5-codex' || lower === 'gpt-5.1-codex') return 'gpt-5'
+  if (lower === 'gpt-5-codex' || lower === 'gpt-5.1-codex' || lower === 'gpt-5') return 'gpt-5.4'
   if (lower === 'gpt-5.1-codex-mini') return 'gpt-5-mini'
+  if (lower === 'gpt-4.1' || lower === 'gpt-4o') return 'gpt-5-mini'
 
   return bare
 }

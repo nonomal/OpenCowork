@@ -13,6 +13,14 @@ export const giteeAiPreset: BuiltinProviderPreset = {
     // Pricing: per-million-token USD rates from public provider metadata (OpenRouter) where available
     // ── Qwen ──
     {
+      id: 'Qwen3.6-35B-A3B',
+      name: 'Qwen3.6 35B A3B',
+      icon: 'qwen',
+      enabled: true,
+      inputPrice: 0.2,
+      outputPrice: 1.6
+    },
+    {
       id: 'Qwen3.5-35B-A3B',
       name: 'Qwen3.5 35B A3B',
       icon: 'qwen',
@@ -169,6 +177,22 @@ export const giteeAiPreset: BuiltinProviderPreset = {
 
     // ── DeepSeek ──
     {
+      id: 'DeepSeek-V4-Pro',
+      name: 'DeepSeek V4 Pro',
+      icon: 'deepseek',
+      enabled: true,
+      inputPrice: 1.6,
+      outputPrice: 3.135
+    },
+    {
+      id: 'DeepSeek-V4-Flash',
+      name: 'DeepSeek V4 Flash',
+      icon: 'deepseek',
+      enabled: true,
+      inputPrice: 0.13,
+      outputPrice: 0.28
+    },
+    {
       id: 'DeepSeek-V3.2',
       name: 'DeepSeek V3.2',
       icon: 'deepseek',
@@ -244,6 +268,14 @@ export const giteeAiPreset: BuiltinProviderPreset = {
 
     // ── GLM (智谱) ──
     {
+      id: 'GLM-5.2',
+      name: 'GLM 5.2',
+      icon: 'chatglm',
+      enabled: true,
+      inputPrice: 1.302,
+      outputPrice: 4.092
+    },
+    {
       id: 'GLM-5',
       name: 'GLM 5',
       icon: 'chatglm',
@@ -303,6 +335,20 @@ export const giteeAiPreset: BuiltinProviderPreset = {
 
     // ── Kimi / MiniMax ──
     {
+      id: 'Kimi-K2.7-Code',
+      name: 'Kimi K2.7 Code',
+      icon: 'kimi',
+      enabled: true,
+      inputPrice: 0.95,
+      outputPrice: 4,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: { thinking: { type: 'enabled' } },
+        disabledBodyParams: { thinking: { type: 'disabled' } },
+        forceTemperature: 1
+      }
+    },
+    {
       id: 'Kimi-K2.6',
       name: 'Kimi K2.6',
       icon: 'kimi',
@@ -351,6 +397,14 @@ export const giteeAiPreset: BuiltinProviderPreset = {
       enabled: true,
       inputPrice: 0.58,
       outputPrice: 2.29
+    },
+    {
+      id: 'MiniMax-M3',
+      name: 'MiniMax M3',
+      icon: 'minimax',
+      enabled: true,
+      inputPrice: 0.3,
+      outputPrice: 1.2
     },
     {
       id: 'MiniMax-M2.5',

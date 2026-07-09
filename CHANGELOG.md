@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2026-07-07
+
+### Added
+
+- Introduced the Creative Production extension with MCP assets, enabling material import and step-by-step creation workflows including mood board, shot/style intake, ad/scene/offer/logo exploration, and generative polish across 9 skill packs.
+- Added local prototype setup and user context management to the product-design extension, supporting prototype bootstrap scripts, user context initialization, communication protocols, and key overrides.
+- Collapsible tool-call execution runs in chat, allowing tool-call output to be collapsed for a cleaner conversation view.
+
+### Changed
+
+- Refactored code structure for improved readability and maintainability.
+- Renamed product design references and removed related dead code.
+
+### Technical
+
+- Creative Production extension ships with a standalone MCP server, widget assets, and Python scripts.
+- Product Design extension includes prototype templates, bootstrap scripts, and user context management tooling.
+
 ## [1.0.8] - 2026-07-05
 
 ### Added

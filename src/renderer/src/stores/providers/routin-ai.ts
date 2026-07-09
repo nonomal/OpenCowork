@@ -9,6 +9,21 @@ export const routinAiPreset: BuiltinProviderPreset = {
   apiKeyUrl: 'https://routin.ai/dashboard/api-keys',
   defaultEnabled: true,
   defaultModel: 'deepseek-v4-flash',
+  // 与 openai.ts/azure-openai.ts/codex-oauth.ts/anthropic.ts today 的清理保持一致：
+  // gpt-5-codex/gpt-5.1-codex/gpt-5.1-codex-max/gpt-5.1-codex-mini/gpt-5.2-codex 已于
+  // OpenAI 官方 deprecations 页面标注 2026-07-23 下线；claude-sonnet-4-20250514/
+  // claude-opus-4-20250514/claude-3-5-haiku-20241022 已被 Anthropic 官方于 2026-06-15
+  // 标记 retired。
+  deprecatedModelIds: [
+    'gpt-5-codex',
+    'gpt-5.1-codex',
+    'gpt-5.1-codex-max',
+    'gpt-5.1-codex-mini',
+    'gpt-5.2-codex',
+    'claude-sonnet-4-20250514',
+    'claude-opus-4-20250514',
+    'claude-3-5-haiku-20241022'
+  ],
   defaultModels: [
     {
       id: 'kimi-k2.7-code',
@@ -38,9 +53,10 @@ export const routinAiPreset: BuiltinProviderPreset = {
       maxOutputTokens: 32_768,
       supportsVision: true,
       supportsFunctionCall: true,
-      inputPrice: 1.9,
+      // HighSpeed 只加价输出 token，input/cache 与 kimi-k2.7-code 一致（此前误将三者一并翻倍）
+      inputPrice: 0.95,
       outputPrice: 8,
-      cacheHitPrice: 0.38,
+      cacheHitPrice: 0.19,
       supportsThinking: true,
       thinkingConfig: {
         bodyParams: { thinking: { type: 'enabled' } },
@@ -509,126 +525,6 @@ export const routinAiPreset: BuiltinProviderPreset = {
       type: 'openai-responses'
     },
     {
-      id: 'gpt-5-codex',
-      name: 'GPT 5 Codex',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 400_000,
-      maxOutputTokens: 64_000,
-      supportsVision: true,
-      supportsFunctionCall: false,
-      inputPrice: 1.25,
-      outputPrice: 10,
-      cacheCreationPrice: 1.25,
-      cacheHitPrice: 0.125,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: {},
-        reasoningEffortLevels: ['minimal', 'low', 'medium', 'high'],
-        defaultReasoningEffort: 'medium'
-      },
-      responseSummary: 'detailed',
-      enablePromptCache: true,
-      enableSystemPromptCache: true,
-      type: 'openai-responses'
-    },
-    {
-      id: 'gpt-5.1-codex',
-      name: 'GPT 5.1 Codex',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 400_000,
-      maxOutputTokens: 64_000,
-      supportsVision: true,
-      supportsFunctionCall: false,
-      inputPrice: 1.25,
-      outputPrice: 10,
-      cacheCreationPrice: 1.25,
-      cacheHitPrice: 0.125,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: {},
-        reasoningEffortLevels: ['minimal', 'low', 'medium', 'high'],
-        defaultReasoningEffort: 'medium'
-      },
-      responseSummary: 'detailed',
-      enablePromptCache: true,
-      enableSystemPromptCache: true,
-      type: 'openai-responses'
-    },
-    {
-      id: 'gpt-5.1-codex-max',
-      name: 'GPT 5.1 Codex Max',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 400_000,
-      maxOutputTokens: 64_000,
-      supportsVision: true,
-      supportsFunctionCall: false,
-      inputPrice: 1.25,
-      outputPrice: 10,
-      cacheCreationPrice: 1.25,
-      cacheHitPrice: 0.125,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: {},
-        reasoningEffortLevels: ['minimal', 'low', 'medium', 'high'],
-        defaultReasoningEffort: 'medium'
-      },
-      responseSummary: 'detailed',
-      enablePromptCache: true,
-      enableSystemPromptCache: true,
-      type: 'openai-responses'
-    },
-    {
-      id: 'gpt-5.1-codex-mini',
-      name: 'GPT 5.1 Codex Mini',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 400_000,
-      maxOutputTokens: 64_000,
-      supportsVision: true,
-      supportsFunctionCall: false,
-      inputPrice: 0.25,
-      outputPrice: 2.0,
-      cacheCreationPrice: 0.25,
-      cacheHitPrice: 0.025,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: {},
-        reasoningEffortLevels: ['minimal', 'low', 'medium', 'high'],
-        defaultReasoningEffort: 'medium'
-      },
-      responseSummary: 'detailed',
-      enablePromptCache: true,
-      enableSystemPromptCache: true,
-      type: 'openai-responses'
-    },
-    {
-      id: 'gpt-5.2-codex',
-      name: 'GPT 5.2 Codex',
-      icon: 'openai',
-      enabled: true,
-      contextLength: 400_000,
-      maxOutputTokens: 64_000,
-      supportsVision: true,
-      supportsFunctionCall: false,
-      inputPrice: 1.75,
-      outputPrice: 14,
-      cacheCreationPrice: 1.75,
-      cacheHitPrice: 0.175,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: {},
-        reasoningEffortLevels: ['minimal', 'low', 'medium', 'high', 'xhigh'],
-        defaultReasoningEffort: 'medium'
-      },
-      responseSummary: 'detailed',
-      enablePromptCache: true,
-      enableSystemPromptCache: true,
-      type: 'openai-responses'
-    },
-    {
       id: 'gpt-5.3-codex',
       name: 'GPT 5.3 Codex',
       icon: 'openai',
@@ -736,6 +632,81 @@ export const routinAiPreset: BuiltinProviderPreset = {
       supportsFunctionCall: false,
       inputPrice: 5,
       outputPrice: 30,
+      cacheHitPrice: 0.5,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: {},
+        reasoningEffortLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
+        defaultReasoningEffort: 'medium'
+      },
+      responseSummary: 'detailed',
+      enablePromptCache: true,
+      enableSystemPromptCache: true,
+      type: 'openai-responses'
+    },
+    {
+      id: 'gpt-5.6-luna',
+      name: 'GPT 5.6 Luna',
+      icon: 'openai',
+      enabled: true,
+      serviceTier: 'priority',
+      contextLength: 268_000,
+      maxOutputTokens: 128_000,
+      supportsVision: true,
+      supportsFunctionCall: false,
+      inputPrice: 1,
+      outputPrice: 6,
+      cacheCreationPrice: 1.25,
+      cacheHitPrice: 0.1,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: {},
+        reasoningEffortLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
+        defaultReasoningEffort: 'medium'
+      },
+      responseSummary: 'detailed',
+      enablePromptCache: true,
+      enableSystemPromptCache: true,
+      type: 'openai-responses'
+    },
+    {
+      id: 'gpt-5.6-terra',
+      name: 'GPT 5.6 Terra',
+      icon: 'openai',
+      enabled: true,
+      serviceTier: 'priority',
+      contextLength: 268_000,
+      maxOutputTokens: 128_000,
+      supportsVision: true,
+      supportsFunctionCall: false,
+      inputPrice: 2.5,
+      outputPrice: 15,
+      cacheCreationPrice: 3.125,
+      cacheHitPrice: 0.25,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: {},
+        reasoningEffortLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
+        defaultReasoningEffort: 'medium'
+      },
+      responseSummary: 'detailed',
+      enablePromptCache: true,
+      enableSystemPromptCache: true,
+      type: 'openai-responses'
+    },
+    {
+      id: 'gpt-5.6-sol',
+      name: 'GPT 5.6 Sol',
+      icon: 'openai',
+      enabled: true,
+      serviceTier: 'priority',
+      contextLength: 268_000,
+      maxOutputTokens: 128_000,
+      supportsVision: true,
+      supportsFunctionCall: false,
+      inputPrice: 5,
+      outputPrice: 30,
+      cacheCreationPrice: 6.25,
       cacheHitPrice: 0.5,
       supportsThinking: true,
       thinkingConfig: {
@@ -1318,6 +1289,28 @@ export const routinAiPreset: BuiltinProviderPreset = {
       supportsFunctionCall: false
     },
     {
+      id: 'claude-fable-5',
+      name: 'Claude Fable 5',
+      icon: 'claude',
+      type: 'anthropic',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 128_000,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 10,
+      outputPrice: 50,
+      cacheCreationPrice: 12.5,
+      cacheHitPrice: 1,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: { thinking: { type: 'adaptive' } },
+        forceTemperature: 1,
+        reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+        defaultReasoningEffort: 'high'
+      }
+    },
+    {
       id: 'claude-sonnet-5',
       name: 'Claude Sonnet 5',
       icon: 'claude',
@@ -1493,74 +1486,6 @@ export const routinAiPreset: BuiltinProviderPreset = {
         defaultReasoningEffort: 'high'
       }
     },
-    {
-      id: 'claude-sonnet-4-20250514',
-      name: 'Claude Sonnet 4',
-      icon: 'claude',
-      type: 'anthropic',
-      enabled: true,
-      contextLength: 200_000,
-      maxOutputTokens: 64_000,
-      supportsVision: true,
-      supportsFunctionCall: true,
-      inputPrice: 3,
-      outputPrice: 15,
-      cacheCreationPrice: 3.75,
-      cacheHitPrice: 0.3,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: {
-          thinking: { type: 'enabled', budget_tokens: 10000 }
-        },
-        forceTemperature: 1,
-        reasoningEffortLevels: ['low', 'medium', 'high'],
-        defaultReasoningEffort: 'high'
-      }
-    },
-    {
-      id: 'claude-opus-4-20250514',
-      name: 'Claude Opus 4',
-      icon: 'claude',
-      type: 'anthropic',
-      enabled: true,
-      contextLength: 200_000,
-      maxOutputTokens: 64_000,
-      supportsVision: true,
-      supportsFunctionCall: true,
-      inputPrice: 15,
-      outputPrice: 75,
-      cacheCreationPrice: 18.75,
-      cacheHitPrice: 1.5,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: { thinking: { type: 'enabled', budget_tokens: 10000 } },
-        forceTemperature: 1,
-        reasoningEffortLevels: ['low', 'medium', 'high'],
-        defaultReasoningEffort: 'high'
-      }
-    },
-    {
-      id: 'claude-3-5-haiku-20241022',
-      name: 'Claude 3.5 Haiku',
-      icon: 'claude',
-      type: 'anthropic',
-      enabled: true,
-      contextLength: 200_000,
-      maxOutputTokens: 8_192,
-      supportsVision: true,
-      supportsFunctionCall: true,
-      inputPrice: 0.8,
-      outputPrice: 4,
-      cacheCreationPrice: 1,
-      cacheHitPrice: 0.08,
-      supportsThinking: true,
-      thinkingConfig: {
-        bodyParams: { thinking: { type: 'enabled', budget_tokens: 8000 } },
-        forceTemperature: 1,
-        reasoningEffortLevels: ['low', 'medium', 'high'],
-        defaultReasoningEffort: 'medium'
-      }
-    },
     // ── Qwen3.5 ──
     {
       id: 'qwen3.5-27b',
@@ -1631,11 +1556,38 @@ export const routinAiPreset: BuiltinProviderPreset = {
       }
     },
     // ── xAI Grok ──（官方标注无输出 token 上限；4.3 与 multi-agent 支持 reasoning_effort low/high）
+    // grok-4.5（2026-07-08 发布，docs.x.ai/developers/grok-4-5）：500K 上下文，$2/$6 每百万 token，
+    // 支持 low/medium/high 三档 reasoning_effort（默认 high）；缓存单价沿用本文件其余型号的 $0.2。
+    // grok-4.20 / grok-4.20-multi-agent 的上下文已按 docs.x.ai 模型注册表（maxPromptLength）
+    // 从错误的 2,000,000 更正为 1,000,000，与 x-ai.ts 保持一致。
+    // 协议：xAI 已提供 OpenAI Responses API 兼容端点，五个 Grok 型号均补上
+    // type: 'openai-responses' 覆盖（本 preset 顶层 type 仍为 'openai-chat'，因为同一个
+    // preset 下还混合了非 Grok 的其他模型家族）。
+    {
+      id: 'grok-4.5',
+      name: 'Grok 4.5',
+      icon: 'grok',
+      enabled: true,
+      type: 'openai-responses',
+      contextLength: 500_000,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 2,
+      outputPrice: 6,
+      cacheHitPrice: 0.2,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: {},
+        reasoningEffortLevels: ['low', 'medium', 'high'],
+        defaultReasoningEffort: 'high'
+      }
+    },
     {
       id: 'grok-4.3',
       name: 'Grok 4.3',
       icon: 'grok',
       enabled: true,
+      type: 'openai-responses',
       contextLength: 1_000_000,
       supportsVision: true,
       supportsFunctionCall: true,
@@ -1654,7 +1606,21 @@ export const routinAiPreset: BuiltinProviderPreset = {
       name: 'Grok 4.20',
       icon: 'grok',
       enabled: true,
-      contextLength: 2_000_000,
+      type: 'openai-responses',
+      contextLength: 1_000_000,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 1.25,
+      outputPrice: 2.5,
+      cacheHitPrice: 0.2
+    },
+    {
+      id: 'grok-4.20-non-reasoning',
+      name: 'Grok 4.20 Non-Reasoning',
+      icon: 'grok',
+      enabled: true,
+      type: 'openai-responses',
+      contextLength: 1_000_000,
       supportsVision: true,
       supportsFunctionCall: true,
       inputPrice: 1.25,
@@ -1666,7 +1632,8 @@ export const routinAiPreset: BuiltinProviderPreset = {
       name: 'Grok 4.20 Multi-Agent',
       icon: 'grok',
       enabled: true,
-      contextLength: 2_000_000,
+      type: 'openai-responses',
+      contextLength: 1_000_000,
       supportsVision: true,
       // 多智能体变体不支持 tools/tool_choice 参数
       supportsFunctionCall: false,
@@ -1685,6 +1652,7 @@ export const routinAiPreset: BuiltinProviderPreset = {
       name: 'Grok Build 0.1',
       icon: 'grok',
       enabled: true,
+      type: 'openai-responses',
       contextLength: 256_000,
       supportsVision: true,
       supportsFunctionCall: true,
@@ -1701,6 +1669,7 @@ const ROUTIN_AI_PLAN_MODEL_ORDER = [
   'gpt-5.4-mini',
   'gpt-5.4',
   'gpt-5.5',
+  'claude-fable-5',
   'claude-sonnet-5',
   'claude-opus-4-8',
   'claude-opus-4-7',
@@ -1708,9 +1677,7 @@ const ROUTIN_AI_PLAN_MODEL_ORDER = [
   'claude-sonnet-4-6',
   'claude-sonnet-4-5-20250929',
   'claude-haiku-4-5-20251001',
-  'claude-opus-4-5-20251101',
-  'claude-sonnet-4-20250514',
-  'claude-opus-4-20250514'
+  'claude-opus-4-5-20251101'
 ] as const
 
 const routinAiModelById = new Map(routinAiPreset.defaultModels.map((m) => [m.id, m]))
