@@ -372,13 +372,18 @@ function ModelSettingsPopover({
   const supportsAnthropicCacheTtl = requestType === 'anthropic'
   const anthropicCacheTtl = model?.cacheTtl ?? '5m'
 
+  const supportsBuiltinSearch =
+    !!model && (requestType === 'anthropic' || requestType === 'openai-responses')
+  const builtinSearchEnabled = model?.enableBuiltinSearch === true
+
   const hasConfigControls =
     supportsThinking ||
     supportsFastMode ||
     supportsResponsesWebsocket ||
     supportsResponsesImageGeneration ||
     supportsContextCompression ||
-    supportsAnthropicCacheTtl
+    supportsAnthropicCacheTtl ||
+    supportsBuiltinSearch
 
   const supportsAnthropicThinkingBudget =
     supportsThinking && requestType === 'anthropic' && !!model?.thinkingConfig
@@ -438,6 +443,16 @@ function ModelSettingsPopover({
     },
     [model, providerId]
   )
+
+  const toggleBuiltinSearch = useCallback(() => {
+    if (!model?.id) return
+    const providerStore = useProviderStore.getState()
+    const targetProviderId = providerId ?? providerStore.activeProviderId
+    if (!targetProviderId) return
+    providerStore.updateModel(targetProviderId, model.id, {
+      enableBuiltinSearch: !builtinSearchEnabled
+    })
+  }, [model, providerId, builtinSearchEnabled])
 
   const websocketEnabled =
     (model?.websocketMode ?? providerWebsocketMode ?? 'disabled') !== 'disabled'
@@ -696,10 +711,24 @@ function ModelSettingsPopover({
                   </div>
                 )}
 
+                {supportsBuiltinSearch && (
+                  <PillToggle
+                    enabled={builtinSearchEnabled}
+                    onClick={toggleBuiltinSearch}
+                    label={t('topbar.builtinSearch')}
+                    description={
+                      builtinSearchEnabled
+                        ? t('topbar.builtinSearchOn')
+                        : t('topbar.builtinSearchOff')
+                    }
+                    activeClassName="bg-teal-500 border-teal-500"
+                  />
+                )}
+
                 {(supportsFastMode ||
                   supportsResponsesWebsocket ||
                   supportsResponsesImageGeneration) && (
-                  <div className="flex items-stretch gap-1.5">
+                  <div className="grid grid-cols-2 gap-1.5">
                     {supportsFastMode && (
                       <PillToggle
                         compact

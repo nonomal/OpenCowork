@@ -82,6 +82,8 @@ internal static class AgentStreamMessagePackEmitter
         WriteOptionalString(writer, "thinkingEncryptedContent", streamEvent.ThinkingEncryptedContent);
         WriteOptionalString(writer, "thinkingEncryptedProvider", streamEvent.ThinkingEncryptedProvider);
         WriteOptionalJson(writer, "toolCallExtraContent", streamEvent.SubAgentToolCallExtraContent);
+        WriteOptionalJson(writer, "webSearchSources", streamEvent.WebSearchSources);
+        WriteOptionalString(writer, "webSearchId", streamEvent.WebSearchId);
     }
 
     private static int CountEventProperties(AgentRuntimeStreamEvent streamEvent)
@@ -129,6 +131,8 @@ internal static class AgentStreamMessagePackEmitter
         if (streamEvent.ThinkingEncryptedContent is not null) count++;
         if (streamEvent.ThinkingEncryptedProvider is not null) count++;
         if (HasJson(streamEvent.SubAgentToolCallExtraContent)) count++;
+        if (HasJson(streamEvent.WebSearchSources)) count++;
+        if (streamEvent.WebSearchId is not null) count++;
         return count;
     }
 

@@ -27,6 +27,8 @@ import {
   ImageIcon,
   RefreshCcw,
   ShieldAlert,
+  ShieldCheck,
+  Check,
   Shapes,
   Users,
   Wrench,
@@ -41,6 +43,7 @@ import {
 } from '@renderer/components/ui/dropdown-menu'
 import { Textarea } from '@renderer/components/ui/textarea'
 import { Spinner } from '@renderer/components/ui/spinner'
+import { confirm } from '@renderer/components/ui/confirm-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@renderer/components/ui/hover-card'
 import { useProviderStore, modelSupportsVision } from '@renderer/stores/provider-store'
@@ -1601,6 +1604,7 @@ export function InputArea({
   const [selectedOptionIndex, setSelectedOptionIndex] = React.useState(0)
   const currentLanguage = useSettingsStore((state) => state.language)
   const mainModelSelectionMode = useSettingsStore((state) => state.mainModelSelectionMode)
+  const autoApprove = useSettingsStore((state) => state.autoApprove)
   const clarifyAutoAcceptRecommended = useSettingsStore(
     (state) => state.clarifyAutoAcceptRecommended
   )
@@ -3701,6 +3705,80 @@ export function InputArea({
     </Tooltip>
   )
 
+  const handleSelectPermissionMode = async (fullAccess: boolean): Promise<void> => {
+    if (fullAccess === autoApprove) return
+    if (fullAccess) {
+      const ok = await confirm({
+        title: t('permission.fullAccessConfirmTitle'),
+        description: t('permission.fullAccessConfirmDesc'),
+        confirmLabel: t('permission.fullAccess'),
+        variant: 'destructive'
+      })
+      if (!ok) return
+    }
+    useSettingsStore.getState().updateSettings({ autoApprove: fullAccess })
+  }
+
+  const permissionControl = (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                composerIconControlClass,
+                'gap-1.5 px-2 text-xs font-medium',
+                autoApprove && 'text-amber-600 dark:text-amber-400'
+              )}
+              aria-label={t('permission.label')}
+            >
+              {autoApprove ? (
+                <ShieldAlert className="size-3.5" />
+              ) : (
+                <ShieldCheck className="size-3.5" />
+              )}
+              <span className="max-w-24 truncate">
+                {autoApprove ? t('permission.fullAccess') : t('permission.default')}
+              </span>
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t('permission.tooltip')}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="min-w-56">
+        <DropdownMenuItem
+          className="flex-col items-start gap-0.5"
+          onSelect={() => void handleSelectPermissionMode(false)}
+        >
+          <div className="flex w-full items-center gap-2">
+            <ShieldCheck className="size-3.5" />
+            <span className="flex-1 font-medium">{t('permission.default')}</span>
+            {!autoApprove && <Check className="size-3.5" />}
+          </div>
+          <span className="pl-[1.375rem] text-xs text-muted-foreground">
+            {t('permission.defaultDesc')}
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="flex-col items-start gap-0.5"
+          onSelect={() => void handleSelectPermissionMode(true)}
+        >
+          <div className="flex w-full items-center gap-2">
+            <ShieldAlert className="size-3.5 text-amber-600 dark:text-amber-400" />
+            <span className="flex-1 font-medium">{t('permission.fullAccess')}</span>
+            {autoApprove && <Check className="size-3.5" />}
+          </div>
+          <span className="pl-[1.375rem] text-xs text-muted-foreground">
+            {t('permission.fullAccessDesc')}
+          </span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+
   const sendControl = (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -4611,6 +4689,7 @@ export function InputArea({
 
                 {stopControl}
                 {optimizeControl}
+                {permissionControl}
                 {sendControl}
               </div>
             </div>

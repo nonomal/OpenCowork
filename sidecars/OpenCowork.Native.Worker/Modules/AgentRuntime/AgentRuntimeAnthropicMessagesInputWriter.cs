@@ -47,7 +47,7 @@ internal static partial class AgentRuntimeAnthropicMessagesProvider
             }
             writer.WritePropertyName("messages");
             WriteMessages(writer, sanitizedConversation, promptCacheEnabled, cacheBudget, validationStats);
-            WriteTools(writer, parameters, promptCacheEnabled, cacheBudget);
+            WriteTools(writer, parameters, provider, promptCacheEnabled, cacheBudget);
             writer.WriteBoolean("stream", true);
             var wroteThinkingTemperature = WriteAnthropicThinkingConfig(writer, provider);
             if (!wroteThinkingTemperature &&
@@ -536,53 +536,77 @@ internal static partial class AgentRuntimeAnthropicMessagesProvider
     private static void WriteTools(
         Utf8JsonWriter writer,
         JsonElement parameters,
+        JsonElement provider,
         bool promptCacheEnabled,
         AnthropicCacheControlBudget cacheBudget)
     {
-        if (parameters.ValueKind != JsonValueKind.Object ||
-            !parameters.TryGetProperty("tools", out var tools) ||
-            tools.ValueKind != JsonValueKind.Array ||
-            tools.GetArrayLength() == 0)
+        JsonElement tools = default;
+        var hasClientTools =
+            parameters.ValueKind == JsonValueKind.Object &&
+            parameters.TryGetProperty("tools", out tools) &&
+            tools.ValueKind == JsonValueKind.Array &&
+            tools.GetArrayLength() > 0;
+        var builtinSearchEnabled = JsonHelpers.GetBool(provider, "builtinSearchEnabled", false);
+        if (!hasClientTools && !builtinSearchEnabled)
         {
             return;
         }
 
         writer.WritePropertyName("tools");
         writer.WriteStartArray();
-        var toolIndex = 0;
-        var toolCount = tools.GetArrayLength();
-        foreach (var tool in tools.EnumerateArray())
-        {
-            var name = JsonHelpers.GetString(tool, "name");
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                toolIndex++;
-                continue;
-            }
 
+        // Claude's server-side web search runs entirely on Anthropic's side: the model
+        // emits server_tool_use/web_search_tool_result blocks and then continues with
+        // text in the same turn, so the client never executes anything. Emitting it
+        // first keeps the client tools' cache breakpoint (placed on the last tool)
+        // exactly where it was before.
+        if (builtinSearchEnabled)
+        {
             writer.WriteStartObject();
-            writer.WriteString("name", name);
-            writer.WriteString("description", JsonHelpers.GetString(tool, "description") ?? string.Empty);
-            writer.WritePropertyName("input_schema");
-            if (tool.TryGetProperty("inputSchema", out var schema))
-            {
-                schema.WriteTo(writer);
-            }
-            else
-            {
-                writer.WriteStartObject();
-                writer.WriteString("type", "object");
-                writer.WriteStartObject("properties");
-                writer.WriteEndObject();
-                writer.WriteEndObject();
-            }
-            if (promptCacheEnabled && toolIndex == toolCount - 1)
-            {
-                WriteAnthropicCacheControl(writer, cacheBudget);
-            }
+            writer.WriteString("type", "web_search_20250305");
+            writer.WriteString("name", "web_search");
+            writer.WriteNumber("max_uses", 5);
             writer.WriteEndObject();
-            toolIndex++;
         }
+
+        if (hasClientTools)
+        {
+            var toolIndex = 0;
+            var toolCount = tools.GetArrayLength();
+            foreach (var tool in tools.EnumerateArray())
+            {
+                var name = JsonHelpers.GetString(tool, "name");
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    toolIndex++;
+                    continue;
+                }
+
+                writer.WriteStartObject();
+                writer.WriteString("name", name);
+                writer.WriteString("description", JsonHelpers.GetString(tool, "description") ?? string.Empty);
+                writer.WritePropertyName("input_schema");
+                if (tool.TryGetProperty("inputSchema", out var schema))
+                {
+                    schema.WriteTo(writer);
+                }
+                else
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "object");
+                    writer.WriteStartObject("properties");
+                    writer.WriteEndObject();
+                    writer.WriteEndObject();
+                }
+                if (promptCacheEnabled && toolIndex == toolCount - 1)
+                {
+                    WriteAnthropicCacheControl(writer, cacheBudget);
+                }
+                writer.WriteEndObject();
+                toolIndex++;
+            }
+        }
+
         writer.WriteEndArray();
         writer.WritePropertyName("tool_choice");
         writer.WriteStartObject();

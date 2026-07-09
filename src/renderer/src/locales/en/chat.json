@@ -412,6 +412,14 @@
   },
   "permission": {
     "title": "Permission Required",
+    "label": "Permission",
+    "tooltip": "Tool call permission",
+    "default": "Default",
+    "defaultDesc": "Ask for confirmation before running dangerous tools",
+    "fullAccess": "Full access",
+    "fullAccessDesc": "Run all tools automatically without confirmation",
+    "fullAccessConfirmTitle": "Switch to full access?",
+    "fullAccessConfirmDesc": "All tool calls, including dangerous operations, will execute automatically without asking for confirmation.",
     "dangerous": "Dangerous",
     "caution": "Caution",
     "safe": "Safe",
@@ -695,6 +703,11 @@
     "deepThought": "Thought deeply",
     "thinkingEllipsis": "Thinking…",
     "thoughts": "Thoughts"
+  },
+  "webSearch": {
+    "label": "Web search",
+    "searching": "Searching the web…",
+    "sources": "Sources"
   },
   "messageList": {
     "startConversation": "Start a conversation",

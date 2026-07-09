@@ -5201,6 +5201,24 @@ export function useChatActions(): {
                   }
                   break
 
+                case 'web_search':
+                  // Preserve stream order: flush pending thinking/text before the chip.
+                  streamDeltaBuffer.flushNow()
+                  if (!thinkingDone) {
+                    thinkingDone = true
+                    completeRuntimeThinking(sessionId!, assistantMsgId)
+                  }
+                  appendRuntimeContentBlock(sessionId!, assistantMsgId, {
+                    type: 'web_search',
+                    query: event.content ?? '',
+                    ...(event.webSearchId ? { id: event.webSearchId } : {}),
+                    ...(event.status ? { status: event.status } : {}),
+                    ...(Array.isArray(event.webSearchSources)
+                      ? { sources: event.webSearchSources }
+                      : {})
+                  })
+                  break
+
                 case 'tool_use_streaming_start':
                   liveToolNames.set(event.toolCallId, event.toolName)
                   // Preserve stream order: flush any pending thinking/text before inserting tool block.
@@ -6807,6 +6825,20 @@ async function runSimpleChat(
           }
           setGeneratingImagePreviewWithSync(assistantMsgId, null)
           setGeneratingImageWithSync(assistantMsgId, false)
+          break
+        case 'web_search':
+          streamDeltaBuffer.flushNow()
+          if (!thinkingDone) {
+            thinkingDone = true
+            completeRuntimeThinking(sessionId, assistantMsgId)
+          }
+          appendRuntimeContentBlock(sessionId, assistantMsgId, {
+            type: 'web_search',
+            query: event.content ?? '',
+            ...(event.webSearchId ? { id: event.webSearchId } : {}),
+            ...(event.status ? { status: event.status } : {}),
+            ...(Array.isArray(event.webSearchSources) ? { sources: event.webSearchSources } : {})
+          })
           break
         case 'message_end': {
           streamDeltaBuffer.flushNow()

@@ -23,6 +23,7 @@ export class NativeAgentRuntimeManager {
   private unsubscribeRawAgentStream: (() => void) | null = null
   private unsubscribeReverseRequest: (() => void) | null = null
   private unsubscribeReverseCancel: (() => void) | null = null
+  private unsubscribeReconnect: (() => void) | null = null
   private activeRunIds = new Set<string>()
 
   get isRunning(): boolean {
@@ -52,6 +53,10 @@ export class NativeAgentRuntimeManager {
 
   setSessionVisibility(sessionId: string, visible: boolean): void {
     this.notify('agent/session-visibility', { sessionId, visible })
+  }
+
+  onDisconnect(listener: () => void): () => void {
+    return getNativeWorker().onDisconnect(listener)
   }
 
   hasActiveRuns(): boolean {
@@ -85,6 +90,27 @@ export class NativeAgentRuntimeManager {
     this.unsubscribeReverseRequest = null
     this.unsubscribeReverseCancel?.()
     this.unsubscribeReverseCancel = null
+    this.unsubscribeReconnect?.()
+    this.unsubscribeReconnect = null
+  }
+
+  // The supervisor may respawn a fresh worker underneath us. The new process is
+  // blank, so re-run the agent handshake and drop the run ids it never knew.
+  private async handleWorkerReconnected(): Promise<void> {
+    this.activeRunIds.clear()
+    if (!this.running) return
+
+    try {
+      await getNativeWorker().request('initialize', { runtime: 'agent' }, 30_000)
+      console.log('[NativeAgentRuntime] re-initialized after worker restart')
+    } catch (error) {
+      this.running = false
+      console.warn(
+        `[NativeAgentRuntime] re-initialize after worker restart failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+    }
   }
 
   async request(method: string, params?: unknown, timeoutMs = 30_000): Promise<unknown> {
@@ -149,6 +175,12 @@ export class NativeAgentRuntimeManager {
           )
         }
       )
+    }
+
+    if (!this.unsubscribeReconnect) {
+      this.unsubscribeReconnect = getNativeWorker().onReconnect(() => {
+        void this.handleWorkerReconnected()
+      })
     }
   }
 

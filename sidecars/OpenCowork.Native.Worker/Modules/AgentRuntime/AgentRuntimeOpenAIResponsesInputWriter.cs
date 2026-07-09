@@ -77,7 +77,21 @@ internal static partial class AgentRuntimeOpenAIResponsesProvider
                 writer.WriteString("service_tier", serviceTier);
             }
 
-            WriteResponsesThinkingConfig(writer, provider, omitted);
+            // Built-in web search: request the sources list so we can surface where the
+            // model looked. OpenAI only returns web_search_call.action.sources when it is
+            // explicitly asked for via `include`.
+            var includeWebSearchSources =
+                JsonHelpers.GetBool(provider, "builtinSearchEnabled", false) &&
+                !omitted.Contains("include");
+            var wroteInclude = WriteResponsesThinkingConfig(
+                writer, provider, omitted, includeWebSearchSources);
+            if (includeWebSearchSources && !wroteInclude)
+            {
+                writer.WritePropertyName("include");
+                writer.WriteStartArray();
+                WriteWebSearchIncludeValues(writer);
+                writer.WriteEndArray();
+            }
             if (!omitted.Contains("prompt_cache_key"))
             {
                 WritePromptCacheKey(writer, provider);
@@ -351,10 +365,13 @@ internal static partial class AgentRuntimeOpenAIResponsesProvider
         writer.WriteEndObject();
     }
 
-    private static void WriteResponsesThinkingConfig(
+    // Returns true when an `include` array was written (so the caller does not emit a
+    // second one for the web-search sources).
+    private static bool WriteResponsesThinkingConfig(
         Utf8JsonWriter writer,
         JsonElement provider,
-        HashSet<string> omitted)
+        HashSet<string> omitted,
+        bool includeWebSearchSources)
     {
         if (provider.TryGetProperty("thinkingConfig", out var thinkingConfig) &&
             thinkingConfig.ValueKind == JsonValueKind.Object)
@@ -376,9 +393,10 @@ internal static partial class AgentRuntimeOpenAIResponsesProvider
 
             if (thinkingEnabled)
             {
-                WriteResponsesReasoningConfig(writer, provider, thinkingConfig, omitted);
+                return WriteResponsesReasoningConfig(
+                    writer, provider, thinkingConfig, omitted, includeWebSearchSources);
             }
-            return;
+            return false;
         }
 
         if (!omitted.Contains("reasoning") &&
@@ -389,17 +407,20 @@ internal static partial class AgentRuntimeOpenAIResponsesProvider
             writer.WriteString("summary", summary);
             writer.WriteEndObject();
         }
+        return false;
     }
 
-    private static void WriteResponsesReasoningConfig(
+    // Returns true when an `include` array was written.
+    private static bool WriteResponsesReasoningConfig(
         Utf8JsonWriter writer,
         JsonElement provider,
         JsonElement thinkingConfig,
-        HashSet<string> omitted)
+        HashSet<string> omitted,
+        bool includeWebSearchSources)
     {
         if (omitted.Contains("reasoning"))
         {
-            return;
+            return false;
         }
 
         var hasReasoning = false;
@@ -426,7 +447,7 @@ internal static partial class AgentRuntimeOpenAIResponsesProvider
 
         if (!hasReasoning)
         {
-            return;
+            return false;
         }
 
         if (JsonHelpers.GetString(provider, "reasoningEffort") is { Length: > 0 } reasoningEffort)
@@ -439,28 +460,49 @@ internal static partial class AgentRuntimeOpenAIResponsesProvider
         }
         writer.WriteEndObject();
 
-        if (!omitted.Contains("include"))
+        if (omitted.Contains("include"))
         {
-            writer.WritePropertyName("include");
-            writer.WriteStartArray();
-            if (thinkingConfig.TryGetProperty("bodyParams", out var includeBodyParams) &&
-                includeBodyParams.ValueKind == JsonValueKind.Object &&
-                includeBodyParams.TryGetProperty("include", out var include) &&
-                include.ValueKind == JsonValueKind.Array)
+            return false;
+        }
+        writer.WritePropertyName("include");
+        writer.WriteStartArray();
+        if (thinkingConfig.TryGetProperty("bodyParams", out var includeBodyParams) &&
+            includeBodyParams.ValueKind == JsonValueKind.Object &&
+            includeBodyParams.TryGetProperty("include", out var include) &&
+            include.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in include.EnumerateArray())
             {
-                foreach (var item in include.EnumerateArray())
+                if (item.ValueKind == JsonValueKind.String &&
+                    item.GetString() is { Length: > 0 } includeItem &&
+                    includeItem != "reasoning.encrypted_content" &&
+                    !IsWebSearchIncludeValue(includeItem))
                 {
-                    if (item.ValueKind == JsonValueKind.String &&
-                        item.GetString() is { Length: > 0 } includeItem &&
-                        includeItem != "reasoning.encrypted_content")
-                    {
-                        writer.WriteStringValue(includeItem);
-                    }
+                    writer.WriteStringValue(includeItem);
                 }
             }
-            writer.WriteStringValue("reasoning.encrypted_content");
-            writer.WriteEndArray();
         }
+        writer.WriteStringValue("reasoning.encrypted_content");
+        if (includeWebSearchSources)
+        {
+            WriteWebSearchIncludeValues(writer);
+        }
+        writer.WriteEndArray();
+        return true;
+    }
+
+    // The `include` values that surface the built-in web search's sources and raw
+    // results. Both must be requested explicitly or the web_search_call item comes
+    // back without them.
+    private static void WriteWebSearchIncludeValues(Utf8JsonWriter writer)
+    {
+        writer.WriteStringValue("web_search_call.action.sources");
+        writer.WriteStringValue("web_search_call.results");
+    }
+
+    private static bool IsWebSearchIncludeValue(string value)
+    {
+        return value is "web_search_call.action.sources" or "web_search_call.results";
     }
 
     private static void WritePromptCacheKey(Utf8JsonWriter writer, JsonElement provider)
@@ -939,7 +981,8 @@ internal static partial class AgentRuntimeOpenAIResponsesProvider
         var hasTools = TryGetTools(parameters, out var tools);
         var hasComputerTool = JsonHelpers.GetBool(provider, "computerUseEnabled", false);
         var hasImageGenerationTool = ShouldEnableResponsesImageGeneration(provider);
-        if (!hasTools && !hasComputerTool && !hasImageGenerationTool) return;
+        var hasBuiltinSearchTool = JsonHelpers.GetBool(provider, "builtinSearchEnabled", false);
+        if (!hasTools && !hasComputerTool && !hasImageGenerationTool && !hasBuiltinSearchTool) return;
         writer.WritePropertyName("tools");
         writer.WriteStartArray();
         if (hasComputerTool)
@@ -951,6 +994,16 @@ internal static partial class AgentRuntimeOpenAIResponsesProvider
         if (hasImageGenerationTool)
         {
             WriteResponsesImageGenerationTool(writer, provider);
+        }
+        // OpenAI Responses runs the `web_search` tool server-side and streams a
+        // web_search_call output item followed by the model's grounded answer, so no
+        // client execution is required.
+        if (hasBuiltinSearchTool)
+        {
+            WorkerLog.Debug("responses request injecting built-in web_search tool");
+            writer.WriteStartObject();
+            writer.WriteString("type", "web_search");
+            writer.WriteEndObject();
         }
         if (hasTools)
         {

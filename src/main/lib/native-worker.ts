@@ -7,11 +7,20 @@ import * as net from 'net'
 import * as path from 'path'
 import { decode, encode } from '@msgpack/msgpack'
 import { readNativeMessagePackRoute, type NativeMessagePackRoute } from './messagepack-route-reader'
+import { writeCrashLog } from '../crash-logger'
+
+const NATIVE_WORKER_STDERR_TAIL_LINES = 40
+const NATIVE_WORKER_STDERR_MAX_LINE = 2000
 
 const DEFAULT_NATIVE_WORKER_TIMEOUT_MS = 60_000
 const DEFAULT_NATIVE_WORKER_SLOW_REQUEST_MS = 750
 const NATIVE_WORKER_CONNECT_TIMEOUT_MS = 10_000
 const NATIVE_WORKER_CONNECT_RETRY_MS = 35
+const NATIVE_WORKER_RESTART_BASE_MS = 300
+const NATIVE_WORKER_RESTART_MAX_MS = 30_000
+const NATIVE_WORKER_HEARTBEAT_INTERVAL_MS = 15_000
+const NATIVE_WORKER_HEARTBEAT_TIMEOUT_MS = 5_000
+const NATIVE_WORKER_HEARTBEAT_MAX_MISSES = 2
 const FRAME_HEADER_BYTES = 4
 const MAX_FRAME_BYTES = 256 * 1024 * 1024
 const REQUIRED_NATIVE_WORKER_METHODS = [
@@ -67,6 +76,14 @@ class NativeWorkerManager {
   private nextId = 1
   private startPromise: Promise<void> | null = null
   private stopping = false
+  private autoRestartDisabled = false
+  private hasStartedOnce = false
+  private restartAttempts = 0
+  private restartTimer: ReturnType<typeof setTimeout> | null = null
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  private heartbeatMisses = 0
+  private lifecycle = new EventEmitter()
+  private stderrTail: string[] = []
 
   get isRunning(): boolean {
     return (
@@ -84,6 +101,9 @@ class NativeWorkerManager {
 
   async ensureStarted(): Promise<void> {
     if (this.isRunning) return
+    // A caller explicitly asking for the worker re-arms supervision even if a
+    // prior stop() disabled it (e.g. macOS window-all-closed then reopen).
+    this.autoRestartDisabled = false
     if (!this.startPromise) {
       this.startPromise = this.start().finally(() => {
         this.startPromise = null
@@ -103,6 +123,26 @@ class NativeWorkerManager {
     this.rawEvents.on(eventName, listener)
     return () => {
       this.rawEvents.off(eventName, listener)
+    }
+  }
+
+  // Fired after the supervisor transparently respawns and reconnects to a fresh
+  // worker process. Higher layers use this to re-run their own handshake
+  // (the new process starts blank — no `initialize`, no active runs).
+  onReconnect(listener: () => void): () => void {
+    this.lifecycle.on('reconnected', listener)
+    return () => {
+      this.lifecycle.off('reconnected', listener)
+    }
+  }
+
+  // Fired when the worker goes down unexpectedly (crash, IPC drop). Any runs the
+  // dead process owned can never resume, so listeners use this to fail them
+  // instead of leaving the renderer hung on a stream that stopped mid-flight.
+  onDisconnect(listener: () => void): () => void {
+    this.lifecycle.on('disconnected', listener)
+    return () => {
+      this.lifecycle.off('disconnected', listener)
     }
   }
 
@@ -165,7 +205,10 @@ class NativeWorkerManager {
   }
 
   async stop(): Promise<void> {
+    this.autoRestartDisabled = true
     this.stopping = true
+    this.clearSupervisedRestart()
+    this.stopHeartbeat()
     this.closeWorker(new Error('Native worker stopped'))
     this.stopping = false
   }
@@ -197,12 +240,40 @@ class NativeWorkerManager {
 
     this.child = child
     this.endpoint = endpoint
+    this.stderrTail = []
     child.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8').trim()
-      if (text) console.warn(`[NativeWorker] ${text}`)
+      if (!text) return
+      console.warn(`[NativeWorker] ${text}`)
+      this.captureStderr(text)
     })
-    child.on('error', (error) => this.closeWorker(error))
+    child.on('error', (error) => {
+      // A spawn/launch failure (e.g. bad binary, blocked by AV) never reaches
+      // the exit handler with useful context; persist what we have.
+      if (!this.stopping) {
+        writeCrashLog('native_worker_spawn_error', {
+          workerPath,
+          pid: child.pid ?? null,
+          error: error.message,
+          stderrTail: this.stderrTail.slice(-NATIVE_WORKER_STDERR_TAIL_LINES)
+        })
+      }
+      this.closeWorker(error)
+    })
     child.on('exit', (code, signal) => {
+      // The worker's own diagnostics go to stderr, which is invisible in a
+      // packaged app (no console). Persist the exit code + stderr tail so a
+      // failure like a trimming/AOT crash or a missing native dep (e_sqlite3,
+      // ICU) is diagnosable from ~/.open-cowork/logs instead of opaque.
+      if (!this.stopping && (code !== 0 || signal)) {
+        writeCrashLog('native_worker_exited', {
+          code,
+          signal,
+          workerPath,
+          pid: child.pid ?? null,
+          stderrTail: this.stderrTail.slice(-NATIVE_WORKER_STDERR_TAIL_LINES)
+        })
+      }
       this.closeWorker(
         new Error(`Native worker exited: code=${code ?? 'null'} signal=${signal ?? 'null'}`)
       )
@@ -227,6 +298,16 @@ class NativeWorkerManager {
         workerPath,
         transport: process.platform === 'win32' ? 'named-pipe' : 'unix-domain-socket'
       })
+
+      const reconnected = this.hasStartedOnce
+      this.hasStartedOnce = true
+      this.restartAttempts = 0
+      this.clearSupervisedRestart()
+      this.startHeartbeat()
+      if (reconnected) {
+        console.log('[NativeWorker] recovered after unexpected exit; re-initializing runtimes')
+        this.lifecycle.emit('reconnected')
+      }
     } catch (error) {
       this.closeWorker(asError(error))
       throw error
@@ -422,6 +503,7 @@ class NativeWorkerManager {
   }
 
   private closeWorker(error: Error): void {
+    this.stopHeartbeat()
     const child = this.child
     const socket = this.socket
     const endpoint = this.endpoint
@@ -456,6 +538,111 @@ class NativeWorkerManager {
       pending.reject(error)
     }
     this.pending.clear()
+
+    if (!this.stopping) {
+      // Runs owned by the dead process are lost; let listeners fail them so the
+      // UI recovers instead of hanging on a stream that will never resume.
+      this.lifecycle.emit('disconnected')
+    }
+    if (!this.stopping && !this.autoRestartDisabled) {
+      this.scheduleSupervisedRestart()
+    }
+  }
+
+  // Proactively bring the worker back after an unexpected exit/close so the next
+  // user turn does not hit SIDECAR_UNAVAILABLE. Backoff (with jitter) keeps a
+  // hard-down worker — e.g. a missing/stale binary awaiting `native:publish` —
+  // from spinning; a live user request still starts immediately via
+  // ensureStarted(), so this only governs the background self-heal cadence.
+  private scheduleSupervisedRestart(): void {
+    if (this.autoRestartDisabled || this.stopping || this.restartTimer) return
+
+    const backoff = Math.min(
+      NATIVE_WORKER_RESTART_MAX_MS,
+      NATIVE_WORKER_RESTART_BASE_MS * 2 ** this.restartAttempts
+    )
+    const wait = Math.round(backoff + backoff * 0.25 * Math.random())
+    this.restartAttempts += 1
+    if (this.restartAttempts <= 5) {
+      console.warn(
+        `[NativeWorker] scheduling supervised restart in ${wait}ms (attempt ${this.restartAttempts})`
+      )
+    }
+
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      if (this.autoRestartDisabled || this.stopping || this.isRunning) return
+      void this.ensureStarted().catch((restartError) => {
+        // A failed attempt runs closeWorker, which reschedules with more backoff.
+        logNativeWorkerDebug('supervised restart attempt failed', {
+          message: asError(restartError).message
+        })
+      })
+    }, wait)
+    this.restartTimer.unref?.()
+  }
+
+  private clearSupervisedRestart(): void {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat()
+    this.heartbeatTimer = setInterval(() => {
+      void this.runHeartbeat()
+    }, NATIVE_WORKER_HEARTBEAT_INTERVAL_MS)
+    this.heartbeatTimer.unref?.()
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+    this.heartbeatMisses = 0
+  }
+
+  private async runHeartbeat(): Promise<void> {
+    if (!this.isRunning || this.stopping || this.autoRestartDisabled) return
+    // In-flight requests are their own liveness proof; probing while busy only
+    // risks a false positive that would recycle a healthy worker mid-run.
+    if (this.pending.size > 0) {
+      this.heartbeatMisses = 0
+      return
+    }
+
+    try {
+      await this.request('worker/ping', {}, NATIVE_WORKER_HEARTBEAT_TIMEOUT_MS)
+      this.heartbeatMisses = 0
+    } catch (error) {
+      if (!this.isRunning || this.stopping || this.autoRestartDisabled) return
+      this.heartbeatMisses += 1
+      console.warn('[NativeWorker] heartbeat miss', {
+        misses: this.heartbeatMisses,
+        error: asError(error).message
+      })
+      if (this.heartbeatMisses >= NATIVE_WORKER_HEARTBEAT_MAX_MISSES) {
+        this.closeWorker(new Error('Native worker heartbeat failed'))
+      }
+    }
+  }
+
+  private captureStderr(text: string): void {
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      this.stderrTail.push(
+        trimmed.length > NATIVE_WORKER_STDERR_MAX_LINE
+          ? `${trimmed.slice(0, NATIVE_WORKER_STDERR_MAX_LINE)}…`
+          : trimmed
+      )
+    }
+    if (this.stderrTail.length > NATIVE_WORKER_STDERR_TAIL_LINES) {
+      this.stderrTail.splice(0, this.stderrTail.length - NATIVE_WORKER_STDERR_TAIL_LINES)
+    }
   }
 }
 

@@ -412,6 +412,14 @@
   },
   "permission": {
     "title": "需要权限",
+    "label": "权限",
+    "tooltip": "工具调用权限",
+    "default": "默认权限",
+    "defaultDesc": "操作危险工具时需要用户确认",
+    "fullAccess": "完全访问权限",
+    "fullAccessDesc": "自动执行所有工具，无需确认",
+    "fullAccessConfirmTitle": "切换到完全访问权限？",
+    "fullAccessConfirmDesc": "所有工具调用（包括危险操作）都将自动执行，不再向你确认。",
     "dangerous": "危险",
     "caution": "注意",
     "safe": "安全",
@@ -695,6 +703,11 @@
     "deepThought": "已深度思考",
     "thinkingEllipsis": "思考中…",
     "thoughts": "思考过程"
+  },
+  "webSearch": {
+    "label": "联网搜索",
+    "searching": "正在联网搜索…",
+    "sources": "来源"
   },
   "messageList": {
     "startConversation": "开始对话",

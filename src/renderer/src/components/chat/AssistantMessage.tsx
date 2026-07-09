@@ -35,6 +35,7 @@ import {
 } from 'lucide-react'
 import { FadeIn, ScaleIn } from '@renderer/components/animate-ui'
 import { cn } from '@renderer/lib/utils'
+import { WebSearchBlock } from './WebSearchBlock'
 import { ImageGeneratingLoader } from './ImageGeneratingLoader'
 import { ImageGenerationErrorCard } from './ImageGenerationErrorCard'
 import { AgentErrorCard } from './AgentErrorCard'
@@ -678,67 +679,11 @@ function CompletionSummaryBar({ summary }: { summary: CompletionSummaryData }): 
   return <CompletionTokenSummary summary={summary} />
 }
 
-interface DebugToolCallEntry {
-  id: string
-  name: string
-  input: Record<string, unknown>
-  result?: ToolResultContent
-  isError?: boolean
-}
-
-function formatDebugJson(value: unknown): string {
-  if (typeof value === 'string') return value
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
-
-function collectDebugToolCalls(
-  content: string | ContentBlock[],
-  toolResults?: Map<string, { content: ToolResultContent; isError?: boolean }>
-): DebugToolCallEntry[] {
-  if (!Array.isArray(content)) return []
-
-  const inlineResults = new Map<string, { content: ToolResultContent; isError?: boolean }>()
-  for (const block of content) {
-    if (block.type !== 'tool_result') continue
-    inlineResults.set(block.toolUseId, {
-      content: block.content,
-      isError: block.isError
-    })
-  }
-
-  return content
-    .filter(
-      (block): block is Extract<ContentBlock, { type: 'tool_use' }> => block.type === 'tool_use'
-    )
-    .map((block) => {
-      const result = toolResults?.get(block.id) ?? inlineResults.get(block.id)
-      return {
-        id: block.id,
-        name: block.name,
-        input: block.input,
-        ...(result
-          ? {
-              result: result.content,
-              isError: result.isError
-            }
-          : {})
-      }
-    })
-}
-
 function DebugToggleButton({
   debugInfo,
-  content,
-  toolResults,
   sessionId
 }: {
   debugInfo: RequestDebugInfo
-  content: string | ContentBlock[]
-  toolResults?: Map<string, { content: ToolResultContent; isError?: boolean }>
   sessionId?: string | null
 }): React.JSX.Element {
   const [show, setShow] = useState(false)
@@ -800,31 +745,6 @@ function DebugToggleButton({
       return bodyText
     }
   })()
-  const toolCalls = show ? collectDebugToolCalls(content, toolResults) : []
-  const cacheShapeRows = [
-    { label: 'Prompt cache key hash', value: debugInfo.promptCacheKeyHash },
-    {
-      label: 'Request body bytes',
-      value: typeof debugInfo.bodyBytes === 'number' ? String(debugInfo.bodyBytes) : undefined
-    },
-    { label: 'System hash', value: debugInfo.systemHash },
-    { label: 'Tools hash', value: debugInfo.toolsHash },
-    { label: 'Message prefix hash', value: debugInfo.messagePrefixHash },
-    {
-      label: 'Tool count',
-      value: typeof debugInfo.toolCount === 'number' ? String(debugInfo.toolCount) : undefined
-    },
-    {
-      label: 'Cache read',
-      value:
-        typeof debugInfo.cacheReadRatio === 'number'
-          ? formatCacheHitRate(debugInfo.cacheReadRatio)
-          : undefined
-    }
-  ].filter(
-    (row): row is { label: string; value: string } =>
-      typeof row.value === 'string' && row.value.length > 0
-  )
 
   return (
     <>
@@ -866,138 +786,34 @@ function DebugToggleButton({
                 </span>
               </div>
             </div>
-            {cacheShapeRows.length > 0 ? (
-              <div
-                className="space-y-1.5 border-b px-4 py-2 text-[11px]"
-                style={{ fontFamily: MONO_FONT }}
-              >
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  Cache Shape
-                </div>
-                <div className="grid gap-1 sm:grid-cols-2">
-                  {cacheShapeRows.map((row) => (
-                    <div key={row.label} className="flex min-w-0 gap-2">
-                      <span className="shrink-0 text-muted-foreground/60">{row.label}</span>
-                      <span className="min-w-0 break-all text-foreground">{row.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {bodyFormatted || bodyLoading || bodyLoadError ? (
-              <div>
-                <div className="flex items-center justify-between border-b bg-muted/20 px-4 py-1.5">
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                    Last Request Body
-                  </span>
-                  {bodyFormatted ? <CopyButton text={bodyFormatted} /> : null}
-                </div>
-                {bodyFormatted ? (
-                  <LazySyntaxHighlighter
-                    language="json"
-                    customStyle={{
-                      margin: 0,
-                      padding: '12px 16px',
-                      fontSize: '11px',
-                      fontFamily: MONO_FONT,
-                      background: 'transparent',
-                      wordBreak: 'break-all',
-                      whiteSpace: 'pre-wrap'
-                    }}
-                    codeTagProps={{ style: { fontFamily: MONO_FONT } }}
-                  >
-                    {bodyFormatted}
-                  </LazySyntaxHighlighter>
-                ) : (
-                  <div className="px-4 py-3 text-[11px] text-muted-foreground">
-                    {bodyLoading ? 'Loading request body...' : bodyLoadError}
-                  </div>
-                )}
-              </div>
-            ) : null}
             <div>
               <div className="flex items-center justify-between border-b bg-muted/20 px-4 py-1.5">
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  Tool Calls In This Message
+                  Request Body
                 </span>
-                {toolCalls.length > 0 ? (
-                  <span className="text-[10px] text-muted-foreground">
-                    {toolCalls.length} call{toolCalls.length === 1 ? '' : 's'}
-                  </span>
-                ) : null}
+                {bodyFormatted ? <CopyButton text={bodyFormatted} /> : null}
               </div>
-              {toolCalls.length === 0 ? (
-                <div className="px-4 py-3 text-[11px] text-muted-foreground">
-                  No tool calls were produced by this assistant message. The request body may still
-                  contain available tool definitions; actual tool calls appear only after the model
-                  emits them.
-                </div>
+              {bodyFormatted ? (
+                <LazySyntaxHighlighter
+                  language="json"
+                  customStyle={{
+                    margin: 0,
+                    padding: '12px 16px',
+                    fontSize: '11px',
+                    fontFamily: MONO_FONT,
+                    background: 'transparent',
+                    wordBreak: 'break-all',
+                    whiteSpace: 'pre-wrap'
+                  }}
+                  codeTagProps={{ style: { fontFamily: MONO_FONT } }}
+                >
+                  {bodyFormatted}
+                </LazySyntaxHighlighter>
               ) : (
-                <div className="divide-y">
-                  {toolCalls.map((toolCall) => {
-                    const inputText = formatDebugJson(toolCall.input)
-                    const resultText =
-                      toolCall.result === undefined ? null : formatDebugJson(toolCall.result)
-                    return (
-                      <div key={toolCall.id} className="space-y-2 px-4 py-3">
-                        <div className="flex min-w-0 items-center gap-2 text-[11px]">
-                          <span className="rounded bg-orange-500/10 px-1.5 py-0.5 font-medium text-orange-500">
-                            {toolCall.name}
-                          </span>
-                          <span className="min-w-0 break-all text-muted-foreground">
-                            {toolCall.id}
-                          </span>
-                          {toolCall.isError ? (
-                            <span className="ml-auto shrink-0 rounded bg-destructive/10 px-1.5 py-0.5 text-destructive">
-                              error
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="overflow-hidden rounded border">
-                          <div className="border-b bg-muted/20 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                            Input
-                          </div>
-                          <LazySyntaxHighlighter
-                            language="json"
-                            customStyle={{
-                              margin: 0,
-                              padding: '8px',
-                              fontSize: '11px',
-                              fontFamily: MONO_FONT,
-                              background: 'transparent',
-                              wordBreak: 'break-all',
-                              whiteSpace: 'pre-wrap'
-                            }}
-                            codeTagProps={{ style: { fontFamily: MONO_FONT } }}
-                          >
-                            {inputText}
-                          </LazySyntaxHighlighter>
-                        </div>
-                        {resultText !== null ? (
-                          <div className="overflow-hidden rounded border">
-                            <div className="border-b bg-muted/20 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                              Result
-                            </div>
-                            <LazySyntaxHighlighter
-                              language="json"
-                              customStyle={{
-                                margin: 0,
-                                padding: '8px',
-                                fontSize: '11px',
-                                fontFamily: MONO_FONT,
-                                background: 'transparent',
-                                wordBreak: 'break-all',
-                                whiteSpace: 'pre-wrap'
-                              }}
-                              codeTagProps={{ style: { fontFamily: MONO_FONT } }}
-                            >
-                              {resultText}
-                            </LazySyntaxHighlighter>
-                          </div>
-                        ) : null}
-                      </div>
-                    )
-                  })}
+                <div className="px-4 py-3 text-[11px] text-muted-foreground">
+                  {bodyLoading
+                    ? 'Loading request body...'
+                    : (bodyLoadError ?? 'Request body is unavailable')}
                 </div>
               )}
             </div>
@@ -2871,6 +2687,14 @@ export function AssistantMessage({
               }
               case 'tool_use':
                 return renderToolBlock(block, block.id, item.index)
+              case 'web_search': {
+                const webSearch = block as Extract<ContentBlock, { type: 'web_search' }>
+                return (
+                  <ScaleIn key={item.index} className={liveScaleInClassName}>
+                    <WebSearchBlock block={webSearch} />
+                  </ScaleIn>
+                )
+              }
               default:
                 return null
             }
@@ -3356,12 +3180,7 @@ export function AssistantMessage({
                 </DropdownMenuContent>
               </DropdownMenu>
               {devMode && debugInfo && (
-                <DebugToggleButton
-                  debugInfo={debugInfo}
-                  content={content}
-                  toolResults={toolResults}
-                  sessionId={sessionId}
-                />
+                <DebugToggleButton debugInfo={debugInfo} sessionId={sessionId} />
               )}
             </div>
           )}

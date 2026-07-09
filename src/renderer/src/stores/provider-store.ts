@@ -131,6 +131,7 @@ function scoreManagedModelRichness(model: AIModelConfig | ManagedModelConfig): n
     'supportsThinking',
     'supportsComputerUse',
     'enableComputerUse',
+    'enableBuiltinSearch',
     'thinkingConfig',
     'responseSummary',
     'responsesImageGeneration',
@@ -372,6 +373,25 @@ export function isModelComputerUseEnabled(
   providerType?: ProviderType
 ): boolean {
   return modelSupportsComputerUse(model, providerType) && model?.enableComputerUse === true
+}
+
+// Providers whose native/server-side web search we can inject. Anthropic exposes
+// the `web_search_20250305` server tool; the OpenAI Responses API exposes the
+// `web_search` tool. Other protocols (openai-chat, gemini, images) have no
+// drop-in equivalent, so the toggle is inert there.
+export function modelSupportsBuiltinSearch(
+  model: AIModelConfig | null | undefined,
+  providerType?: ProviderType
+): boolean {
+  const requestType = model?.type ?? providerType
+  return requestType === 'anthropic' || requestType === 'openai-responses'
+}
+
+export function isModelBuiltinSearchEnabled(
+  model: AIModelConfig | null | undefined,
+  providerType?: ProviderType
+): boolean {
+  return modelSupportsBuiltinSearch(model, providerType) && model?.enableBuiltinSearch === true
 }
 
 export function normalizeProviderBaseUrl(
@@ -1211,6 +1231,7 @@ export const useProviderStore = create<ProviderStore>()(
           providerId: provider.id,
           providerBuiltinId: provider.builtinId,
           computerUseEnabled: isModelComputerUseEnabled(activeModel, requestType),
+          builtinSearchEnabled: isModelBuiltinSearchEnabled(activeModel, requestType),
           ...(serviceTier ? { serviceTier } : {}),
           requiresApiKey: provider.requiresApiKey,
           ...(provider.useSystemProxy !== undefined
@@ -1331,6 +1352,7 @@ export const useProviderStore = create<ProviderStore>()(
           providerId: provider.id,
           providerBuiltinId: provider.builtinId,
           computerUseEnabled: isModelComputerUseEnabled(model, requestType),
+          builtinSearchEnabled: isModelBuiltinSearchEnabled(model, requestType),
           ...(serviceTier ? { serviceTier } : {}),
           requiresApiKey: provider.requiresApiKey,
           ...(provider.useSystemProxy !== undefined
@@ -1432,6 +1454,7 @@ export const useProviderStore = create<ProviderStore>()(
           providerId: provider.id,
           providerBuiltinId: provider.builtinId,
           computerUseEnabled: isModelComputerUseEnabled(fastModel, requestType),
+          builtinSearchEnabled: isModelBuiltinSearchEnabled(fastModel, requestType),
           ...(serviceTier ? { serviceTier } : {}),
           requiresApiKey: provider.requiresApiKey,
           ...(provider.useSystemProxy !== undefined

@@ -5,9 +5,11 @@ import { join } from 'path'
 import { safePostMessageToWindow } from '../window-ipc'
 import {
   AGENT_STREAM_MSGPACK_CHANNEL,
-  decodeAgentStreamEnvelope
+  decodeAgentStreamEnvelope,
+  encodeAgentStreamEnvelope
 } from '../../shared/messagepack/agent-stream-codec'
 import type { AgentStreamEvent, ToolCallStateWire } from '../../shared/agent-stream-protocol'
+import { AGENT_STREAM_PROTOCOL_VERSION } from '../../shared/agent-stream-protocol'
 import type { InteractiveAgentEvent, ToolCallState } from '../../shared/agent-loop-types'
 import {
   SIDECAR_APPROVAL_REQUEST_MSGPACK_CHANNEL,
@@ -122,6 +124,7 @@ type SidecarBridgeManager = {
     handler: (id: number | string, method: string, params: unknown) => Promise<unknown>
   ) => void
   setReverseCancelHandler: (handler: (id: number | string, method?: string) => void) => void
+  onDisconnect: (listener: () => void) => () => void
   setSessionVisibility: (sessionId: string, visible: boolean) => void
   start: () => Promise<boolean>
   ensureStarted: () => Promise<boolean>
@@ -606,6 +609,9 @@ export function registerSidecarHandlers(): void {
   const runWindowIds = new Map<string, number>()
   const sessionWindowIds = new Map<string, number>()
   const goalRuntimeObservationChains = new Map<string, Promise<void>>()
+  // Runs currently streaming from the worker, tracked so a mid-flight worker
+  // crash can be turned into a terminal error the renderer can recover from.
+  const activeRunSessions = new Map<string, { sessionId: string; lastSeq: number }>()
 
   const cleanupAgentRunIfTerminal = (runId: string, terminal: boolean): void => {
     if (!terminal) return
@@ -730,6 +736,20 @@ export function registerSidecarHandlers(): void {
   manager.setRawEventHandler((frame) => {
     queueGoalRuntimeObservation(frame)
 
+    if (frame.runId && frame.sessionId) {
+      if (frame.hasTerminalEvent === true) {
+        activeRunSessions.delete(frame.runId)
+      } else {
+        activeRunSessions.set(frame.runId, {
+          sessionId: frame.sessionId,
+          lastSeq:
+            typeof frame.seq === 'number'
+              ? frame.seq
+              : (activeRunSessions.get(frame.runId)?.lastSeq ?? 0)
+        })
+      }
+    }
+
     if (!frame.runId || !frame.sessionId) {
       const targetWindow = resolveRendererTargetWindow(frame, runWindowIds, sessionWindowIds, {
         allowFallback: false
@@ -773,6 +793,47 @@ export function registerSidecarHandlers(): void {
   manager.setReverseCancelHandler((id, method) => {
     if (method === HOOK_REVERSE_METHODS.run) {
       cancelHookRuns(String(id))
+    }
+  })
+
+  // When the worker dies mid-stream the renderer never receives a terminal
+  // event and hangs on the run. Synthesize error + loop_end for each active run
+  // so the UI fails gracefully; the supervisor respawns the worker underneath.
+  manager.onDisconnect(() => {
+    if (activeRunSessions.size === 0) return
+    flushAllStreamBatches()
+    const runs = Array.from(activeRunSessions.entries())
+    activeRunSessions.clear()
+
+    for (const [runId, info] of runs) {
+      const targetWindow = resolveRendererTargetWindow(
+        { runId, sessionId: info.sessionId },
+        runWindowIds,
+        sessionWindowIds,
+        { allowFallback: false }
+      )
+      runWindowIds.delete(runId)
+      if (!targetWindow) continue
+
+      const bytes = encodeAgentStreamEnvelope({
+        v: AGENT_STREAM_PROTOCOL_VERSION,
+        runId,
+        sessionId: info.sessionId,
+        seq: info.lastSeq + 1,
+        events: [
+          {
+            type: 'error',
+            message: 'Native worker disconnected; the local runtime was recycled.',
+            errorType: 'sidecar_unavailable'
+          },
+          { type: 'loop_end', reason: 'error' }
+        ]
+      })
+      sendAgentStreamBytes(targetWindow, bytes, {
+        source: 'worker-disconnect',
+        runId,
+        sessionId: info.sessionId
+      })
     }
   })
 

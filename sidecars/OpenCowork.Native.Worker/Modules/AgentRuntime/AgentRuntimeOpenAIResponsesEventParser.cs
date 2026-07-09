@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.Json;
 
 internal static partial class AgentRuntimeOpenAIResponsesProvider
@@ -134,6 +135,16 @@ internal static partial class AgentRuntimeOpenAIResponsesProvider
             await ProcessComputerCallAsync(item, parseState, state, context);
             return;
         }
+        if (itemType == "web_search_call")
+        {
+            // Surface the search the moment it starts so a live "searching" component
+            // appears immediately — the query/sources only land on the completed item
+            // (output_item.done), which can arrive seconds later mid-stream. The renderer
+            // upserts by id, so the same block is updated in place when done fires.
+            WorkerLog.Debug($"responses web_search_call added raw={item.GetRawText()}");
+            await EmitWebSearchAsync(item, "searching", parseState, state, context);
+            return;
+        }
         if (itemType != "function_call")
         {
             return;
@@ -224,10 +235,165 @@ internal static partial class AgentRuntimeOpenAIResponsesProvider
             await ProcessComputerCallAsync(item, parseState, state, context);
             return;
         }
+        if (itemType == "web_search_call")
+        {
+            await EmitWebSearchAsync(item, "completed", parseState, state, context);
+            return;
+        }
         if (itemType == "image_generation_call")
         {
             await ProcessImageGenerationDoneAsync(item, parseState, state, context, startedAt);
         }
+    }
+
+    // OpenAI Responses runs `web_search` server-side, streaming a web_search_call output
+    // item (added -> done, then again in the final response.output). We surface it as a
+    // display-only component: a live "searching" state on `added`, resolved to the query
+    // + sources on `done`. The renderer correlates the two by id and updates in place;
+    // the model's grounded answer streams as normal text alongside.
+    private static async Task EmitWebSearchAsync(
+        JsonElement item,
+        string status,
+        ResponsesParseState parseState,
+        AgentRuntimeTools.AgentRuntimeRunState state,
+        WorkerRequestContext context)
+    {
+        var id = JsonHelpers.GetString(item, "id");
+        // Some models/endpoints omit action.query — surface the search anyway so the
+        // user at least sees that the model went to the web.
+        var query = ExtractWebSearchQuery(item) ?? string.Empty;
+        var dedupBase = !string.IsNullOrWhiteSpace(id)
+            ? id
+            : (!string.IsNullOrWhiteSpace(query) ? $"q:{query}" : "web_search");
+        // Dedup per (call, status) so both the "searching" and "completed" emits go out
+        // once each — `done` also replays inside the final response.output array.
+        if (!parseState.EmittedWebSearchCallIds.Add($"{dedupBase}:{status}"))
+        {
+            return;
+        }
+        // action.sources / results are only present when the request asked for them via
+        // include=["web_search_call.action.sources", "web_search_call.results"].
+        var sources = ExtractWebSearchSources(item);
+        WorkerLog.Debug(
+            $"responses web_search {status} id={id ?? string.Empty} query='{query}' " +
+            $"sources={(sources?.GetArrayLength() ?? 0)}");
+        await AgentRuntimeTools.EmitAsync(
+            state,
+            context,
+            new AgentRuntimeStreamEvent(
+                "web_search",
+                Content: query,
+                Status: status,
+                WebSearchId: id,
+                WebSearchSources: sources));
+    }
+
+    private static string? ExtractWebSearchQuery(JsonElement item)
+    {
+        if (item.TryGetProperty("action", out var action) && action.ValueKind == JsonValueKind.Object)
+        {
+            // Some gateways batch several searches into one web_search_call and expose
+            // them as action.queries[]; surface all of them (newline-joined) so the chip
+            // reflects every query the model ran, not just the first.
+            if (action.TryGetProperty("queries", out var queries) &&
+                queries.ValueKind == JsonValueKind.Array &&
+                queries.GetArrayLength() > 0)
+            {
+                var collected = new List<string>();
+                foreach (var entry in queries.EnumerateArray())
+                {
+                    if (entry.ValueKind == JsonValueKind.String &&
+                        entry.GetString() is { } text &&
+                        !string.IsNullOrWhiteSpace(text))
+                    {
+                        collected.Add(text.Trim());
+                    }
+                }
+                if (collected.Count > 0)
+                {
+                    return string.Join('\n', collected);
+                }
+            }
+            var actionQuery = JsonHelpers.GetString(action, "query");
+            if (!string.IsNullOrWhiteSpace(actionQuery))
+            {
+                return actionQuery;
+            }
+        }
+        return JsonHelpers.GetString(item, "query");
+    }
+
+    private static JsonElement? ExtractWebSearchSources(JsonElement item)
+    {
+        var entries = new List<(string Url, string? Title)>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        // results[] (include=web_search_call.results) carries url + title, so read it
+        // first — that gives the chips real page titles instead of bare hostnames.
+        if (item.TryGetProperty("results", out var results) &&
+            results.ValueKind == JsonValueKind.Array)
+        {
+            CollectWebSearchEntries(results, entries, seen);
+        }
+        // action.sources (include=web_search_call.action.sources) is usually url-only;
+        // use it to backfill any URLs the results list did not already cover.
+        if (item.TryGetProperty("action", out var action) &&
+            action.ValueKind == JsonValueKind.Object &&
+            action.TryGetProperty("sources", out var sources) &&
+            sources.ValueKind == JsonValueKind.Array)
+        {
+            CollectWebSearchEntries(sources, entries, seen);
+        }
+        if (entries.Count == 0)
+        {
+            return null;
+        }
+        // Re-emit a trimmed {url,title} array: results[] entries also carry large snippet
+        // blobs we must not clone onto the wire or into the persisted message.
+        return BuildWebSearchSourcesElement(entries);
+    }
+
+    private static void CollectWebSearchEntries(
+        JsonElement array,
+        List<(string Url, string? Title)> entries,
+        HashSet<string> seen)
+    {
+        foreach (var entry in array.EnumerateArray())
+        {
+            if (entry.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            var url = JsonHelpers.GetString(entry, "url");
+            if (string.IsNullOrWhiteSpace(url) || !seen.Add(url))
+            {
+                continue;
+            }
+            var title = JsonHelpers.GetString(entry, "title");
+            entries.Add((url, string.IsNullOrWhiteSpace(title) ? null : title));
+        }
+    }
+
+    private static JsonElement BuildWebSearchSourcesElement(List<(string Url, string? Title)> entries)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartArray();
+            foreach (var (url, title) in entries)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("url", url);
+                if (title is not null)
+                {
+                    writer.WriteString("title", title);
+                }
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+        }
+        using var document = JsonDocument.Parse(buffer.WrittenMemory);
+        return document.RootElement.Clone();
     }
 
 

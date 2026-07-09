@@ -146,6 +146,22 @@ export interface ThinkingBlock {
   completedAt?: number
 }
 
+/** A source consulted by a provider-native web search. */
+export interface WebSearchSource {
+  url?: string
+  title?: string
+}
+
+/** Display-only marker for a provider-native web search the model ran server-side. */
+export interface WebSearchBlock {
+  type: 'web_search'
+  /** Correlates the live "searching" update with the resolved "completed" one. */
+  id?: string
+  status?: 'searching' | 'completed'
+  query: string
+  sources?: WebSearchSource[]
+}
+
 export type ContentBlock =
   | TextBlock
   | ImageBlock
@@ -154,6 +170,7 @@ export type ContentBlock =
   | ToolUseBlock
   | ToolResultBlock
   | ThinkingBlock
+  | WebSearchBlock
 
 // --- Messages ---
 
@@ -560,6 +577,12 @@ export interface AIModelConfig {
   supportsComputerUse?: boolean
   /** Whether Computer Use is enabled for this model */
   enableComputerUse?: boolean
+  /**
+   * Whether the provider's built-in/native web search tool is enabled for this model.
+   * Resolves to a provider-specific server tool (Anthropic `web_search_20250305`,
+   * OpenAI Responses `web_search`). Only meaningful for `anthropic`/`openai-responses`.
+   */
+  enableBuiltinSearch?: boolean
   /** Configuration describing how to enable thinking for this model */
   thinkingConfig?: ThinkingConfig
   /** OpenAI Responses: summary of reasoning (auto/concise/detailed) */
@@ -693,6 +716,8 @@ export interface ProviderConfig {
   promptCacheKey?: string
   /** Whether OpenAI Computer Use should be enabled for this request */
   computerUseEnabled?: boolean
+  /** Whether the provider's built-in web search server tool should be enabled for this request */
+  builtinSearchEnabled?: boolean
   /** Anthropic: enable system prompt caching */
   enableSystemPromptCache?: boolean
   /** Anthropic: cache TTL duration — '5m' (default) or '1h' (requires extended-cache-ttl beta) */

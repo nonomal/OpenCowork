@@ -124,6 +124,7 @@ export interface SidecarProviderConfig {
   responsesImageGeneration?: ProviderConfig['responsesImageGeneration']
   imageGenerationStream?: ProviderConfig['imageGenerationStream']
   computerUseEnabled?: boolean
+  builtinSearchEnabled?: boolean
   organization?: string
   project?: string
   accountId?: string
@@ -526,6 +527,9 @@ function mapSidecarProvider(provider: ProviderConfig): SidecarProviderConfig {
       : {}),
     ...(provider.computerUseEnabled !== undefined
       ? { computerUseEnabled: provider.computerUseEnabled }
+      : {}),
+    ...(provider.builtinSearchEnabled !== undefined
+      ? { builtinSearchEnabled: provider.builtinSearchEnabled }
       : {}),
     ...(provider.organization ? { organization: provider.organization } : {}),
     ...(provider.project ? { project: provider.project } : {}),

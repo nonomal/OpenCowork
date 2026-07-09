@@ -20,6 +20,15 @@ internal sealed class WorkerResponse
         return new WorkerResponse(writer => writer.WriteStringValue(result));
     }
 
+    // Writes the result directly into the outgoing JSON buffer. Prefer this over
+    // building a JsonObject and RawJson-ing it when the payload is large (e.g. a
+    // multi-MB debug body): it escapes the value once instead of serializing,
+    // re-parsing and re-serializing it.
+    public static WorkerResponse FromWriter(Action<Utf8JsonWriter> writeResult)
+    {
+        return new WorkerResponse(writeResult);
+    }
+
     public static WorkerResponse RawJson(string result)
     {
         return new WorkerResponse(writer =>

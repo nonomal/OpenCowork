@@ -18,9 +18,7 @@ import {
   ShieldCheck
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
-import { confirm } from '@renderer/components/ui/confirm-dialog'
 import { Button } from '@renderer/components/ui/button'
 import {
   DropdownMenu,
@@ -30,7 +28,6 @@ import {
 } from '@renderer/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { useChatStore } from '@renderer/stores/chat-store'
-import { useSettingsStore } from '@renderer/stores/settings-store'
 import { useUIStore, type AppMode } from '@renderer/stores/ui-store'
 import { cn } from '@renderer/lib/utils'
 import { PendingInboxPopover } from './PendingInboxPopover'
@@ -176,8 +173,6 @@ export function TitleBar({
       : false
   )
 
-  const autoApprove = useSettingsStore((s) => s.autoApprove)
-
   const chatSurfaceActive =
     !settingsPageOpen &&
     !skillsPageOpen &&
@@ -235,16 +230,6 @@ export function TitleBar({
     if (chatView === 'session' && activeSessionId) {
       updateSessionMode(activeSessionId, nextMode)
     }
-  }
-
-  const handleToggleAutoApprove = async (): Promise<void> => {
-    if (!autoApprove) {
-      const ok = await confirm({ title: t('layout.autoApproveConfirm') })
-      if (!ok) return
-    }
-
-    useSettingsStore.getState().updateSettings({ autoApprove: !autoApprove })
-    toast.success(t(autoApprove ? 'autoApproveOff' : 'autoApproveOn'))
   }
 
   return (
@@ -385,29 +370,6 @@ export function TitleBar({
             </TooltipContent>
           </Tooltip>
         )}
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-pressed={autoApprove}
-              aria-label={autoApprove ? t('topbar.autoApproveOn') : t('topbar.autoApproveOff')}
-              className={cn(
-                'titlebar-no-drag size-7 rounded-md transition-colors',
-                autoApprove
-                  ? 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/15 dark:text-emerald-400'
-                  : 'workspace-titlebar-action text-muted-foreground hover:text-accent-foreground'
-              )}
-              onClick={() => void handleToggleAutoApprove()}
-            >
-              <ShieldCheck className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {autoApprove ? t('topbar.autoApproveOn') : t('topbar.autoApproveOff')}
-          </TooltipContent>
-        </Tooltip>
 
         <PendingInboxPopover />
 

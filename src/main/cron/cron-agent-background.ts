@@ -202,6 +202,7 @@ interface AIModelConfig {
   serviceTier?: string
   websocketUrl?: string
   websocketMode?: ResponsesWebsocketMode
+  enableBuiltinSearch?: boolean
 }
 
 interface AIProviderConfigRecord {
@@ -263,6 +264,7 @@ interface ProviderConfig {
   sessionId?: string
   responsesSessionScope?: string
   computerUseEnabled?: boolean
+  builtinSearchEnabled?: boolean
   responsesImageGeneration?: {
     enabled?: boolean
     action?: string
@@ -581,6 +583,10 @@ function buildProviderConfigById(
       : {}),
     cacheTtl: model?.cacheTtl ?? provider.cacheTtl,
     ...(model?.serviceTier ? { serviceTier: model.serviceTier } : {}),
+    ...((requestType === 'anthropic' || requestType === 'openai-responses') &&
+    model?.enableBuiltinSearch === true
+      ? { builtinSearchEnabled: true }
+      : {}),
     ...(websocketUrl ? { websocketUrl } : {}),
     ...(websocketMode ? { websocketMode } : {}),
     maxTokens: getEffectiveMaxTokens(settings, model),

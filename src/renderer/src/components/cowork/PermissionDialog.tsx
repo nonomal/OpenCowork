@@ -275,9 +275,9 @@ export function PermissionDialog({
                 )}
               </div>
               {summary && (
-                <div className="rounded-md bg-muted px-3 py-2 text-xs font-mono break-all">
+                <pre className="max-h-48 overflow-y-auto overflow-x-hidden rounded-md bg-muted px-3 py-2 text-xs font-mono whitespace-pre-wrap break-words">
                   {summary}
-                </div>
+                </pre>
               )}
               {workingFolder &&
                 [

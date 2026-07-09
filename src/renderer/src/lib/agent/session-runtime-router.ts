@@ -6,6 +6,7 @@ import type {
   UnifiedMessage
 } from '@renderer/lib/api/types'
 import { emitSessionRuntimeSync } from '@renderer/lib/session-runtime-sync'
+import { appendOrUpsertContentBlock } from '@renderer/lib/content-blocks'
 import { useChatStore } from '@renderer/stores/chat-store'
 import { summarizeToolInputForHistory } from '@renderer/lib/tools/tool-input-sanitizer'
 import { useBackgroundSessionStore } from '@renderer/stores/background-session-store'
@@ -506,7 +507,7 @@ export function appendRuntimeContentBlock(
       return
     }
 
-    ;(message.content as ContentBlock[]).push({ ...block } as ContentBlock)
+    appendOrUpsertContentBlock(message.content as ContentBlock[], { ...block } as ContentBlock)
   })
 }
 

@@ -149,14 +149,22 @@ export async function canSidecarHandle(capability: string): Promise<boolean> {
  */
 export const agentBridge = new AgentBridgeClient()
 
+// Bounded so the debug panel surfaces a failure quickly instead of hanging on
+// the 60s native-worker default when a body read stalls.
+const DEBUG_BODY_READ_TIMEOUT_MS = 15_000
+
 export async function readSidecarDebugBody(args: {
   bodyRef?: string
   sessionId?: string | null
 }): Promise<string> {
-  const result = (await agentBridge.request('agent/debug-body-read', {
-    ...(args.bodyRef ? { bodyRef: args.bodyRef } : {}),
-    ...(args.sessionId ? { sessionId: args.sessionId } : {})
-  })) as {
+  const result = (await agentBridge.request(
+    'agent/debug-body-read',
+    {
+      ...(args.bodyRef ? { bodyRef: args.bodyRef } : {}),
+      ...(args.sessionId ? { sessionId: args.sessionId } : {})
+    },
+    DEBUG_BODY_READ_TIMEOUT_MS
+  )) as {
     success?: boolean
     body?: string
     error?: string

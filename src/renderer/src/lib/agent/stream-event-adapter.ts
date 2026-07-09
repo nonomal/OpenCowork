@@ -42,6 +42,7 @@ export function toAgentEvent(e: AgentStreamEvent): AgentEvent | null {
     case 'image_generation_partial':
     case 'image_generated':
     case 'image_error':
+    case 'web_search':
     case 'message_end':
     case 'tool_use_generated':
     case 'tool_call_start':

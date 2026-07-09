@@ -127,6 +127,13 @@ export type AgentEvent =
   | { type: 'image_generated'; imageBlock: ImageBlock }
   | { type: 'image_error'; imageError: { code: ImageErrorCode; message: string } }
   | {
+      type: 'web_search'
+      content: string
+      status?: 'searching' | 'completed'
+      webSearchId?: string
+      webSearchSources?: { url?: string; title?: string }[]
+    }
+  | {
       type: 'message_end'
       usage?: TokenUsage
       timing?: RequestTiming

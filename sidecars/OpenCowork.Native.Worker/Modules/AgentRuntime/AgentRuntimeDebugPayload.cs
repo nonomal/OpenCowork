@@ -31,16 +31,15 @@ internal static class AgentRuntimeDebugPayload
             return null;
         }
 
-        var redacted = RedactPromptCacheKey(body) ?? body;
         var bodyRef = Guid.NewGuid().ToString("N");
         var filePath = Path.Combine(TempDirectory, $"{bodyRef}.json");
-        var bytes = Encoding.UTF8.GetByteCount(redacted);
+        var bytes = Encoding.UTF8.GetByteCount(body);
         var sessionId = JsonHelpers.GetString(parameters, "sessionId");
 
         lock (Sync)
         {
             Directory.CreateDirectory(TempDirectory);
-            File.WriteAllText(filePath, redacted, Utf8NoBom);
+            File.WriteAllText(filePath, body, Utf8NoBom);
             BodyFiles[bodyRef] = new DebugBodyEntry(bodyRef, filePath, bytes, sessionId);
             BodyFileOrder.Enqueue(bodyRef);
             TotalBodyBytes += bytes;
@@ -50,7 +49,7 @@ internal static class AgentRuntimeDebugPayload
         return new AgentRuntimeDebugBodyFile(bodyRef, bytes);
     }
 
-    public static WorkerResponse ReadBody(JsonElement parameters)
+    public static async Task<WorkerResponse> ReadBody(JsonElement parameters)
     {
         var bodyRef = JsonHelpers.GetString(parameters, "bodyRef");
         var sessionId = JsonHelpers.GetString(parameters, "sessionId");
@@ -59,6 +58,32 @@ internal static class AgentRuntimeDebugPayload
             return ToResponse(Mutation(false, null, null, "Missing debug body reference"));
         }
 
+        var entry = ResolveEntry(bodyRef, sessionId);
+        if (entry is null)
+        {
+            return ToResponse(Mutation(false, null, null, "Debug body is no longer available"));
+        }
+
+        // Read and serialize outside the lock: a debug body is up to 64 MB and
+        // often carries inlined base64 images. Holding Sync across the read would
+        // block concurrent body writes, and reading synchronously would stall the
+        // single IPC read loop (this handler runs inline on it) long enough to
+        // trip the renderer's request timeout. The file can be pruned between
+        // resolve and read; treat that as "no longer available".
+        try
+        {
+            var body = await File.ReadAllTextAsync(entry.Path, Encoding.UTF8).ConfigureAwait(false);
+            return SuccessBody(body, entry.Bytes);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            WorkerLog.Warn($"failed to read debug body: {ex.Message}");
+            return ToResponse(Mutation(false, null, null, "Debug body is no longer available"));
+        }
+    }
+
+    private static DebugBodyEntry? ResolveEntry(string? bodyRef, string? sessionId)
+    {
         lock (Sync)
         {
             DebugBodyEntry? entry = null;
@@ -86,15 +111,23 @@ internal static class AgentRuntimeDebugPayload
                 }
             }
 
-            if (entry is null)
-            {
-                return ToResponse(Mutation(false, null, null, "Debug body is no longer available"));
-            }
-
-            var body = File.ReadAllText(entry.Path, Encoding.UTF8);
-            var bytes = new FileInfo(entry.Path).Length;
-            return ToResponse(Mutation(true, body, bytes, null));
+            return entry;
         }
+    }
+
+    // Writes { success, body, bodyBytes } straight to the response buffer,
+    // escaping the (potentially huge) body exactly once instead of the
+    // Mutation -> ToJsonString -> RawJson.Parse -> WriteTo round-trip.
+    private static WorkerResponse SuccessBody(string body, long bodyBytes)
+    {
+        return WorkerResponse.FromWriter(writer =>
+        {
+            writer.WriteStartObject();
+            writer.WriteBoolean("success", true);
+            writer.WriteString("body", body);
+            writer.WriteNumber("bodyBytes", bodyBytes);
+            writer.WriteEndObject();
+        });
     }
 
     public static void CleanupTempFiles()
@@ -147,62 +180,6 @@ internal static class AgentRuntimeDebugPayload
         catch (Exception ex)
         {
             WorkerLog.Warn($"failed to delete previous debug body file: {ex.Message}");
-        }
-    }
-
-    private static string? RedactPromptCacheKey(string? body)
-    {
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            return body;
-        }
-
-        try
-        {
-            var node = JsonNode.Parse(body);
-            if (node is null)
-            {
-                return body;
-            }
-
-            RedactPromptCacheKey(node);
-            return node.ToJsonString();
-        }
-        catch (JsonException)
-        {
-            return body;
-        }
-    }
-
-    private static void RedactPromptCacheKey(JsonNode node)
-    {
-        if (node is JsonObject obj)
-        {
-            foreach (var property in obj.ToArray())
-            {
-                if (string.Equals(property.Key, "prompt_cache_key", StringComparison.Ordinal))
-                {
-                    obj[property.Key] = "[redacted]";
-                    continue;
-                }
-
-                if (property.Value is not null)
-                {
-                    RedactPromptCacheKey(property.Value);
-                }
-            }
-            return;
-        }
-
-        if (node is JsonArray array)
-        {
-            foreach (var item in array)
-            {
-                if (item is not null)
-                {
-                    RedactPromptCacheKey(item);
-                }
-            }
         }
     }
 

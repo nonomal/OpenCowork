@@ -95,6 +95,7 @@ internal static partial class AgentRuntimeOpenAIResponsesProvider
         public HashSet<string> EmittedComputerCallIds { get; } = new(StringComparer.Ordinal);
         public HashSet<string> EmittedImageGenerationStartIds { get; } = new(StringComparer.Ordinal);
         public HashSet<string> EmittedImageOutputItemIds { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> EmittedWebSearchCallIds { get; } = new(StringComparer.Ordinal);
         public bool ImageGenerationStarted { get; set; }
         public bool EmittedThinkingDelta { get; set; }
         public bool ReceivedAnyMessage { get; set; }

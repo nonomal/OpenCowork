@@ -23,6 +23,25 @@ import { volcenginePreset } from './volcengine'
 import { xaiPreset } from './x-ai'
 import type { BuiltinProviderPreset } from './types'
 
+// Provider protocols whose native/server-side web search we can inject: Anthropic
+// exposes the `web_search_20250305` server tool, and the OpenAI Responses API exposes
+// the `web_search` tool. Chat models on these protocols ship with built-in search
+// enabled by default; users can still opt out per-model (provider settings) or
+// per-session (input-box model settings). Explicit preset values are never overridden.
+function applyBuiltinSearchDefaults(preset: BuiltinProviderPreset): BuiltinProviderPreset {
+  let changed = false
+  const defaultModels = preset.defaultModels.map((model) => {
+    const requestType = model.type ?? preset.type
+    const category = model.category ?? 'chat'
+    const supported =
+      category === 'chat' && (requestType === 'anthropic' || requestType === 'openai-responses')
+    if (!supported || model.enableBuiltinSearch !== undefined) return model
+    changed = true
+    return { ...model, enableBuiltinSearch: true }
+  })
+  return changed ? { ...preset, defaultModels } : preset
+}
+
 export const builtinProviderPresets: BuiltinProviderPreset[] = [
   routinAiPreset,
   routinAiPlanPreset,
@@ -52,4 +71,4 @@ export const builtinProviderPresets: BuiltinProviderPreset[] = [
   bigmodelPreset,
   volcenginePreset,
   xaiPreset
-]
+].map(applyBuiltinSearchDefaults)

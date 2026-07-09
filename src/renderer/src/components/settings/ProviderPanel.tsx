@@ -609,6 +609,12 @@ function ModelFormDialog({
     initial?.supportsComputerUse ?? false
   )
   const [enableComputerUse, setEnableComputerUse] = useState(initial?.enableComputerUse ?? false)
+  const [enableBuiltinSearch, setEnableBuiltinSearch] = useState(() => {
+    if (initial?.enableBuiltinSearch !== undefined) return initial.enableBuiltinSearch
+    // Supported protocols default to on, matching the built-in preset behavior.
+    const resolvedType = initial?.type ?? providerType
+    return resolvedType === 'anthropic' || resolvedType === 'openai-responses'
+  })
   const [icon, setIcon] = useState(initial?.icon ?? '')
   const [responseSummary, setResponseSummary] = useState<'auto' | 'concise' | 'detailed' | 'none'>(
     initial?.responseSummary ?? 'none'
@@ -675,6 +681,7 @@ function ModelFormDialog({
     setSupportsFunctionCall(model.supportsFunctionCall ?? true)
     setSupportsComputerUse(model.supportsComputerUse ?? false)
     setEnableComputerUse(model.enableComputerUse ?? false)
+    setEnableBuiltinSearch(model.enableBuiltinSearch ?? false)
     setIcon(model.icon ?? '')
     setResponseSummary(model.responseSummary ?? 'none')
     setWebsocketMode(model.websocketMode ?? 'disabled')
@@ -795,6 +802,11 @@ function ModelFormDialog({
     model.supportsFunctionCall = supportsFunctionCall
     model.supportsComputerUse = supportsComputerUse
     model.enableComputerUse = supportsComputerUse && enableComputerUse
+    if (isAnthropicModel || isResponsesModel) {
+      model.enableBuiltinSearch = enableBuiltinSearch
+    } else {
+      delete model.enableBuiltinSearch
+    }
     if (icon.trim()) model.icon = icon.trim()
     else delete model.icon
     if (responseSummary && responseSummary !== 'none') model.responseSummary = responseSummary
@@ -1520,6 +1532,19 @@ function ModelFormDialog({
                   onCheckedChange={setEnableComputerUse}
                 />
               </div>
+              {(isAnthropicModel || isResponsesModel) && (
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground">
+                      {t('provider.enableBuiltinSearch')}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground/70">
+                      {t('provider.enableBuiltinSearchDesc')}
+                    </span>
+                  </div>
+                  <Switch checked={enableBuiltinSearch} onCheckedChange={setEnableBuiltinSearch} />
+                </div>
+              )}
             </div>
           </div>
 

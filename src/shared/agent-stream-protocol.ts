@@ -99,6 +99,12 @@ export interface ImageErrorWire {
   message: string
 }
 
+/** A source a provider-native web search consulted (raw shape may carry extra keys). */
+export interface WebSearchSourceWire {
+  url?: string
+  title?: string
+}
+
 export interface RequestDebugInfoWire {
   url: string
   method: string
@@ -169,6 +175,18 @@ export type ContentBlockWire =
       encryptedContent?: string
       encryptedContentProvider?: 'anthropic' | 'openai-responses' | 'google'
     }
+  // Display-only: a provider-native web search the model ran server-side. Rendered as
+  // an activity component (live "searching" -> resolved query + sources); dropped when
+  // the conversation is re-sent (no client execution).
+  | {
+      type: 'web_search'
+      // Correlates the "searching" and "completed" updates so the renderer upserts one
+      // block in place instead of appending a duplicate.
+      id?: string
+      status?: 'searching' | 'completed'
+      query: string
+      sources?: WebSearchSourceWire[]
+    }
 
 // ---- Event classification ----
 
@@ -198,6 +216,14 @@ export type AgentStreamEvent =
   | { type: 'image_generation_partial'; imageBlock: ImageBlockWire; partialImageIndex?: number }
   | { type: 'image_generated'; imageBlock: ImageBlockWire }
   | { type: 'image_error'; imageError: ImageErrorWire }
+  // Provider-native web search activity (display-only; live searching -> query + sources)
+  | {
+      type: 'web_search'
+      content: string
+      status?: 'searching' | 'completed'
+      webSearchId?: string
+      webSearchSources?: WebSearchSourceWire[]
+    }
   // Message completion
   | {
       type: 'message_end'

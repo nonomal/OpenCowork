@@ -10,6 +10,7 @@ import type {
   ToolUseBlock,
   ToolDefinition
 } from '../lib/api/types'
+import { appendOrUpsertContentBlock } from '../lib/content-blocks'
 import { invokeMessagePack, invokeMessagePackBinary } from '../lib/ipc/messagepack-ipc-client'
 import {
   DB_MESSAGES_ADD_BATCH_MSGPACK_CHANNEL,
@@ -4910,7 +4911,7 @@ export const useChatStore = create<ChatStore>()(
         if (typeof msg.content === 'string') {
           msg.content = msg.content ? [{ type: 'text', text: msg.content }, block] : [block]
         } else {
-          ;(msg.content as ContentBlock[]).push(block)
+          appendOrUpsertContentBlock(msg.content as ContentBlock[], block)
         }
         bumpMessageRevision(msg)
       })
