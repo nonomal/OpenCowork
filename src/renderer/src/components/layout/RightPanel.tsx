@@ -2,13 +2,15 @@ import * as React from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
-import { Loader2, Terminal } from 'lucide-react'
+import { Loader2, MonitorSmartphone, Terminal } from 'lucide-react'
 import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
 import { useUIStore, type RightPanelTabInstance } from '@renderer/stores/ui-store'
 import { useChatStore } from '@renderer/stores/chat-store'
 import { useAgentStore } from '@renderer/stores/agent-store'
 import { useAppPluginStore } from '@renderer/stores/app-plugin-store'
+import { useSshStore } from '@renderer/stores/ssh-store'
+import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { BROWSER_PLUGIN_ID } from '@renderer/lib/app-plugin/types'
 import { cn } from '@renderer/lib/utils'
 import {
@@ -20,6 +22,7 @@ import { BrowserPanel } from './BrowserPanel'
 import { PreviewPanel } from './PreviewPanel'
 import { SubAgentsPanel } from './SubAgentsPanel'
 import { SubAgentExecutionDetail } from './SubAgentExecutionDetail'
+import { AgentFilesPanel } from './AgentFilesPanel'
 import { SessionChangeReviewPanel } from '@renderer/components/layout/SessionChangeReviewPanel'
 import { ipcClient } from '@renderer/lib/ipc/ipc-client'
 import { IPC } from '@renderer/lib/ipc/channels'
@@ -27,6 +30,9 @@ import { RIGHT_PANEL_DEFAULT_WIDTH, clampRightPanelWidth } from './right-panel-d
 
 const LocalTerminal = React.lazy(() =>
   import('@renderer/components/terminal/LocalTerminal').then((m) => ({ default: m.LocalTerminal }))
+)
+const SshTerminal = React.lazy(() =>
+  import('@renderer/components/ssh/SshTerminal').then((m) => ({ default: m.SshTerminal }))
 )
 
 function TerminalTabContent({ processId }: { processId: string }): React.JSX.Element {
@@ -109,6 +115,112 @@ function TerminalTabContent({ processId }: { processId: string }): React.JSX.Ele
   )
 }
 
+function ProjectTerminalTabContent({
+  tab,
+  onMoveToBottom
+}: {
+  tab: RightPanelTabInstance
+  onMoveToBottom: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation('layout')
+  const localTab = useTerminalStore((state) =>
+    tab.terminalSource === 'local' && tab.localTabId
+      ? (state.tabs.find((item) => item.id === tab.localTabId) ?? null)
+      : null
+  )
+  const sshTab = useSshStore((state) =>
+    tab.terminalSource === 'ssh' && tab.sshTabId
+      ? (state.openTabs.find((item) => item.id === tab.sshTabId) ?? null)
+      : null
+  )
+  const sshSession = useSshStore((state) =>
+    sshTab?.sessionId ? (state.sessions[sshTab.sessionId] ?? null) : null
+  )
+
+  if (tab.terminalSource === 'local') {
+    if (!localTab) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+          <Terminal className="mb-3 size-8 text-muted-foreground/40" />
+          <p className="text-sm text-muted-foreground">{t('detailPanel.terminalNotFound')}</p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2 text-xs">
+          <div className="min-w-0">
+            <div className="truncate font-medium">{localTab.title}</div>
+            <div className="truncate text-[11px] text-muted-foreground">
+              {localTab.cwd || localTab.shell || '-'}
+            </div>
+          </div>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onMoveToBottom}>
+            {t('terminalDock.moveToBottomDock')}
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {localTab.status === 'running' ? (
+            <React.Suspense fallback={null}>
+              <LocalTerminal terminalId={localTab.id} />
+            </React.Suspense>
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Terminal className="size-8 text-muted-foreground/40" />
+              <div>
+                {localTab.status === 'error'
+                  ? t('terminalDock.terminalExitedWithError')
+                  : t('terminalDock.terminalExited')}
+              </div>
+              {localTab.exitCode !== undefined ? (
+                <div>{t('terminalDock.exitCode', { code: localTab.exitCode })}</div>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (!sshTab) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+        <MonitorSmartphone className="mb-3 size-8 text-muted-foreground/40" />
+        <p className="text-sm text-muted-foreground">{t('detailPanel.terminalNotFound')}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2 text-xs">
+        <div className="min-w-0">
+          <div className="truncate font-medium">{sshTab.title || sshTab.connectionName}</div>
+          <div className="truncate text-[11px] text-muted-foreground">{sshTab.connectionName}</div>
+        </div>
+        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onMoveToBottom}>
+          {t('terminalDock.moveToBottomDock')}
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {sshTab.sessionId && sshSession?.status === 'connected' ? (
+          <React.Suspense fallback={null}>
+            <SshTerminal sessionId={sshTab.sessionId} connectionName={sshTab.connectionName} />
+          </React.Suspense>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className={cn('size-4', sshTab.sessionId ? '' : 'animate-spin')} />
+            <div>
+              {sshTab.sessionId ? t('terminalDock.terminalExited') : t('terminalDock.connecting')}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 interface RightPanelProps {
   compact?: boolean
   sessionId?: string | null
@@ -160,6 +272,9 @@ export function RightPanel({ compact = false, sessionId }: RightPanelProps): Rea
     return visibleTabs.map((tab) => {
       if (tab.kind === 'review') {
         return { ...tab, title: t('rightPanel.review', { defaultValue: 'Review' }) }
+      }
+      if (tab.kind === 'files') {
+        return { ...tab, title: t('rightPanel.files', { defaultValue: 'Files' }) }
       }
       if (tab.kind === 'browser') {
         return { ...tab, title: t('rightPanel.browser', { defaultValue: 'Browser' }) }
@@ -252,10 +367,37 @@ export function RightPanel({ compact = false, sessionId }: RightPanelProps): Rea
     }
   }
 
+  const restoreProjectTerminalToBottom = (tab: RightPanelTabInstance | undefined): void => {
+    if (tab?.kind !== 'terminal' || !tab.terminalSource) return
+    if (tab.terminalSource === 'local' && tab.localTabId) {
+      useTerminalStore.getState().setTabSurface(tab.localTabId, 'bottom')
+    } else if (tab.terminalSource === 'ssh' && tab.sshTabId) {
+      useSshStore.getState().setTabSurface(tab.sshTabId, 'bottom')
+    }
+    if (tab.projectId) {
+      useUIStore.getState().setBottomTerminalDockOpen(tab.projectId, true)
+    }
+  }
+
+  const handleCloseRightPanelTab = (tabId: string): void => {
+    const tab = rightPanelTabs.find((item) => item.id === tabId)
+    restoreProjectTerminalToBottom(tab)
+    closeRightPanelTab(tabId)
+  }
+
   const renderActivePanel = (tab: RightPanelTabInstance | undefined): React.ReactNode => {
     if (!tab) return null
     if (tab.kind === 'review') {
       return <SessionChangeReviewPanel />
+    }
+    if (tab.kind === 'files') {
+      return (
+        <AgentFilesPanel
+          sessionId={tab.sessionId ?? panelSessionId}
+          surface="right-panel"
+          initialTab={tab.initialChangeId ? 'changes' : 'files'}
+        />
+      )
     }
     if (tab.kind === 'preview') {
       return <PreviewPanel embedded showTabStrip={false} />
@@ -270,6 +412,17 @@ export function RightPanel({ compact = false, sessionId }: RightPanelProps): Rea
         />
       ) : (
         <SubAgentsPanel sessionId={tab.sessionId ?? panelSessionId} />
+      )
+    }
+    if (tab.kind === 'terminal' && tab.terminalSource) {
+      return (
+        <ProjectTerminalTabContent
+          tab={tab}
+          onMoveToBottom={() => {
+            restoreProjectTerminalToBottom(tab)
+            closeRightPanelTab(tab.id)
+          }}
+        />
       )
     }
     if (tab.kind === 'terminal' && tab.processId) {
@@ -306,7 +459,7 @@ export function RightPanel({ compact = false, sessionId }: RightPanelProps): Rea
               activeTabId={activeTab?.id ?? 'review'}
               browserEnabled={browserPluginEnabled}
               onSelectTab={setRightPanelActiveTab}
-              onCloseTab={closeRightPanelTab}
+              onCloseTab={handleCloseRightPanelTab}
               onOpenFiles={() => void handleOpenLocalFiles()}
               onAddBrowser={() => ensureBrowserTab(undefined, panelSessionId)}
               onClosePanel={() => setRightPanelOpen(false)}

@@ -143,6 +143,7 @@ export function SessionConversationPane({
   const [copiedAll, setCopiedAll] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [folderDialogOpen, setFolderDialogOpen] = useState(false)
+  const [terminalDockFullscreen, setTerminalDockFullscreen] = useState(false)
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [renameValue, setRenameValue] = useState('')
 
@@ -150,12 +151,23 @@ export function SessionConversationPane({
   const hasProjectFolderAction = Boolean(sessionView.projectId && sessionView.workingFolder)
   const hasTranscriptActions = sessionView.messageCount > 0
   const showSessionActionBar =
-    hasProjectFolderAction || hasTranscriptActions || allowOpenInNewWindow
+    !terminalDockFullscreen &&
+    (hasProjectFolderAction || hasTranscriptActions || allowOpenInNewWindow)
   const showTerminalDock = Boolean(
     sessionView.projectId &&
     terminalDockOpen &&
     (sessionView.workingFolder || sessionView.sshConnectionId)
   )
+
+  useEffect(() => {
+    if (!showTerminalDock && terminalDockFullscreen) {
+      setTerminalDockFullscreen(false)
+    }
+  }, [showTerminalDock, terminalDockFullscreen])
+
+  useEffect(() => {
+    setTerminalDockFullscreen(false)
+  }, [sessionView.projectId])
 
   const updateSessionProjectDirectory = useCallback(
     async (patch: Partial<{ workingFolder: string | null; sshConnectionId: string | null }>) => {
@@ -253,6 +265,16 @@ export function SessionConversationPane({
 
   const conversationRoot = useMemo(() => resolvedSessionId ?? 'empty', [resolvedSessionId])
   const showInlineSessionTitle = !windowHeaderOwnsTitle
+  const terminalDockNode = showTerminalDock ? (
+    <ProjectTerminalDock
+      projectId={sessionView.projectId!}
+      projectName={sessionView.projectName}
+      workingFolder={sessionView.workingFolder ?? null}
+      sshConnectionId={sessionView.sshConnectionId}
+      fullscreen={terminalDockFullscreen}
+      onFullscreenChange={setTerminalDockFullscreen}
+    />
+  ) : null
 
   if (!resolvedSessionId) {
     return (
@@ -500,33 +522,45 @@ export function SessionConversationPane({
         </div>
 
         <div key={conversationRoot} className="flex min-h-0 flex-1 flex-col">
-          <MessageList
-            sessionId={resolvedSessionId}
-            fullWidth={conversationPanelFullWidth}
-            onRetry={retryLastMessage}
-            onContinue={continueLastToolExecution}
-            onEditUserMessage={editAndResend}
-            onDeleteMessage={deleteMessage}
-          />
-          <InputArea
-            sessionId={resolvedSessionId}
-            onSend={(text, images, options) =>
-              void sendMessage(text, images, undefined, resolvedSessionId, undefined, undefined, {
-                ...options,
-                clearCompletedTasksOnTurnStart: true
-              })
-            }
-            onStop={stopStreaming}
-            onSelectFolder={sessionView.projectId ? () => setFolderDialogOpen(true) : undefined}
-            workingFolder={sessionView.workingFolder}
-            hideWorkingFolderIndicator
-            onCompressContext={manualCompressContext}
-            isStreaming={isStreaming}
-            fullWidth={conversationPanelFullWidth}
-          />
-          {animationsEnabled ? (
+          {!terminalDockFullscreen ? (
+            <>
+              <MessageList
+                sessionId={resolvedSessionId}
+                fullWidth={conversationPanelFullWidth}
+                onRetry={retryLastMessage}
+                onContinue={continueLastToolExecution}
+                onEditUserMessage={editAndResend}
+                onDeleteMessage={deleteMessage}
+              />
+              <InputArea
+                sessionId={resolvedSessionId}
+                onSend={(text, images, options) =>
+                  void sendMessage(
+                    text,
+                    images,
+                    undefined,
+                    resolvedSessionId,
+                    undefined,
+                    undefined,
+                    {
+                      ...options,
+                      clearCompletedTasksOnTurnStart: true
+                    }
+                  )
+                }
+                onStop={stopStreaming}
+                onSelectFolder={sessionView.projectId ? () => setFolderDialogOpen(true) : undefined}
+                workingFolder={sessionView.workingFolder}
+                hideWorkingFolderIndicator
+                onCompressContext={manualCompressContext}
+                isStreaming={isStreaming}
+                fullWidth={conversationPanelFullWidth}
+              />
+            </>
+          ) : null}
+          {animationsEnabled && !terminalDockFullscreen ? (
             <AnimatePresence initial={false}>
-              {showTerminalDock ? (
+              {terminalDockNode ? (
                 <motion.div
                   key={`terminal-dock-${sessionView.projectId}`}
                   initial={{ height: 0, opacity: 0, y: 12 }}
@@ -537,25 +571,22 @@ export function SessionConversationPane({
                     y: TERMINAL_DOCK_TRANSITION,
                     opacity: { duration: 0.16, ease: 'easeOut' }
                   }}
-                  className="min-h-0 overflow-hidden"
+                  className="min-h-0 shrink-0 overflow-hidden"
                   style={{ willChange: 'height, opacity, transform' }}
                 >
-                  <ProjectTerminalDock
-                    projectId={sessionView.projectId!}
-                    projectName={sessionView.projectName}
-                    workingFolder={sessionView.workingFolder ?? null}
-                    sshConnectionId={sessionView.sshConnectionId}
-                  />
+                  {terminalDockNode}
                 </motion.div>
               ) : null}
             </AnimatePresence>
-          ) : showTerminalDock ? (
-            <ProjectTerminalDock
-              projectId={sessionView.projectId!}
-              projectName={sessionView.projectName}
-              workingFolder={sessionView.workingFolder ?? null}
-              sshConnectionId={sessionView.sshConnectionId}
-            />
+          ) : terminalDockNode ? (
+            <div
+              className={cn(
+                'min-h-0 overflow-hidden',
+                terminalDockFullscreen ? 'flex flex-1 flex-col' : 'shrink-0'
+              )}
+            >
+              {terminalDockNode}
+            </div>
           ) : null}
         </div>
       </div>

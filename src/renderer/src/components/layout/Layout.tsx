@@ -19,7 +19,6 @@ import { ConversationGuideDialog } from '@renderer/components/chat/ConversationG
 import { SettingsPage } from '@renderer/components/settings/SettingsPage'
 import { CommandPalette } from './CommandPalette'
 import { SessionConversationPane } from './SessionConversationPane'
-import { WorkingFolderSheet } from './WorkingFolderSheet'
 import { ErrorBoundary } from '@renderer/components/error-boundary'
 import { useUIStore, type AppMode } from '@renderer/stores/ui-store'
 import { useChatStore, type SessionMode } from '@renderer/stores/chat-store'
@@ -73,7 +72,6 @@ const TasksPage = lazy(async () => {
 })
 
 const MIN_MAIN_WORKSPACE_WIDTH_WITH_SIDEBAR = 720
-const MULTI_RIGHT_PANEL_COLLAPSE_VIEWPORT = 1600
 
 function LazyPageFallback(): React.JSX.Element {
   return (
@@ -104,8 +102,6 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
   const setLeftSidebarOpen = useUIStore((s) => s.setLeftSidebarOpen)
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen)
   const rightPanelWidth = useUIStore((s) => s.rightPanelWidth)
-  const workingFolderSheetOpen = useUIStore((s) => s.workingFolderSheetOpen)
-  const workingFolderPanelWidth = useUIStore((s) => s.workingFolderPanelWidth)
   const subAgentExecutionDetailOpen = useUIStore((s) => s.subAgentExecutionDetailOpen)
   const subAgentExecutionDetailToolUseId = useUIStore((s) => s.subAgentExecutionDetailToolUseId)
   const subAgentExecutionDetailInlineText = useUIStore((s) => s.subAgentExecutionDetailInlineText)
@@ -197,24 +193,16 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
   }, [])
 
   useEffect(() => {
-    const openRightSidePanelCount = Number(rightPanelOpen) + Number(workingFolderSheetOpen)
-    const rightSideWidth =
-      (rightPanelOpen ? rightPanelWidth : 0) +
-      (workingFolderSheetOpen ? workingFolderPanelWidth : 0)
+    const rightSideWidth = rightPanelOpen ? rightPanelWidth : 0
     const widthLeftForMainWorkspace =
       viewportWidth - rightSideWidth - (leftSidebarOpen ? leftSidebarWidth : 0)
-    const rightSidePanelsNeedSpace =
-      openRightSidePanelCount >= 2 && viewportWidth < MULTI_RIGHT_PANEL_COLLAPSE_VIEWPORT
     const mainWorkspaceTooNarrow =
-      openRightSidePanelCount > 0 &&
-      widthLeftForMainWorkspace < MIN_MAIN_WORKSPACE_WIDTH_WITH_SIDEBAR
+      rightPanelOpen && widthLeftForMainWorkspace < MIN_MAIN_WORKSPACE_WIDTH_WITH_SIDEBAR
     const shouldCollapseSidebar =
-      chatView === 'session' &&
-      leftSidebarOpen &&
-      (rightSidePanelsNeedSpace || mainWorkspaceTooNarrow)
+      chatView === 'session' && leftSidebarOpen && mainWorkspaceTooNarrow
 
     if (!shouldCollapseSidebar) {
-      if (openRightSidePanelCount === 0 || viewportWidth >= MULTI_RIGHT_PANEL_COLLAPSE_VIEWPORT) {
+      if (!rightPanelOpen) {
         autoCollapsedSidebarForCrowdingRef.current = false
       }
       return
@@ -230,9 +218,7 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
     rightPanelOpen,
     rightPanelWidth,
     setLeftSidebarOpen,
-    viewportWidth,
-    workingFolderPanelWidth,
-    workingFolderSheetOpen
+    viewportWidth
   ])
 
   // Update window title (show pending approvals + streaming state + SubAgent)
@@ -879,7 +865,6 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
                 >
                   <div className="flex flex-1 overflow-hidden">
                     <SessionConversationPane windowHeaderOwnsTitle />
-                    <WorkingFolderSheet />
                     <RightPanel />
                   </div>
                 </ErrorBoundary>

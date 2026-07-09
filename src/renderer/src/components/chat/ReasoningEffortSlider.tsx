@@ -16,95 +16,164 @@ interface ReasoningEffortSliderProps {
 
 const clamp01 = (n: number): number => (n < 0 ? 0 : n > 1 ? 1 : n)
 
-// Max-level comet trail: a gradient streak over the right half of the rail plus
-// hand-placed particles that drift away from the thumb, fade out and respawn.
-// Everything animates on transform/opacity only. `.dark` swaps in brighter tones.
-const MAX_TRAIL_CSS = `
-.reasoningEffortStreak {
-  background: linear-gradient(90deg, rgba(147, 51, 234, 0) 0%, rgba(147, 51, 234, 0.26) 55%, rgba(192, 38, 211, 0.52) 100%);
+const REASONING_EFFORT_CSS = `
+.reasoningEffortFill {
+  background: linear-gradient(90deg, #a79aff 0%, #bb8cff 54%, #d574ff 100%);
+  box-shadow: 0 0 12px rgba(190, 139, 255, 0.38);
 }
-.dark .reasoningEffortStreak {
-  background: linear-gradient(90deg, rgba(168, 85, 247, 0) 0%, rgba(168, 85, 247, 0.32) 55%, rgba(217, 70, 239, 0.58) 100%);
+.reasoningEffortFillMax {
+  background: linear-gradient(90deg, #a79aff 0%, #bb8cff 40%, #de7cff 74%, #fff7ff 100%);
+  box-shadow:
+    0 0 14px rgba(216, 180, 254, 0.58),
+    0 0 24px rgba(232, 121, 249, 0.28);
+  animation: reasoningEffortMaxBreath 1.65s ease-in-out infinite;
 }
-.reasoningEffortParticle {
+.reasoningEffortFill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.58) 45%, transparent 78%);
+  opacity: 0.34;
+  transform: translateX(-85%);
+  animation: reasoningEffortSheen 2.4s ease-in-out infinite;
+}
+.reasoningEffortThumb {
+  background: linear-gradient(180deg, #515765 0%, #363b46 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.18),
+    0 4px 10px rgba(7, 10, 18, 0.42),
+    0 0 12px rgba(183, 145, 255, 0.24);
+}
+.dark .reasoningEffortThumb {
+  background: linear-gradient(180deg, #4d5361 0%, #303541 100%);
+}
+.reasoningEffortRailMax {
+  background:
+    radial-gradient(circle at 100% 50%, rgba(255, 255, 255, 0.34) 0%, rgba(232, 121, 249, 0.22) 24%, transparent 48%),
+    linear-gradient(90deg, rgba(76, 29, 149, 0.22) 0%, rgba(126, 34, 206, 0.3) 58%, rgba(192, 38, 211, 0.44) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(216, 180, 254, 0.38),
+    0 0 16px rgba(168, 85, 247, 0.3),
+    0 0 28px rgba(217, 70, 239, 0.18);
+}
+.reasoningEffortRailMax::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.42) 42%, rgba(244, 214, 255, 0.72) 52%, transparent 70%);
+  mix-blend-mode: screen;
+  opacity: 0.7;
+  transform: translateX(-112%);
+  animation: reasoningEffortMaxSweep 1.35s ease-in-out infinite;
+}
+.reasoningEffortRailMax::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 0;
+  z-index: 3;
+  width: 34%;
+  height: 18px;
+  pointer-events: none;
+  background: radial-gradient(ellipse at right, rgba(255, 255, 255, 0.58) 0%, rgba(232, 121, 249, 0.28) 42%, transparent 74%);
+  opacity: 0.88;
+  transform: translateY(-50%);
+}
+.reasoningEffortThumbMax {
+  background: radial-gradient(circle at 42% 35%, #ffffff 0%, #fce7ff 22%, #d8b4fe 42%, #8b5cf6 70%, #4c1d95 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.38),
+    0 2px 7px rgba(7, 10, 18, 0.38),
+    0 0 0 2px rgba(196, 181, 253, 0.24),
+    0 0 15px rgba(244, 214, 255, 0.78),
+    0 0 28px rgba(232, 121, 249, 0.46);
+}
+.reasoningEffortMaxLabel {
+  border-color: rgba(216, 180, 254, 0.64);
+  background: linear-gradient(180deg, rgba(49, 44, 60, 0.98), rgba(33, 31, 38, 0.98));
+  color: rgb(250, 245, 255);
+  box-shadow:
+    0 7px 18px rgba(16, 12, 26, 0.24),
+    0 0 18px rgba(192, 132, 252, 0.28);
+}
+.reasoningEffortMaxChip {
+  background: linear-gradient(90deg, #f5d0fe 0%, #ddd6fe 100%);
+  color: #271334;
+  box-shadow: 0 0 12px rgba(244, 214, 255, 0.46);
+  animation: reasoningEffortMaxChip 1.4s ease-in-out infinite;
+}
+.reasoningEffortMaxSpark {
   position: absolute;
   border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 6px rgba(244, 214, 255, 0.75);
   opacity: 0;
-  animation: reasoningEffortDrift var(--dur) ease-out var(--delay) infinite;
+  animation: reasoningEffortSpark var(--dur) ease-in-out var(--delay) infinite;
 }
-.reasoningEffortParticleViolet { background: rgba(139, 92, 246, 0.9); }
-.reasoningEffortParticleFuchsia { background: rgba(192, 38, 211, 0.85); }
-.reasoningEffortParticleBright { background: rgba(124, 58, 237, 0.85); }
-.dark .reasoningEffortParticleViolet { background: rgba(216, 180, 254, 0.95); }
-.dark .reasoningEffortParticleFuchsia { background: rgba(232, 121, 249, 0.9); }
-.dark .reasoningEffortParticleBright { background: rgba(245, 235, 255, 0.92); }
-@keyframes reasoningEffortDrift {
-  0% { transform: translateX(0) scale(1); opacity: 0; }
-  14% { opacity: var(--peak); }
-  100% { transform: translateX(var(--dx)) scale(0.55); opacity: 0; }
+@keyframes reasoningEffortSheen {
+  0%, 42% { transform: translateX(-85%); }
+  78%, 100% { transform: translateX(110%); }
+}
+@keyframes reasoningEffortMaxSweep {
+  0%, 18% { transform: translateX(-112%); }
+  72%, 100% { transform: translateX(112%); }
+}
+@keyframes reasoningEffortMaxBreath {
+  0%, 100% { filter: saturate(1) brightness(1); }
+  50% { filter: saturate(1.28) brightness(1.14); }
+}
+@keyframes reasoningEffortMaxChip {
+  0%, 100% { transform: scale(1); opacity: 0.82; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+@keyframes reasoningEffortSpark {
+  0%, 100% { transform: translateY(0) scale(0.55); opacity: 0; }
+  42% { transform: translateY(1px) scale(1); opacity: 0.95; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .reasoningEffortParticle { animation: none; opacity: calc(var(--peak) * 0.6); }
+  .reasoningEffortFill::after { animation: none; opacity: 0; }
+  .reasoningEffortFillMax,
+  .reasoningEffortRailMax::before,
+  .reasoningEffortMaxChip,
+  .reasoningEffortMaxSpark {
+    animation: none;
+  }
+  .reasoningEffortRailMax::before { opacity: 0.35; transform: none; }
+  .reasoningEffortMaxSpark { opacity: 0.7; }
 }
 `.trim()
 
-type TrailTone = 'violet' | 'fuchsia' | 'bright'
-
-interface TrailParticle {
-  /** % from the left of the trail band; 100 = at the thumb. */
+interface MaxSpark {
   x: number
-  /** px from the top of the 18px particle band (rail center is 9). */
   y: number
   size: number
-  /** Leftward drift distance in px over one cycle. */
-  dx: number
   dur: number
   delay: number
-  peak: number
-  tone: TrailTone
 }
 
-// Hand-tuned constellation: dense sparks near the thumb thinning into strays at the tail.
-const TRAIL_PARTICLES: TrailParticle[] = [
-  { x: 98, y: 13, size: 2.5, dx: -12, dur: 1.3, delay: 0.7, peak: 0.95, tone: 'fuchsia' },
-  { x: 97, y: 8, size: 3, dx: -14, dur: 1.4, delay: 0, peak: 0.95, tone: 'bright' },
-  { x: 95, y: 3, size: 2, dx: -18, dur: 1.5, delay: 1.2, peak: 0.9, tone: 'violet' },
-  { x: 94, y: 10, size: 2.5, dx: -16, dur: 1.6, delay: 0.5, peak: 0.9, tone: 'bright' },
-  { x: 93, y: 15, size: 2, dx: -20, dur: 1.8, delay: 0.35, peak: 0.85, tone: 'fuchsia' },
-  { x: 92, y: 6, size: 2.5, dx: -18, dur: 1.7, delay: 0.9, peak: 0.9, tone: 'violet' },
-  { x: 91, y: 1, size: 2, dx: -14, dur: 1.5, delay: 1.45, peak: 0.85, tone: 'bright' },
-  { x: 90, y: 12, size: 2, dx: -20, dur: 1.5, delay: 0.2, peak: 0.9, tone: 'fuchsia' },
-  { x: 89, y: 8, size: 3, dx: -15, dur: 1.8, delay: 1.1, peak: 0.85, tone: 'violet' },
-  { x: 88, y: 4, size: 2, dx: -22, dur: 1.4, delay: 0.6, peak: 0.85, tone: 'bright' },
-  { x: 87, y: 14, size: 2.5, dx: -16, dur: 1.9, delay: 1.0, peak: 0.85, tone: 'violet' },
-  { x: 86, y: 10, size: 2, dx: -20, dur: 1.6, delay: 1.35, peak: 0.85, tone: 'fuchsia' },
-  { x: 84, y: 2, size: 2, dx: -18, dur: 1.7, delay: 0.15, peak: 0.85, tone: 'bright' },
-  { x: 83, y: 7, size: 2.5, dx: -18, dur: 1.9, delay: 0.85, peak: 0.9, tone: 'violet' },
-  { x: 82, y: 12, size: 2, dx: -16, dur: 1.5, delay: 1.55, peak: 0.8, tone: 'fuchsia' },
-  { x: 80, y: 5, size: 2.5, dx: -24, dur: 2.0, delay: 0.45, peak: 0.85, tone: 'bright' },
-  { x: 79, y: 15, size: 2, dx: -14, dur: 1.6, delay: 1.25, peak: 0.8, tone: 'violet' },
-  { x: 78, y: 9, size: 2.5, dx: -16, dur: 1.8, delay: 0.05, peak: 0.85, tone: 'fuchsia' },
-  { x: 74, y: 8, size: 2.5, dx: -20, dur: 1.7, delay: 0.1, peak: 0.8, tone: 'violet' },
-  { x: 71, y: 13, size: 2, dx: -16, dur: 2.1, delay: 0.95, peak: 0.75, tone: 'bright' },
-  { x: 68, y: 4, size: 2, dx: -22, dur: 1.8, delay: 0.45, peak: 0.75, tone: 'fuchsia' },
-  { x: 64, y: 10, size: 2.2, dx: -18, dur: 2.2, delay: 1.25, peak: 0.7, tone: 'violet' },
-  { x: 60, y: 2, size: 2, dx: -24, dur: 1.9, delay: 0.6, peak: 0.7, tone: 'bright' },
-  { x: 57, y: 7, size: 1.8, dx: -16, dur: 2.0, delay: 1.5, peak: 0.65, tone: 'fuchsia' },
-  { x: 54, y: 12, size: 2, dx: -20, dur: 2.3, delay: 0.3, peak: 0.65, tone: 'violet' },
-  { x: 51, y: 5, size: 1.8, dx: -14, dur: 1.7, delay: 1.05, peak: 0.6, tone: 'bright' },
-  { x: 46, y: 9, size: 1.8, dx: -18, dur: 2.1, delay: 0.75, peak: 0.55, tone: 'fuchsia' },
-  { x: 42, y: 3, size: 1.6, dx: -22, dur: 2.4, delay: 0.15, peak: 0.55, tone: 'violet' },
-  { x: 37, y: 13, size: 1.6, dx: -16, dur: 2.2, delay: 1.35, peak: 0.5, tone: 'bright' },
-  { x: 32, y: 6, size: 1.6, dx: -20, dur: 2.5, delay: 0.55, peak: 0.45, tone: 'fuchsia' },
-  { x: 26, y: 10, size: 1.5, dx: -14, dur: 2.3, delay: 1.0, peak: 0.4, tone: 'violet' },
-  { x: 19, y: 4, size: 1.5, dx: -18, dur: 2.6, delay: 0.4, peak: 0.38, tone: 'fuchsia' },
-  { x: 12, y: 8, size: 1.5, dx: -14, dur: 2.4, delay: 1.2, peak: 0.35, tone: 'violet' }
+const MAX_SPARKS: MaxSpark[] = [
+  { x: 55, y: 4, size: 1.2, dur: 1.9, delay: 0.15 },
+  { x: 60, y: 8, size: 1.4, dur: 2.1, delay: 0.85 },
+  { x: 66, y: 3, size: 1.3, dur: 1.8, delay: 1.15 },
+  { x: 71, y: 9, size: 1.6, dur: 2, delay: 0.45 },
+  { x: 76, y: 5, size: 1.7, dur: 1.65, delay: 1.3 },
+  { x: 81, y: 8, size: 1.4, dur: 1.85, delay: 0.7 },
+  { x: 85, y: 3, size: 1.7, dur: 1.7, delay: 0.05 },
+  { x: 89, y: 7, size: 1.8, dur: 1.4, delay: 0 },
+  { x: 92, y: 8, size: 2.3, dur: 1.7, delay: 0.35 },
+  { x: 95, y: 7, size: 1.8, dur: 1.5, delay: 0.7 },
+  { x: 97, y: 9, size: 2, dur: 1.8, delay: 1.05 }
 ]
 
-const TRAIL_TONE_CLASS: Record<TrailTone, string> = {
-  violet: 'reasoningEffortParticleViolet',
-  fuchsia: 'reasoningEffortParticleFuchsia',
-  bright: 'reasoningEffortParticleBright'
+function formatEffortLabel(level: ReasoningEffortLevel): string {
+  const label = String(level).toLowerCase() === 'xhigh' ? 'extra high' : String(level)
+  return label
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
 }
 
 export function ReasoningEffortSlider(props: ReasoningEffortSliderProps): React.JSX.Element {
@@ -115,9 +184,12 @@ export function ReasoningEffortSlider(props: ReasoningEffortSliderProps): React.
 
   const lastIndex = Math.max(0, levels.length - 1)
   const index = Math.max(0, levels.indexOf(value))
-  const isMax = index === lastIndex && lastIndex > 0
-  const active = isMax && !dimmed
+  const isMax = lastIndex > 0 && index === lastIndex
+  const showMaxEasterEgg = isMax && !dimmed
   const pct = lastIndex > 0 ? (index / lastIndex) * 100 : 0
+  const valueLabel = formatEffortLabel(value)
+  const valueTransform =
+    index <= 0 ? 'translateX(0)' : index >= lastIndex ? 'translateX(-100%)' : 'translateX(-50%)'
 
   const commit = useCallback(
     (next: number): void => {
@@ -187,13 +259,8 @@ export function ReasoningEffortSlider(props: ReasoningEffortSliderProps): React.
   }
 
   return (
-    <div className={cn('flex w-full select-none flex-col gap-1.5', dimmed && 'opacity-60')}>
-      {active ? <style>{MAX_TRAIL_CSS}</style> : null}
-
-      <div className="flex items-center justify-between px-0.5 text-[10px] leading-none text-muted-foreground">
-        <span>{fasterLabel}</span>
-        <span>{smarterLabel}</span>
-      </div>
+    <div className={cn('flex w-full select-none flex-col', dimmed && 'opacity-60')}>
+      <style>{REASONING_EFFORT_CSS}</style>
 
       <div
         role="slider"
@@ -208,109 +275,109 @@ export function ReasoningEffortSlider(props: ReasoningEffortSliderProps): React.
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         onKeyDown={onKeyDown}
-        className="relative flex h-6 cursor-pointer touch-none items-center outline-none focus-visible:rounded-full focus-visible:ring-2 focus-visible:ring-violet-500/50"
+        className={cn(
+          'group relative h-[60px] cursor-pointer touch-none rounded-xl px-2 outline-none transition-colors',
+          'focus-visible:ring-2 focus-visible:ring-violet-500/50',
+          showMaxEasterEgg &&
+            'bg-violet-500/[0.055] shadow-[inset_0_0_0_1px_rgba(216,180,254,0.14),0_0_22px_rgba(168,85,247,0.12)]'
+        )}
       >
-        {/* Inner rail inset by half the thumb width so the thumb sits flush at both ends. */}
-        <div
-          ref={railRef}
-          className="absolute inset-x-[6px] top-1/2 h-3 -translate-y-1/2 rounded-full bg-muted"
-        >
-          {/* Max level only: comet trail over the right half of the rail — a gradient
-              streak into the thumb, with particles drifting off the tail. */}
-          {active ? (
-            <>
-              <div
-                aria-hidden
-                className="reasoningEffortStreak absolute inset-y-0 left-1/2 right-0 rounded-r-full"
-              />
-              <div
-                aria-hidden
-                className="absolute left-1/2 right-0 top-1/2 z-[5] h-[18px] -translate-y-1/2"
-              >
-                {TRAIL_PARTICLES.map((p, i) => (
-                  <span
-                    key={i}
-                    className={cn('reasoningEffortParticle', TRAIL_TONE_CLASS[p.tone])}
-                    style={
-                      {
-                        left: `${p.x}%`,
-                        top: p.y,
-                        width: p.size,
-                        height: p.size,
-                        '--dx': `${p.dx}px`,
-                        '--dur': `${p.dur}s`,
-                        '--delay': `${p.delay}s`,
-                        '--peak': p.peak
-                      } as React.CSSProperties
-                    }
-                  />
-                ))}
-              </div>
-            </>
-          ) : null}
+        {/* Shared inset keeps the value pill, thumb and endpoint labels on the same rail. */}
+        <div className="absolute inset-x-[14px] inset-y-0">
+          <div className="absolute inset-x-0 top-1 flex items-center justify-between text-[10px] font-medium leading-none text-muted-foreground/75">
+            <span>{fasterLabel}</span>
+            <span>{smarterLabel}</span>
+          </div>
 
-          {levels.map((lvl, i) => {
-            const tickPct = lastIndex > 0 ? (i / lastIndex) * 100 : 0
-            return (
-              <span
-                key={`${lvl}-${i}`}
-                aria-hidden
-                className={cn(
-                  'absolute top-1/2 z-10 size-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full',
-                  i <= index
-                    ? 'bg-violet-400/70 dark:bg-violet-200/80'
-                    : i === lastIndex
-                      ? 'bg-violet-500'
-                      : 'bg-muted-foreground/45'
-                )}
-                style={{ left: `${tickPct}%` }}
-              />
-            )
-          })}
-
-          {/* Light capsule thumb. */}
-          <div
+          <span
             aria-hidden
             className={cn(
-              'absolute top-1/2 z-20 h-5 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-black/25 bg-zinc-300 shadow-md',
-              'transition-[left,box-shadow] duration-150 ease-out motion-reduce:transition-none'
+              'absolute top-[18px] z-30 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none shadow-sm backdrop-blur',
+              'border-border/70 bg-popover/95 text-foreground/85',
+              'transition-[left,transform,background-color,border-color,color] duration-150 ease-out motion-reduce:transition-none',
+              'group-hover:border-violet-300/60 group-hover:text-violet-700 dark:group-hover:text-violet-200',
+              showMaxEasterEgg && 'reasoningEffortMaxLabel'
             )}
-            style={{
-              left: `${pct}%`,
-              boxShadow: isMax
-                ? '0 0 9px 2px rgba(216, 180, 254, 0.55), 0 1px 3px rgba(0, 0, 0, 0.45)'
-                : undefined
-            }}
-          />
-        </div>
-      </div>
+            style={{ left: `${pct}%`, transform: valueTransform }}
+          >
+            <span>{valueLabel}</span>
+            {showMaxEasterEgg && (
+              <span className="reasoningEffortMaxChip inline-flex rounded-full px-1 py-px text-[8px] font-black tracking-wide">
+                MAX
+              </span>
+            )}
+          </span>
 
-      {/* Clickable level labels aligned with the ticks (endpoints edge-aligned). */}
-      <div className="relative mx-[6px] h-[11px] text-[9px] font-medium uppercase leading-none tracking-wide">
-        {levels.map((lvl, i) => {
-          const tickPct = lastIndex > 0 ? (i / lastIndex) * 100 : 0
-          return (
-            <button
-              key={`${lvl}-${i}`}
-              type="button"
-              tabIndex={-1}
+          <div
+            ref={railRef}
+            className={cn(
+              'absolute inset-x-0 bottom-2 h-3 overflow-hidden rounded-full',
+              'bg-slate-950/10 shadow-inner shadow-black/10 transition-shadow dark:bg-black/20',
+              showMaxEasterEgg && 'reasoningEffortRailMax'
+            )}
+          >
+            <div
               aria-hidden
-              onClick={() => commit(i)}
               className={cn(
-                'absolute top-0 cursor-pointer transition-colors',
-                i === lastIndex ? '-translate-x-full' : i !== 0 && '-translate-x-1/2',
-                i === index
-                  ? isMax
-                    ? 'font-semibold text-fuchsia-500 dark:text-fuchsia-400'
-                    : 'font-semibold text-violet-600 dark:text-violet-400'
-                  : 'text-muted-foreground/60 hover:text-foreground/80'
+                'reasoningEffortFill absolute inset-y-0 left-0 z-[1] overflow-hidden rounded-full',
+                'transition-[width,opacity] duration-150 ease-out motion-reduce:transition-none',
+                showMaxEasterEgg && 'reasoningEffortFillMax'
               )}
-              style={{ left: `${tickPct}%` }}
-            >
-              {lvl}
-            </button>
-          )
-        })}
+              style={{ width: `${pct}%`, opacity: dimmed ? 0.58 : 1 }}
+            />
+
+            {showMaxEasterEgg &&
+              MAX_SPARKS.map((spark, i) => (
+                <span
+                  key={i}
+                  aria-hidden
+                  className="reasoningEffortMaxSpark z-[8]"
+                  style={
+                    {
+                      left: `${spark.x}%`,
+                      top: spark.y,
+                      width: spark.size,
+                      height: spark.size,
+                      '--dur': `${spark.dur}s`,
+                      '--delay': `${spark.delay}s`
+                    } as React.CSSProperties
+                  }
+                />
+              ))}
+
+            {levels.map((lvl, i) => {
+              const tickPct = lastIndex > 0 ? (i / lastIndex) * 100 : 0
+              return (
+                <span
+                  key={`${lvl}-${i}`}
+                  aria-hidden
+                  className={cn(
+                    'absolute top-1/2 z-10 size-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors',
+                    showMaxEasterEgg && i === lastIndex
+                      ? 'opacity-0'
+                      : i <= index
+                        ? 'bg-white/70 shadow-sm'
+                        : 'bg-muted-foreground/45'
+                  )}
+                  style={{ left: `${tickPct}%` }}
+                />
+              )
+            })}
+
+            <span
+              aria-hidden
+              className={cn(
+                'reasoningEffortThumb absolute z-20',
+                'transition-[left,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none',
+                'group-active:scale-105',
+                showMaxEasterEgg
+                  ? 'reasoningEffortThumbMax top-1/2 size-3 -translate-x-full -translate-y-1/2 rounded-full'
+                  : 'top-[calc(50%+1px)] h-[18px] w-3 -translate-x-1/2 -translate-y-1/2 rounded-[5px]'
+              )}
+              style={{ left: `${pct}%` }}
+            />
+          </div>
+        </div>
       </div>
     </div>
   )

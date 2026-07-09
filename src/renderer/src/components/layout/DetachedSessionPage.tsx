@@ -15,7 +15,6 @@ import { useChatStore } from '@renderer/stores/chat-store'
 import { useUIStore } from '@renderer/stores/ui-store'
 import { cn } from '@renderer/lib/utils'
 import { SessionConversationPane } from './SessionConversationPane'
-import { WorkingFolderSheet } from './WorkingFolderSheet'
 import { WindowControls } from './WindowControls'
 import { RightPanel } from './RightPanel'
 import { setSessionForegroundVisibility } from '@renderer/lib/agent/session-runtime-router'
@@ -46,9 +45,15 @@ export function DetachedSessionPage({ sessionId }: DetachedSessionPageProps): Re
     useShallow((state) => selectSessionPendingApproval(state, sessionId))
   )
   const resolveApproval = useAgentStore((state) => state.resolveApproval)
-  const workingFolderSheetOpen = useUIStore((state) => state.workingFolderSheetOpen)
-  const toggleWorkingFolderSheet = useUIStore((state) => state.toggleWorkingFolderSheet)
+  const rightPanelOpen = useUIStore((state) => state.rightPanelOpen)
+  const rightPanelActiveTabKind = useUIStore(
+    (state) =>
+      state.rightPanelTabs.find((tab) => tab.id === state.rightPanelActiveTabId)?.kind ?? null
+  )
+  const setRightPanelOpen = useUIStore((state) => state.setRightPanelOpen)
+  const openFilesTab = useUIStore((state) => state.openFilesTab)
   const isMac = /Mac/.test(navigator.userAgent)
+  const fileManagerOpen = rightPanelOpen && rightPanelActiveTabKind === 'files'
 
   useEffect(() => {
     document.title = sessionView.title ? `${sessionView.title} | OpenCoWork` : 'OpenCoWork'
@@ -84,11 +89,11 @@ export function DetachedSessionPage({ sessionId }: DetachedSessionPageProps): Re
                   <Button
                     variant="ghost"
                     size="icon"
-                    aria-pressed={workingFolderSheetOpen}
+                    aria-pressed={fileManagerOpen}
                     aria-disabled={!sessionView.workingFolder}
                     className={cn(
                       'titlebar-no-drag size-7 rounded-md transition-colors',
-                      workingFolderSheetOpen
+                      fileManagerOpen
                         ? 'bg-accent text-accent-foreground'
                         : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
                       !sessionView.workingFolder &&
@@ -96,7 +101,11 @@ export function DetachedSessionPage({ sessionId }: DetachedSessionPageProps): Re
                     )}
                     onClick={() => {
                       if (!sessionView.workingFolder) return
-                      toggleWorkingFolderSheet()
+                      if (fileManagerOpen) {
+                        setRightPanelOpen(false)
+                        return
+                      }
+                      openFilesTab('files', sessionId, sessionView.projectId)
                     }}
                   >
                     <FolderOpen className="size-4" />
@@ -104,7 +113,7 @@ export function DetachedSessionPage({ sessionId }: DetachedSessionPageProps): Re
                 </TooltipTrigger>
                 <TooltipContent>
                   {sessionView.workingFolder
-                    ? workingFolderSheetOpen
+                    ? fileManagerOpen
                       ? t('topbar.closeFileManager', { defaultValue: 'Close file manager' })
                       : t('topbar.openFileManager', { defaultValue: 'Open file manager' })
                     : t('topbar.fileManagerUnavailable', {
@@ -124,7 +133,6 @@ export function DetachedSessionPage({ sessionId }: DetachedSessionPageProps): Re
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <SessionConversationPane sessionId={sessionId} allowOpenInNewWindow={false} />
-          <WorkingFolderSheet sessionId={sessionId} />
           <RightPanel sessionId={sessionId} />
         </div>
 

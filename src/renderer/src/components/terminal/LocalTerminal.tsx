@@ -143,9 +143,7 @@ export function LocalTerminal({
       if (!snapshotLoaded) {
         pendingChunks.push({
           seq:
-            typeof data.seq === 'number'
-              ? data.seq
-              : lastSeqRef.current + pendingChunks.length + 1,
+            typeof data.seq === 'number' ? data.seq : lastSeqRef.current + pendingChunks.length + 1,
           data: data.data
         })
         return
@@ -268,12 +266,13 @@ export function LocalTerminal({
     >
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div
-            ref={containerRef}
-            className="flex-1 overflow-hidden px-1 py-1"
-            style={{ minHeight: 0 }}
-            onClick={() => termRef.current?.focus()}
-          />
+          <div className="min-h-0 flex-1 overflow-hidden p-1">
+            <div
+              ref={containerRef}
+              className="h-full overflow-hidden"
+              onClick={() => termRef.current?.focus()}
+            />
+          </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
           <ContextMenuItem onClick={handleCopy} disabled={!hasSelection}>

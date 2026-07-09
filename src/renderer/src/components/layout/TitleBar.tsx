@@ -106,10 +106,13 @@ export function TitleBar({
   const toggleLeftSidebar = useUIStore((s) => s.toggleLeftSidebar)
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen)
   const toggleRightPanel = useUIStore((s) => s.toggleRightPanel)
+  const setRightPanelOpen = useUIStore((s) => s.setRightPanelOpen)
+  const rightPanelActiveTabKind = useUIStore(
+    (s) => s.rightPanelTabs.find((tab) => tab.id === s.rightPanelActiveTabId)?.kind ?? null
+  )
+  const openFilesTab = useUIStore((s) => s.openFilesTab)
   const runtimeStatusPanelOpen = useUIStore((s) => s.runtimeStatusPanelOpen)
   const toggleRuntimeStatusPanel = useUIStore((s) => s.toggleRuntimeStatusPanel)
-  const workingFolderSheetOpen = useUIStore((s) => s.workingFolderSheetOpen)
-  const toggleWorkingFolderSheet = useUIStore((s) => s.toggleWorkingFolderSheet)
   const setBottomTerminalDockOpen = useUIStore((s) => s.setBottomTerminalDockOpen)
   const chatView = useUIStore((s) => s.chatView)
   const mode = useUIStore((s) => s.mode)
@@ -203,6 +206,7 @@ export function TitleBar({
   const showFileManagerToggle =
     chatSurfaceActive && chatView === 'session' && Boolean(sessionContext.sessionProjectId)
   const canOpenFileManager = Boolean(sessionContext.sessionWorkingFolder)
+  const fileManagerOpen = rightPanelOpen && rightPanelActiveTabKind === 'files'
   const showProjectTerminalToggle =
     chatSurfaceActive &&
     Boolean(sessionContext.terminalProjectId) &&
@@ -431,8 +435,8 @@ export function TitleBar({
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    aria-pressed={workingFolderSheetOpen}
-                    data-active={workingFolderSheetOpen ? 'true' : 'false'}
+                    aria-pressed={fileManagerOpen}
+                    data-active={fileManagerOpen ? 'true' : 'false'}
                     aria-disabled={!canOpenFileManager}
                     className={cn(
                       projectToolButtonClass,
@@ -440,7 +444,11 @@ export function TitleBar({
                     )}
                     onClick={() => {
                       if (!canOpenFileManager) return
-                      toggleWorkingFolderSheet()
+                      if (fileManagerOpen) {
+                        setRightPanelOpen(false)
+                        return
+                      }
+                      openFilesTab('files', activeSessionId, sessionContext.sessionProjectId)
                     }}
                   >
                     <FolderOpen className="size-[14px]" />
@@ -448,7 +456,7 @@ export function TitleBar({
                 </TooltipTrigger>
                 <TooltipContent>
                   {canOpenFileManager
-                    ? workingFolderSheetOpen
+                    ? fileManagerOpen
                       ? t('topbar.closeFileManager')
                       : t('topbar.openFileManager')
                     : t('topbar.fileManagerUnavailable')}

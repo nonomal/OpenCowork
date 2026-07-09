@@ -336,12 +336,13 @@ export function SshTerminal({ sessionId }: SshTerminalProps): React.JSX.Element 
       {/* Terminal container with context menu */}
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div
-            ref={containerRef}
-            className="flex-1 overflow-hidden px-3 py-3"
-            onClick={handleContainerClick}
-            style={{ minHeight: 0 }}
-          />
+          <div className="min-h-0 flex-1 overflow-hidden p-3">
+            <div
+              ref={containerRef}
+              className="h-full overflow-hidden"
+              onClick={handleContainerClick}
+            />
+          </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
           <ContextMenuItem onClick={handleCopy} disabled={!hasSelection}>

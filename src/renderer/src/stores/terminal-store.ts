@@ -13,6 +13,7 @@ export interface LocalTerminalTab {
   shell: string
   createdAt: number
   status: LocalTerminalStatus
+  surface?: 'bottom' | 'right'
   exitCode?: number
 }
 
@@ -54,11 +55,13 @@ interface TerminalStore {
     cwd?: string,
     title?: string,
     initialCommand?: string,
-    projectId?: string | null
+    projectId?: string | null,
+    envOverrides?: Record<string, string>
   ) => Promise<string | null>
   closeTab: (id: string) => Promise<void>
   closeSession: (id: string) => Promise<void>
   setActiveTab: (id: string | null) => void
+  setTabSurface: (id: string, surface: 'bottom' | 'right') => void
   findTabByCwd: (cwd?: string | null, projectId?: string | null) => LocalTerminalTab | null
   markExited: (id: string, exitCode?: number, exitSignal?: number) => void
 }
@@ -167,11 +170,12 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
       return
     }
   },
-  createTab: async (cwd, preferredTitle, initialCommand, projectId) => {
+  createTab: async (cwd, preferredTitle, initialCommand, projectId, envOverrides) => {
     const title = buildNextTitle(get().tabs, preferredTitle, projectId)
     const result = (await ipcClient.invoke(IPC.TERMINAL_CREATE, {
       cwd,
-      title
+      title,
+      ...(envOverrides && Object.keys(envOverrides).length > 0 ? { env: envOverrides } : {})
     })) as
       | {
           id?: string
@@ -198,7 +202,8 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
       cwd: result.cwd || cwd || '',
       shell: result.shell || '',
       createdAt: result.createdAt || Date.now(),
-      status: 'running'
+      status: 'running',
+      surface: 'bottom'
     }
     const session = normalizeTerminalSession({
       id: result.id,
@@ -290,6 +295,10 @@ export const useTerminalStore = create<TerminalStore>()((set, get) => ({
     })
   },
   setActiveTab: (id) => set({ activeTabId: id }),
+  setTabSurface: (id, surface) =>
+    set((state) => ({
+      tabs: state.tabs.map((tab) => (tab.id === id ? { ...tab, surface } : tab))
+    })),
   findTabByCwd: (cwd, projectId) => {
     if (!cwd) return null
     const normalizedProjectId = projectId ?? null

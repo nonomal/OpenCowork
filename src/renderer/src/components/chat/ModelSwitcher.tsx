@@ -181,11 +181,13 @@ function PillToggle({
 function ModelCapabilityTags({
   model,
   providerType,
-  t
+  t,
+  showContext = true
 }: {
   model: AIModelConfig
   providerType?: AIProvider['type']
   t: (key: string) => string
+  showContext?: boolean
 }): React.JSX.Element {
   const ctx = formatContextLength(model.contextLength)
   return (
@@ -208,10 +210,79 @@ function ModelCapabilityTags({
           {t('topbar.thinking')}
         </span>
       )}
-      {ctx && (
+      {showContext && ctx && (
         <span className="inline-flex items-center rounded-sm bg-muted/60 px-1 py-px text-[9px] font-medium text-muted-foreground">
           {ctx}
         </span>
+      )}
+    </div>
+  )
+}
+
+function ModelHoverDetails({
+  model,
+  tSettings
+}: {
+  model: AIModelConfig
+  tSettings: (key: string, opts?: Record<string, unknown>) => string
+}): React.JSX.Element | null {
+  const contextRows = [
+    {
+      label: tSettings('provider.contextLength'),
+      value: formatTokenCount(model.contextLength)
+    },
+    {
+      label: tSettings('provider.maxOutputTokens'),
+      value: formatTokenCount(model.maxOutputTokens)
+    }
+  ].filter((row) => row.value !== '-')
+
+  const priceRows = [
+    { label: tSettings('provider.inputPrice'), value: formatPrice(model.inputPrice) },
+    { label: tSettings('provider.outputPrice'), value: formatPrice(model.outputPrice) },
+    {
+      label: tSettings('provider.cacheCreationPrice'),
+      value: formatPrice(model.cacheCreationPrice)
+    },
+    { label: tSettings('provider.cacheHitPrice'), value: formatPrice(model.cacheHitPrice) }
+  ].filter((row) => row.value !== '-')
+
+  if (contextRows.length === 0 && priceRows.length === 0) return null
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-border/60 pt-2">
+      {contextRows.length > 0 && (
+        <div className="grid grid-cols-2 gap-2">
+          {contextRows.map((row) => (
+            <div key={row.label} className="min-w-0 rounded-md bg-muted/35 px-2 py-1.5">
+              <div className="truncate text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                {row.label}
+              </div>
+              <div className="mt-0.5 truncate text-[11px] font-semibold text-foreground/90">
+                {row.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {priceRows.length > 0 && (
+        <div className="space-y-1.5 rounded-md bg-muted/25 px-2 py-1.5">
+          <div className="flex items-center justify-between gap-2 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">
+            <span>{tSettings('provider.pricing')}</span>
+            <span className="normal-case tracking-normal">{tSettings('provider.pricingUnit')}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+            {priceRows.map((row) => (
+              <div key={row.label} className="flex min-w-0 items-center justify-between gap-2">
+                <span className="truncate text-[10px] text-muted-foreground">{row.label}</span>
+                <span className="shrink-0 text-[10px] font-semibold text-foreground/85">
+                  {row.value.replace('/M tokens', '')}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   )
@@ -483,39 +554,6 @@ function ModelSettingsPopover({
     })
   }, [model, providerId, responsesImageGenerationEnabled])
 
-  const priceRows = [
-    { label: tSettings('provider.inputPrice'), value: formatPrice(model?.inputPrice) },
-    { label: tSettings('provider.outputPrice'), value: formatPrice(model?.outputPrice) },
-    { label: tSettings('provider.cacheHitPrice'), value: formatPrice(model?.cacheHitPrice) }
-  ]
-
-  const capabilityItems = [
-    {
-      enabled: !!model && modelSupportsVision(model, providerType),
-      label: t('topbar.vision'),
-      icon: <Eye className="size-3" />,
-      className: 'bg-lime-500/15 text-lime-500'
-    },
-    {
-      enabled: !!model?.supportsFunctionCall,
-      label: t('topbar.tools'),
-      icon: <Wrench className="size-3" />,
-      className: 'bg-cyan-500/15 text-cyan-500'
-    },
-    {
-      enabled: supportsThinking,
-      label: t('topbar.thinking'),
-      icon: <Brain className="size-3" />,
-      className: 'bg-fuchsia-500/15 text-fuchsia-500'
-    },
-    {
-      enabled: requestType === 'openai-responses',
-      label: tSettings('provider.responsesConfig'),
-      icon: <Settings2 className="size-3" />,
-      className: 'bg-emerald-500/15 text-emerald-500'
-    }
-  ].filter((item) => item.enabled)
-
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -546,53 +584,6 @@ function ModelSettingsPopover({
 
           {model && (
             <>
-              <SettingSection accent="bg-blue-500" title={tSettings('provider.contextLength')}>
-                <div className="flex items-baseline justify-between px-2">
-                  <span className="text-xs text-muted-foreground">{model.name}</span>
-                  <span className="text-sm font-semibold text-foreground">
-                    {formatTokenCount(model.contextLength)}
-                  </span>
-                </div>
-              </SettingSection>
-
-              <SettingSection accent="bg-violet-500" title={t('topbar.capabilities')}>
-                <div className="flex items-center justify-between px-2">
-                  <span className="text-xs text-muted-foreground">
-                    {capabilityItems.length > 0 ? requestType : '-'}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    {capabilityItems.map((item) => (
-                      <Tooltip key={item.label}>
-                        <TooltipTrigger asChild>
-                          <span
-                            className={cn(
-                              'inline-flex size-6 items-center justify-center rounded-md',
-                              item.className
-                            )}
-                          >
-                            {item.icon}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="text-[11px]">
-                          {item.label}
-                        </TooltipContent>
-                      </Tooltip>
-                    ))}
-                  </div>
-                </div>
-              </SettingSection>
-
-              <SettingSection accent="bg-amber-500" title={tSettings('provider.pricing')}>
-                <div className="space-y-2 px-2 text-xs">
-                  {priceRows.map((row) => (
-                    <div key={row.label} className="flex items-center justify-between gap-3">
-                      <span className="text-muted-foreground">{row.label}</span>
-                      <span className="text-right font-medium text-foreground/85">{row.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </SettingSection>
-
               <SettingSection accent="bg-emerald-500" title={tSettings('provider.modelConfig')}>
                 {!hasConfigControls && (
                   <div className="px-2 py-2 text-xs text-muted-foreground">
@@ -600,7 +591,7 @@ function ModelSettingsPopover({
                   </div>
                 )}
 
-                {supportsThinking && (
+                {supportsThinking && (!levels || levels.length === 0) && (
                   <PillToggle
                     enabled={thinkingEnabled}
                     onClick={toggleThinking}
@@ -616,34 +607,67 @@ function ModelSettingsPopover({
                 )}
 
                 {supportsThinking && levels && levels.length > 0 && (
-                  <div className="px-2 py-1.5">
-                    <div className="mb-2 flex items-end justify-between gap-3">
-                      <div>
-                        <div className="text-xs font-semibold text-foreground">
-                          {t('topbar.reasoningEffort')}
-                        </div>
-                        <div className="text-[10px] text-muted-foreground">reasoning_effort</div>
-                      </div>
+                  <div className="mx-2 space-y-1.5 py-1">
+                    <div
+                      className={cn(
+                        'rounded-lg px-2.5 pb-1 pt-1.5 transition-colors',
+                        thinkingEnabled
+                          ? 'bg-zinc-950/[0.035] dark:bg-white/[0.035]'
+                          : 'bg-muted/20 dark:bg-white/[0.02]'
+                      )}
+                    >
+                      <ReasoningEffortSlider
+                        levels={levels}
+                        value={effectiveReasoningEffort}
+                        onChange={setEffort}
+                        dimmed={!thinkingEnabled}
+                        fasterLabel={t('topbar.faster')}
+                        smarterLabel={t('topbar.smarter')}
+                        ariaLabel={t('topbar.reasoningEffort')}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors',
+                        'hover:bg-muted/45 dark:hover:bg-white/[0.04]',
+                        thinkingEnabled ? 'text-foreground' : 'text-muted-foreground'
+                      )}
+                      onClick={toggleThinking}
+                    >
                       <span
                         className={cn(
-                          'text-xs font-semibold uppercase tracking-wide',
-                          thinkingEnabled && effectiveReasoningEffort === levels[levels.length - 1]
-                            ? 'text-fuchsia-500 dark:text-fuchsia-400'
-                            : 'text-foreground/80'
+                          'flex size-5 shrink-0 items-center justify-center rounded-full',
+                          thinkingEnabled
+                            ? 'bg-violet-500/12 text-violet-600 dark:text-violet-300'
+                            : 'bg-muted text-muted-foreground'
                         )}
                       >
-                        {effectiveReasoningEffort}
+                        <Brain className="size-3" />
                       </span>
-                    </div>
-                    <ReasoningEffortSlider
-                      levels={levels}
-                      value={effectiveReasoningEffort}
-                      onChange={setEffort}
-                      dimmed={!thinkingEnabled}
-                      fasterLabel={t('topbar.faster')}
-                      smarterLabel={t('topbar.smarter')}
-                      ariaLabel={t('topbar.reasoningEffort')}
-                    />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">
+                          {t('topbar.deepThinking')}
+                        </span>
+                        <span className="block truncate text-[10px] text-muted-foreground">
+                          {thinkingEnabled
+                            ? tChat('input.thinkingLevel', {
+                                level: String(effectiveReasoningEffort).toUpperCase()
+                              })
+                            : tChat('input.thinkingOff')}
+                        </span>
+                      </span>
+                      <span
+                        className={cn(
+                          'flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors',
+                          thinkingEnabled
+                            ? 'border-emerald-500 bg-emerald-500 text-white'
+                            : 'border-muted-foreground/30'
+                        )}
+                      >
+                        {thinkingEnabled && <Check className="size-3" />}
+                      </span>
+                    </button>
                   </div>
                 )}
 
@@ -1167,7 +1191,9 @@ export function ModelSwitcher({
                   model={triggerModel}
                   providerType={triggerProviderType}
                   t={t}
+                  showContext={false}
                 />
+                <ModelHoverDetails model={triggerModel} tSettings={tSettings} />
               </div>
             )}
           </HoverCardContent>

@@ -534,9 +534,7 @@ export function AgentFilesPanel({
 }: AgentFilesPanelProps): React.JSX.Element {
   const { t, i18n } = useTranslation('layout')
   const activeTab = useUIStore((state) => state.agentFilesActiveTabBySurface[surface] ?? initialTab)
-  const panelVisible = useUIStore((state) =>
-    surface === 'sheet' ? state.workingFolderSheetOpen : true
-  )
+  const panelVisible = true
   const setActiveTab = useUIStore((state) => state.setAgentFilesActiveTab)
   const selectedChangeKey = useUIStore((state) => state.agentFilesSelectedChangeKey)
   const setSelectedChangeKey = useUIStore((state) => state.setAgentFilesSelectedChangeKey)

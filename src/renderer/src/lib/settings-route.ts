@@ -18,6 +18,8 @@ const VALID_SETTINGS_TABS: ReadonlySet<SettingsTab> = new Set([
   'provider',
   'modelManagement',
   'model',
+  'aiCodingClaudeCode',
+  'aiCodingCodex',
   'plugin',
   'extension',
   'hooks',

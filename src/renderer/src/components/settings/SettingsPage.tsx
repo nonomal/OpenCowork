@@ -82,6 +82,7 @@ import { WebSearchPanel } from './WebSearchPanel'
 import { SkillsMarketPanel } from './SkillsMarketPanel'
 import { MigrationPanel } from './MigrationPanel'
 import { PetPanel } from './PetPanel'
+import { AiCodingPanel } from './AiCodingPanel'
 import { GlobalThemePanel } from './GlobalThemePanel'
 import { AnalyticsOverview } from './AnalyticsOverview'
 import { ProfilePanel } from './ProfilePanel'
@@ -459,6 +460,23 @@ const menuGroupDefs: Array<{
         icon: <BrainCircuit className="size-4" />,
         labelKey: 'model.title',
         descKey: 'model.subtitle'
+      }
+    ]
+  },
+  {
+    labelKey: 'page.groups.aiCoding',
+    items: [
+      {
+        id: 'aiCodingClaudeCode',
+        icon: <Terminal className="size-4" />,
+        labelKey: 'aiCoding.claudeTitle',
+        descKey: 'aiCoding.claudeSubtitle'
+      },
+      {
+        id: 'aiCodingCodex',
+        icon: <Sparkles className="size-4" />,
+        labelKey: 'aiCoding.codexTitle',
+        descKey: 'aiCoding.codexSubtitle'
       }
     ]
   },
@@ -3610,6 +3628,8 @@ const panelMap: Record<SettingsTab, () => React.JSX.Element> = {
   migration: MigrationPanel,
   provider: ProviderPanel,
   modelManagement: ModelManagementPanel,
+  aiCodingClaudeCode: () => <AiCodingPanel kind="claude" />,
+  aiCodingCodex: () => <AiCodingPanel kind="codex" />,
   plugin: AppPluginPanel,
   extension: ExtensionPanel,
   hooks: HooksPanel,

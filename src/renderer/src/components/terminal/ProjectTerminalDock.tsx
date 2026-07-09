@@ -1,11 +1,23 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, MonitorSmartphone, Plus, SquareTerminal, X } from 'lucide-react'
+import {
+  ChevronDown,
+  Maximize2,
+  Minimize2,
+  MonitorSmartphone,
+  PanelRightOpen,
+  Plus,
+  SquareTerminal,
+  X
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@renderer/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from '@renderer/components/ui/dropdown-menu'
 import {
@@ -28,8 +40,15 @@ import {
   type UnifiedTerminalTab
 } from '@renderer/lib/terminal/unified-terminal-tabs'
 import { useSshStore } from '@renderer/stores/ssh-store'
+import { useSettingsStore } from '@renderer/stores/settings-store'
 import { useTerminalStore } from '@renderer/stores/terminal-store'
 import { useUIStore } from '@renderer/stores/ui-store'
+import {
+  resolveClaudeCodeLaunch,
+  resolveCodexLaunch,
+  validateClaudeCodeConfig,
+  validateCodexConfig
+} from '@renderer/lib/ai-coding-terminal'
 
 const LocalTerminal = lazy(() =>
   import('./LocalTerminal').then((m) => ({ default: m.LocalTerminal }))
@@ -44,6 +63,11 @@ function getViewportTerminalDockMaxHeight(): number {
     BOTTOM_TERMINAL_DOCK_MIN_HEIGHT,
     Math.min(BOTTOM_TERMINAL_DOCK_MAX_HEIGHT, Math.floor(window.innerHeight * 0.72))
   )
+}
+
+function getViewportTerminalDockFullscreenHeight(): number {
+  if (typeof window === 'undefined') return BOTTOM_TERMINAL_DOCK_MAX_HEIGHT
+  return Math.max(BOTTOM_TERMINAL_DOCK_MIN_HEIGHT, Math.floor(window.innerHeight - 88))
 }
 
 function StatusDot({
@@ -72,13 +96,17 @@ interface ProjectTerminalDockProps {
   projectName?: string | null
   workingFolder?: string | null
   sshConnectionId?: string | null
+  fullscreen?: boolean
+  onFullscreenChange?: (fullscreen: boolean) => void
 }
 
 export function ProjectTerminalDock({
   projectId,
   projectName,
   workingFolder,
-  sshConnectionId
+  sshConnectionId,
+  fullscreen,
+  onFullscreenChange
 }: ProjectTerminalDockProps): React.JSX.Element {
   const { t } = useTranslation('layout')
 
@@ -88,6 +116,7 @@ export function ProjectTerminalDock({
   const createLocalTab = useTerminalStore((s) => s.createTab)
   const closeLocalTab = useTerminalStore((s) => s.closeTab)
   const setLocalActiveTab = useTerminalStore((s) => s.setActiveTab)
+  const setLocalTabSurface = useTerminalStore((s) => s.setTabSurface)
 
   const sshConnections = useSshStore((s) => s.connections)
   const sshSessions = useSshStore((s) => s.sessions)
@@ -99,15 +128,33 @@ export function ProjectTerminalDock({
   const closeSshSession = useSshStore((s) => s.disconnect)
   const closeSshTab = useSshStore((s) => s.closeTab)
   const setSshActiveTab = useSshStore((s) => s.setActiveTab)
+  const setSshTabSurface = useSshStore((s) => s.setTabSurface)
 
+  const claudeCodeConfigs = useSettingsStore((s) => s.claudeCodeConfigs)
+  const codexConfigs = useSettingsStore((s) => s.codexConfigs)
+  const ensureProjectTerminalRightPanelTab = useUIStore((s) => s.ensureProjectTerminalRightPanelTab)
   const setBottomTerminalDockOpen = useUIStore((s) => s.setBottomTerminalDockOpen)
   const bottomTerminalDockHeight = useUIStore((s) => s.bottomTerminalDockHeight)
   const setBottomTerminalDockHeight = useUIStore((s) => s.setBottomTerminalDockHeight)
   const [isEnsuringTerminal, setIsEnsuringTerminal] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
+  const [uncontrolledTerminalDockFullscreen, setUncontrolledTerminalDockFullscreen] =
+    useState(false)
+  const terminalDockFullscreen = fullscreen ?? uncontrolledTerminalDockFullscreen
+  const expandsToParent = terminalDockFullscreen && fullscreen !== undefined
   const resizeActiveRef = useRef(false)
   const resizeStartYRef = useRef(0)
   const resizeStartHeightRef = useRef(bottomTerminalDockHeight)
+  const previousDockHeightRef = useRef(bottomTerminalDockHeight)
+  const setTerminalDockFullscreen = useCallback(
+    (nextFullscreen: boolean): void => {
+      if (fullscreen === undefined) {
+        setUncontrolledTerminalDockFullscreen(nextFullscreen)
+      }
+      onFullscreenChange?.(nextFullscreen)
+    },
+    [fullscreen, onFullscreenChange]
+  )
 
   useEffect(() => {
     initTerminal()
@@ -121,6 +168,12 @@ export function ProjectTerminalDock({
 
   useEffect(() => {
     const handleWindowResize = (): void => {
+      if (terminalDockFullscreen) {
+        const fullscreenHeight = getViewportTerminalDockFullscreenHeight()
+        setBottomTerminalDockHeight(fullscreenHeight, fullscreenHeight)
+        return
+      }
+
       const nextHeight = clampBottomTerminalDockHeight(
         useUIStore.getState().bottomTerminalDockHeight,
         getViewportTerminalDockMaxHeight()
@@ -133,7 +186,7 @@ export function ProjectTerminalDock({
     return () => {
       window.removeEventListener('resize', handleWindowResize)
     }
-  }, [setBottomTerminalDockHeight])
+  }, [setBottomTerminalDockHeight, terminalDockFullscreen])
 
   useEffect(() => {
     if (!isResizing) return
@@ -142,9 +195,8 @@ export function ProjectTerminalDock({
       if (!resizeActiveRef.current) return
       const delta = resizeStartYRef.current - event.clientY
       const nextHeight = resizeStartHeightRef.current + delta
-      setBottomTerminalDockHeight(
-        clampBottomTerminalDockHeight(nextHeight, getViewportTerminalDockMaxHeight())
-      )
+      const maxHeight = getViewportTerminalDockMaxHeight()
+      setBottomTerminalDockHeight(clampBottomTerminalDockHeight(nextHeight, maxHeight), maxHeight)
     }
 
     const handleMouseUp = (): void => {
@@ -161,11 +213,14 @@ export function ProjectTerminalDock({
   }, [isResizing, setBottomTerminalDockHeight])
 
   const projectLocalTabs = useMemo(
-    () => localTabs.filter((tab) => tab.projectId === projectId),
+    () => localTabs.filter((tab) => tab.projectId === projectId && tab.surface !== 'right'),
     [localTabs, projectId]
   )
   const projectSshTabs = useMemo(
-    () => sshOpenTabs.filter((tab) => tab.type === 'terminal' && tab.projectId === projectId),
+    () =>
+      sshOpenTabs.filter(
+        (tab) => tab.type === 'terminal' && tab.projectId === projectId && tab.surface !== 'right'
+      ),
     [projectId, sshOpenTabs]
   )
 
@@ -265,7 +320,11 @@ export function ProjectTerminalDock({
     : getProjectTerminalBaseTitle(projectName, workingFolder)
 
   const handleCreateTerminal = useCallback(
-    (initialCommand?: string): void => {
+    (
+      initialCommand?: string,
+      envOverrides?: Record<string, string>,
+      titleOverride?: string
+    ): void => {
       hasManuallyCreatedTerminalRef.current = true
 
       if (sshConnectionId) {
@@ -288,9 +347,10 @@ export function ProjectTerminalDock({
       activateSshTab(null)
       void createLocalTab(
         workingFolder,
-        getProjectTerminalBaseTitle(projectName, workingFolder),
+        titleOverride || getProjectTerminalBaseTitle(projectName, workingFolder),
         initialCommand,
-        projectId
+        projectId,
+        envOverrides
       )
     },
     [
@@ -302,6 +362,60 @@ export function ProjectTerminalDock({
       activateSshTab,
       createLocalTab,
       projectName
+    ]
+  )
+
+  const handleCreateClaudeCode = useCallback(
+    (configId: string): void => {
+      if (sshConnectionId) return
+      const launch = resolveClaudeCodeLaunch(configId)
+      if (!launch) return
+      handleCreateTerminal(launch.command, launch.envOverrides, launch.title)
+    },
+    [handleCreateTerminal, sshConnectionId]
+  )
+
+  const handleCreateCodex = useCallback(
+    (configId: string): void => {
+      if (sshConnectionId) return
+      const launch = resolveCodexLaunch(configId)
+      if (!launch) return
+      handleCreateTerminal(launch.command, launch.envOverrides, launch.title)
+    },
+    [handleCreateTerminal, sshConnectionId]
+  )
+
+  const handleMoveToRightPanel = useCallback(
+    (tab: UnifiedTerminalTab): void => {
+      if (tab.type === 'local') {
+        setLocalTabSurface(tab.localTabId, 'right')
+        ensureProjectTerminalRightPanelTab({
+          terminalSource: 'local',
+          localTabId: tab.localTabId,
+          title: tab.title,
+          projectId
+        })
+      } else {
+        setSshTabSurface(tab.sshTabId, 'right')
+        ensureProjectTerminalRightPanelTab({
+          terminalSource: 'ssh',
+          sshTabId: tab.sshTabId,
+          title: tab.title,
+          projectId
+        })
+      }
+
+      if (tabs.length <= 1) {
+        setBottomTerminalDockOpen(projectId, false)
+      }
+    },
+    [
+      ensureProjectTerminalRightPanelTab,
+      projectId,
+      setBottomTerminalDockOpen,
+      setLocalTabSurface,
+      setSshTabSurface,
+      tabs.length
     ]
   )
 
@@ -337,23 +451,59 @@ export function ProjectTerminalDock({
   const startResize = useCallback(
     (event: React.MouseEvent<HTMLDivElement>): void => {
       event.preventDefault()
+      if (terminalDockFullscreen) {
+        setTerminalDockFullscreen(false)
+      }
       resizeActiveRef.current = true
       resizeStartYRef.current = event.clientY
       resizeStartHeightRef.current = bottomTerminalDockHeight
       setIsResizing(true)
     },
-    [bottomTerminalDockHeight]
+    [bottomTerminalDockHeight, terminalDockFullscreen]
   )
+
+  const handleToggleFullscreen = useCallback((): void => {
+    if (terminalDockFullscreen) {
+      setTerminalDockFullscreen(false)
+      const maxHeight = getViewportTerminalDockMaxHeight()
+      setBottomTerminalDockHeight(
+        clampBottomTerminalDockHeight(previousDockHeightRef.current, maxHeight)
+      )
+      return
+    }
+
+    previousDockHeightRef.current = bottomTerminalDockHeight
+    setTerminalDockFullscreen(true)
+    const fullscreenHeight = getViewportTerminalDockFullscreenHeight()
+    setBottomTerminalDockHeight(fullscreenHeight, fullscreenHeight)
+  }, [bottomTerminalDockHeight, setBottomTerminalDockHeight, terminalDockFullscreen])
+
+  const handleCollapseDock = useCallback((): void => {
+    if (terminalDockFullscreen) {
+      setTerminalDockFullscreen(false)
+      const maxHeight = getViewportTerminalDockMaxHeight()
+      setBottomTerminalDockHeight(
+        clampBottomTerminalDockHeight(previousDockHeightRef.current, maxHeight)
+      )
+    }
+    setBottomTerminalDockOpen(projectId, false)
+  }, [projectId, setBottomTerminalDockHeight, setBottomTerminalDockOpen, terminalDockFullscreen])
 
   return (
     <div
       className={cn(
-        'workspace-terminal-dock relative shrink-0',
+        'workspace-terminal-dock relative min-h-0',
+        expandsToParent ? 'flex h-full flex-1 flex-col' : 'shrink-0',
         isResizing && 'workspace-terminal-dock--resizing select-none'
       )}
     >
-      <div className="workspace-terminal-resize-handle" onMouseDown={startResize} />
-      <div className="flex flex-col" style={{ height: bottomTerminalDockHeight }}>
+      {!expandsToParent ? (
+        <div className="workspace-terminal-resize-handle" onMouseDown={startResize} />
+      ) : null}
+      <div
+        className={cn('flex min-h-0 flex-col', expandsToParent && 'h-full flex-1')}
+        style={{ height: expandsToParent ? '100%' : bottomTerminalDockHeight }}
+      >
         <div className="workspace-terminal-header flex h-10 shrink-0 items-center gap-2 px-3">
           <div className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none]">
             <div className="flex min-w-max items-center gap-1">
@@ -375,6 +525,24 @@ export function ProjectTerminalDock({
                   )}
                   <StatusDot status={tab.status} />
                   <span className="max-w-[120px] truncate">{tab.title}</span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="workspace-terminal-action shrink-0 rounded p-0.5 transition-colors"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      handleMoveToRightPanel(tab)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      handleMoveToRightPanel(tab)
+                    }}
+                    title={t('terminalDock.moveToRightPanel')}
+                  >
+                    <PanelRightOpen className="size-3" />
+                  </span>
                   <span
                     role="button"
                     tabIndex={0}
@@ -415,15 +583,58 @@ export function ProjectTerminalDock({
                   <DropdownMenuItem onClick={() => handleCreateTerminal()}>
                     {t('terminalDock.newTerminal')}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleCreateTerminal('claude')}>
-                    {t('terminalDock.newClaude')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleCreateTerminal('codex')}>
-                    {t('terminalDock.newCodex')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleCreateTerminal('gemini')}>
-                    {t('terminalDock.newGemini')}
-                  </DropdownMenuItem>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      {t('terminalDock.newClaudeCode')}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-56">
+                      {claudeCodeConfigs.map((config) => {
+                        const status = validateClaudeCodeConfig(config)
+                        const disabled = Boolean(sshConnectionId) || !status.valid
+                        return (
+                          <DropdownMenuItem
+                            key={config.id}
+                            disabled={disabled}
+                            title={
+                              sshConnectionId
+                                ? t('terminalDock.localAiCodingOnly')
+                                : status.valid
+                                  ? config.name
+                                  : t('terminalDock.invalidAiCodingConfig')
+                            }
+                            onClick={() => handleCreateClaudeCode(config.id)}
+                          >
+                            {config.name}
+                          </DropdownMenuItem>
+                        )
+                      })}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>{t('terminalDock.newCodex')}</DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-56">
+                      {codexConfigs.map((config) => {
+                        const status = validateCodexConfig(config)
+                        const disabled = Boolean(sshConnectionId) || !status.valid
+                        return (
+                          <DropdownMenuItem
+                            key={config.id}
+                            disabled={disabled}
+                            title={
+                              sshConnectionId
+                                ? t('terminalDock.localAiCodingOnly')
+                                : status.valid
+                                  ? config.name
+                                  : t('terminalDock.invalidAiCodingConfig')
+                            }
+                            onClick={() => handleCreateCodex(config.id)}
+                          >
+                            {config.name}
+                          </DropdownMenuItem>
+                        )
+                      })}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -436,7 +647,28 @@ export function ProjectTerminalDock({
                   variant="ghost"
                   size="icon-xs"
                   className="workspace-terminal-action size-7 rounded-[10px]"
-                  onClick={() => setBottomTerminalDockOpen(projectId, false)}
+                  onClick={handleToggleFullscreen}
+                >
+                  {terminalDockFullscreen ? (
+                    <Minimize2 className="size-3.5" />
+                  ) : (
+                    <Maximize2 className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {terminalDockFullscreen
+                  ? t('terminalDock.exitFullscreen', { defaultValue: 'Exit full screen' })
+                  : t('terminalDock.enterFullscreen', { defaultValue: 'Full screen' })}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="workspace-terminal-action size-7 rounded-[10px]"
+                  onClick={handleCollapseDock}
                 >
                   <ChevronDown className="size-3.5" />
                 </Button>

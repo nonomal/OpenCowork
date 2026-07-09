@@ -4,11 +4,9 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import {
   BOTTOM_TERMINAL_DOCK_DEFAULT_HEIGHT,
   LEFT_SIDEBAR_DEFAULT_WIDTH,
-  WORKING_FOLDER_PANEL_DEFAULT_WIDTH,
   clampBottomTerminalDockHeight,
   clampLeftSidebarWidth,
-  clampRightPanelWidth,
-  clampWorkingFolderPanelWidth
+  clampRightPanelWidth
 } from '@renderer/components/layout/right-panel-defs'
 import { ipcStorage } from '@renderer/lib/ipc/ipc-storage'
 import { parseChatRoute, replaceChatRoute } from '@renderer/lib/chat-route'
@@ -47,12 +45,13 @@ export type LegacyRightPanelTab =
   | 'team'
   | 'acp'
 export type RightPanelSection = 'execution' | 'resources' | 'collaboration' | 'monitoring'
-export type AgentFilesSurface = 'sheet'
+export type AgentFilesSurface = 'right-panel'
 export type AgentFilesTab = 'files' | 'changes'
 export type AgentFilesChangeSource = 'all' | 'agent' | 'git'
 export type RightPanelTabKind =
   | 'context'
   | 'review'
+  | 'files'
   | 'preview'
   | 'browser'
   | 'subagent'
@@ -67,6 +66,9 @@ export interface RightPanelTabInstance {
   toolUseId?: string | null
   inlineText?: string | null
   processId?: string
+  terminalSource?: 'local' | 'ssh'
+  localTabId?: string
+  sshTabId?: string
   previewTabId?: string
   projectId?: string | null
   initialChangeId?: string | null
@@ -216,6 +218,8 @@ export type SettingsTab =
   | 'provider'
   | 'modelManagement'
   | 'model'
+  | 'aiCodingClaudeCode'
+  | 'aiCodingCodex'
   | 'plugin'
   | 'extension'
   | 'hooks'
@@ -296,10 +300,9 @@ function normalizeAgentChangeKey(initialChangeId?: string | null): string | null
   return initialChangeId.includes(':') ? initialChangeId : `agent:${initialChangeId}`
 }
 
-function closeRightSidePanels(): { rightPanelOpen: false; workingFolderSheetOpen: false } {
+function closeRightSidePanels(): { rightPanelOpen: false } {
   return {
-    rightPanelOpen: false,
-    workingFolderSheetOpen: false
+    rightPanelOpen: false
   }
 }
 
@@ -325,17 +328,12 @@ interface UIStore {
   runtimeStatusPanelOpen: boolean
   toggleRuntimeStatusPanel: () => void
   setRuntimeStatusPanelOpen: (open: boolean) => void
-  workingFolderSheetOpen: boolean
-  toggleWorkingFolderSheet: () => void
-  setWorkingFolderSheetOpen: (open: boolean) => void
-  workingFolderPanelWidth: number
-  setWorkingFolderPanelWidth: (width: number) => void
   bottomTerminalDockOpenByProjectId: Record<string, boolean>
   setBottomTerminalDockOpen: (projectId: string, open: boolean) => void
   toggleBottomTerminalDock: (projectId: string) => void
   isBottomTerminalDockOpen: (projectId?: string | null) => boolean
   bottomTerminalDockHeight: number
-  setBottomTerminalDockHeight: (height: number) => void
+  setBottomTerminalDockHeight: (height: number, maxHeight?: number) => void
   rightPanelTab: LegacyRightPanelTab
   setRightPanelTab: (tab: LegacyRightPanelTab) => void
   rightPanelSection: RightPanelSection
@@ -343,6 +341,12 @@ interface UIStore {
   rightPanelTabs: RightPanelTabInstance[]
   rightPanelActiveTabId: string
   setRightPanelActiveTab: (tabId: string) => void
+  openFilesTab: (
+    initialTab?: AgentFilesTab,
+    sessionId?: string | null,
+    projectId?: string | null,
+    initialChangeId?: string | null
+  ) => void
   openReviewTab: (initialChangeId?: string | null) => void
   ensureBrowserTab: (url?: string, sessionId?: string | null, projectId?: string | null) => void
   ensureSubAgentTab: (
@@ -352,6 +356,13 @@ interface UIStore {
     sessionId?: string | null
   ) => void
   ensureTerminalTab: (processId: string, title?: string | null) => void
+  ensureProjectTerminalRightPanelTab: (args: {
+    terminalSource: 'local' | 'ssh'
+    localTabId?: string
+    sshTabId?: string
+    title?: string | null
+    projectId?: string | null
+  }) => void
   closeRightPanelTab: (tabId: string) => void
   rightPanelWidth: number
   setRightPanelWidth: (width: number) => void
@@ -611,6 +622,10 @@ function getBrowserStateFromMap(
 
 function getBrowserScopeKey(scope: PanelScope): string {
   return getBrowserSessionKey(scope.sessionId, scope.projectId)
+}
+
+function rightPanelFilesTabId(scope: PanelScope): string {
+  return `files:${getBrowserScopeKey(scope)}`
 }
 
 function isActiveBrowserScope(
@@ -980,13 +995,6 @@ export const useUIStore = create<UIStore>()(
       toggleRuntimeStatusPanel: () =>
         set((state) => ({ runtimeStatusPanelOpen: !state.runtimeStatusPanelOpen })),
       setRuntimeStatusPanelOpen: (open) => set({ runtimeStatusPanelOpen: open }),
-      workingFolderSheetOpen: false,
-      toggleWorkingFolderSheet: () =>
-        set((state) => ({ workingFolderSheetOpen: !state.workingFolderSheetOpen })),
-      setWorkingFolderSheetOpen: (open) => set({ workingFolderSheetOpen: open }),
-      workingFolderPanelWidth: WORKING_FOLDER_PANEL_DEFAULT_WIDTH,
-      setWorkingFolderPanelWidth: (width) =>
-        set({ workingFolderPanelWidth: clampWorkingFolderPanelWidth(width) }),
       bottomTerminalDockOpenByProjectId: {},
       bottomTerminalDockHeight: BOTTOM_TERMINAL_DOCK_DEFAULT_HEIGHT,
       setBottomTerminalDockOpen: (projectId, open) =>
@@ -1005,8 +1013,8 @@ export const useUIStore = create<UIStore>()(
         })),
       isBottomTerminalDockOpen: (projectId) =>
         projectId ? Boolean(get().bottomTerminalDockOpenByProjectId[projectId]) : false,
-      setBottomTerminalDockHeight: (height) =>
-        set({ bottomTerminalDockHeight: clampBottomTerminalDockHeight(height) }),
+      setBottomTerminalDockHeight: (height, maxHeight) =>
+        set({ bottomTerminalDockHeight: clampBottomTerminalDockHeight(height, maxHeight) }),
       rightPanelTab: 'preview',
       setRightPanelTab: (tab) => {
         if (tab === 'browser') {
@@ -1014,14 +1022,7 @@ export const useUIStore = create<UIStore>()(
           return
         }
         if (tab === 'files') {
-          set((state) => ({
-            workingFolderSheetOpen: true,
-            agentFilesActiveTabBySurface: {
-              ...state.agentFilesActiveTabBySurface,
-              sheet: 'files'
-            },
-            rightPanelTab: tab
-          }))
+          get().openFilesTab('files')
           return
         }
         if (tab === 'subagents') {
@@ -1073,16 +1074,49 @@ export const useUIStore = create<UIStore>()(
               : {})
           }
         }),
+      openFilesTab: (initialTab = 'files', sessionId, projectId, initialChangeId) =>
+        set((state) => {
+          const scope = resolvePanelScope(state, sessionId, projectId)
+          const tabId = rightPanelFilesTabId(scope)
+          const normalizedChangeKey = normalizeAgentChangeKey(initialChangeId)
+          const existing = state.rightPanelTabs.find((tab) => tab.id === tabId)
+          const tab: RightPanelTabInstance = existing
+            ? {
+                ...existing,
+                sessionId: scope.sessionId,
+                projectId: scope.projectId,
+                initialChangeId: normalizedChangeKey ?? existing.initialChangeId ?? null
+              }
+            : {
+                id: tabId,
+                kind: 'files',
+                title: 'Files',
+                closable: true,
+                sessionId: scope.sessionId,
+                projectId: scope.projectId,
+                initialChangeId: normalizedChangeKey,
+                createdAt: Date.now()
+              }
+          const rightPanelTabs = ensureRightPanelTabs(
+            existing
+              ? state.rightPanelTabs.map((item) => (item.id === tabId ? tab : item))
+              : [...state.rightPanelTabs, tab]
+          )
+
+          return {
+            rightPanelTabs,
+            rightPanelActiveTabId: tabId,
+            rightPanelTab: 'files',
+            rightPanelOpen: true,
+            agentFilesActiveTabBySurface: {
+              ...state.agentFilesActiveTabBySurface,
+              'right-panel': initialTab
+            },
+            ...(normalizedChangeKey ? { agentFilesSelectedChangeKey: normalizedChangeKey } : {})
+          }
+        }),
       openReviewTab: (initialChangeId) =>
-        set((state) => ({
-          workingFolderSheetOpen: true,
-          agentFilesActiveTabBySurface: {
-            ...state.agentFilesActiveTabBySurface,
-            sheet: 'changes'
-          },
-          agentFilesSelectedChangeKey:
-            normalizeAgentChangeKey(initialChangeId) ?? state.agentFilesSelectedChangeKey
-        })),
+        get().openFilesTab('changes', undefined, undefined, initialChangeId),
       ensureBrowserTab: (url, sessionId, projectId) =>
         set((state) => {
           const existing = state.rightPanelTabs.find((tab) => tab.kind === 'browser')
@@ -1177,6 +1211,48 @@ export const useUIStore = create<UIStore>()(
                 closable: true,
                 sessionId,
                 processId,
+                createdAt: Date.now()
+              }
+          const rightPanelTabs = ensureRightPanelTabs(
+            existing
+              ? state.rightPanelTabs.map((item) => (item.id === tabId ? tab : item))
+              : [...state.rightPanelTabs, tab]
+          )
+          return {
+            rightPanelTabs,
+            rightPanelActiveTabId: tabId,
+            rightPanelTab: 'context',
+            rightPanelOpen: true
+          }
+        }),
+      ensureProjectTerminalRightPanelTab: (args) =>
+        set((state) => {
+          const terminalId =
+            args.terminalSource === 'local' ? args.localTabId?.trim() : args.sshTabId?.trim()
+          if (!terminalId) return state
+
+          const tabId = `project-terminal:${args.terminalSource}:${terminalId}`
+          const sessionId =
+            state.activeScopedSessionId ?? useChatStore.getState().activeSessionId ?? null
+          const existing = state.rightPanelTabs.find((tab) => tab.id === tabId)
+          const tab: RightPanelTabInstance = existing
+            ? {
+                ...existing,
+                title: args.title?.trim() || existing.title,
+                projectId: args.projectId ?? existing.projectId ?? null,
+                sessionId: sessionId ?? existing.sessionId ?? null
+              }
+            : {
+                id: tabId,
+                kind: 'terminal',
+                title: args.title?.trim() || 'Terminal',
+                closable: true,
+                sessionId,
+                projectId: args.projectId ?? null,
+                terminalSource: args.terminalSource,
+                ...(args.terminalSource === 'local'
+                  ? { localTabId: terminalId }
+                  : { sshTabId: terminalId }),
                 createdAt: Date.now()
               }
           const rightPanelTabs = ensureRightPanelTabs(
@@ -2022,8 +2098,6 @@ export const useUIStore = create<UIStore>()(
         rightPanelOpen: state.rightPanelOpen,
         runtimeStatusPanelOpen: state.runtimeStatusPanelOpen,
         rightPanelWidth: clampRightPanelWidth(state.rightPanelWidth),
-        workingFolderSheetOpen: state.workingFolderSheetOpen,
-        workingFolderPanelWidth: clampWorkingFolderPanelWidth(state.workingFolderPanelWidth),
         agentFilesActiveTabBySurface: state.agentFilesActiveTabBySurface,
         agentFilesChangeSource: state.agentFilesChangeSource,
         bottomTerminalDockOpenByProjectId: state.bottomTerminalDockOpenByProjectId,
@@ -2074,9 +2148,6 @@ export const useUIStore = create<UIStore>()(
           autoModelRoutingStatesBySession:
             state.autoModelRoutingStatesBySession ?? current.autoModelRoutingStatesBySession ?? {},
           planModesBySession: state.planModesBySession ?? current.planModesBySession ?? {},
-          workingFolderPanelWidth: clampWorkingFolderPanelWidth(
-            state.workingFolderPanelWidth ?? current.workingFolderPanelWidth
-          ),
           bottomTerminalDockHeight: clampBottomTerminalDockHeight(
             state.bottomTerminalDockHeight ?? current.bottomTerminalDockHeight
           )

@@ -14,6 +14,7 @@ interface CreateTerminalSessionArgs {
   rows?: number
   title?: string
   command?: string
+  env?: Record<string, string>
 }
 
 interface CreateTerminalSessionResult {
@@ -126,6 +127,19 @@ function serializeShellEnvironment(): Record<string, string> {
     }
   }
   return serialized
+}
+
+function sanitizeEnvironmentOverrides(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+
+  const env: Record<string, string> = {}
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue
+    if (typeof rawValue !== 'string') continue
+    env[key] = rawValue
+  }
+
+  return env
 }
 
 function isUsableDirectory(dirPath?: string): dirPath is string {
@@ -258,7 +272,10 @@ export async function createTerminalSession(
 ): Promise<CreateTerminalSessionResult> {
   pruneExpiredExitedSessions()
   const ownerWindowId = resolveOwnerWindowId(sender)
-  const env = serializeShellEnvironment()
+  const env = {
+    ...serializeShellEnvironment(),
+    ...sanitizeEnvironmentOverrides(args.env)
+  }
   const requestedCwd = args.cwd?.trim()
   const cwd = resolveCwd(requestedCwd)
   const cols = Math.max(MIN_COLS, Math.floor(args.cols ?? DEFAULT_COLS))

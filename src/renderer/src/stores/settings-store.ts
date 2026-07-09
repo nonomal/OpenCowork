@@ -29,8 +29,29 @@ export interface ModelBinding {
   modelId: string
 }
 
+export type ClaudeCodePermissionOption = 'dangerouslySkipPermissions'
+
 export interface SessionDefaultModelBinding extends ModelBinding {
   useGlobalActiveModel: boolean
+}
+
+export interface ClaudeCodeConfig {
+  id: string
+  name: string
+  providerId: string
+  defaultModelId: string
+  smallFastModelId: string
+  sonnetModelId: string
+  opusModelId: string
+  haikuModelId: string
+  permissionOptions: ClaudeCodePermissionOption[]
+}
+
+export interface CodexConfig {
+  id: string
+  name: string
+  providerId: string
+  modelId: string
 }
 
 export type PromptRecommendationModelBinding = ModelBinding | 'disabled' | null
@@ -84,6 +105,91 @@ export interface RecentWorkingTarget {
 }
 
 const MAX_RECENT_WORKING_TARGETS = 8
+const DEFAULT_AI_CODING_CONFIG_ID = 'default'
+
+function readStringField(item: Record<string, unknown>, key: string): string {
+  const value = item[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function sanitizeClaudeCodePermissionOptions(value: unknown): ClaudeCodePermissionOption[] {
+  if (!Array.isArray(value)) return []
+  return value.includes('dangerouslySkipPermissions') ? ['dangerouslySkipPermissions'] : []
+}
+
+export function createDefaultClaudeCodeConfig(): ClaudeCodeConfig {
+  return {
+    id: DEFAULT_AI_CODING_CONFIG_ID,
+    name: '默认 1',
+    providerId: '',
+    defaultModelId: '',
+    smallFastModelId: '',
+    sonnetModelId: '',
+    opusModelId: '',
+    haikuModelId: '',
+    permissionOptions: []
+  }
+}
+
+export function createDefaultCodexConfig(): CodexConfig {
+  return {
+    id: DEFAULT_AI_CODING_CONFIG_ID,
+    name: '默认 1',
+    providerId: '',
+    modelId: ''
+  }
+}
+
+function sanitizeClaudeCodeConfigs(configs: unknown): ClaudeCodeConfig[] {
+  if (!Array.isArray(configs)) return [createDefaultClaudeCodeConfig()]
+
+  const usedIds = new Set<string>()
+  const sanitized = configs
+    .map((item, index): ClaudeCodeConfig | null => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+      const record = item as Record<string, unknown>
+      const rawId = readStringField(record, 'id').trim() || `claude-${index + 1}`
+      const id = usedIds.has(rawId) ? `${rawId}-${index + 1}` : rawId
+      usedIds.add(id)
+      return {
+        id,
+        name: readStringField(record, 'name').trim() || `默认 ${index + 1}`,
+        providerId: readStringField(record, 'providerId'),
+        defaultModelId: readStringField(record, 'defaultModelId'),
+        smallFastModelId: readStringField(record, 'smallFastModelId'),
+        sonnetModelId: readStringField(record, 'sonnetModelId'),
+        opusModelId: readStringField(record, 'opusModelId'),
+        haikuModelId: readStringField(record, 'haikuModelId'),
+        permissionOptions: sanitizeClaudeCodePermissionOptions(record.permissionOptions)
+      }
+    })
+    .filter((item): item is ClaudeCodeConfig => Boolean(item))
+
+  return sanitized.length > 0 ? sanitized : [createDefaultClaudeCodeConfig()]
+}
+
+function sanitizeCodexConfigs(configs: unknown): CodexConfig[] {
+  if (!Array.isArray(configs)) return [createDefaultCodexConfig()]
+
+  const usedIds = new Set<string>()
+  const sanitized = configs
+    .map((item, index): CodexConfig | null => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+      const record = item as Record<string, unknown>
+      const rawId = readStringField(record, 'id').trim() || `codex-${index + 1}`
+      const id = usedIds.has(rawId) ? `${rawId}-${index + 1}` : rawId
+      usedIds.add(id)
+      return {
+        id,
+        name: readStringField(record, 'name').trim() || `默认 ${index + 1}`,
+        providerId: readStringField(record, 'providerId'),
+        modelId: readStringField(record, 'modelId')
+      }
+    })
+    .filter((item): item is CodexConfig => Boolean(item))
+
+  return sanitized.length > 0 ? sanitized : [createDefaultCodexConfig()]
+}
 
 function normalizeWorkingFolderPath(folderPath: string): string {
   const trimmed = folderPath.trim()
@@ -328,6 +434,8 @@ interface SettingsStore {
   promptRecommendationModels: PromptRecommendationModelBindings
   newSessionDefaultModel: SessionDefaultModelBinding | null
   mainModelSelectionMode: MainModelSelectionMode
+  claudeCodeConfigs: ClaudeCodeConfig[]
+  codexConfigs: CodexConfig[]
   projectDefaultDirectoryMode: ProjectDefaultDirectoryMode
   projectDefaultDirectory: string
   lastProjectDirectory: string
@@ -441,6 +549,8 @@ export const useSettingsStore = create<SettingsStore>()(
       },
       newSessionDefaultModel: null,
       mainModelSelectionMode: 'auto',
+      claudeCodeConfigs: [createDefaultClaudeCodeConfig()],
+      codexConfigs: [createDefaultCodexConfig()],
       projectDefaultDirectoryMode: 'last-used',
       projectDefaultDirectory: '',
       lastProjectDirectory: '',
@@ -480,7 +590,7 @@ export const useSettingsStore = create<SettingsStore>()(
     }),
     {
       name: 'opencowork-settings',
-      version: 26,
+      version: 28,
       storage: createJSONStorage(() => ipcStorage),
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Record<string, unknown>
@@ -543,6 +653,8 @@ export const useSettingsStore = create<SettingsStore>()(
         if (state.mainModelSelectionMode === undefined) {
           state.mainModelSelectionMode = 'auto'
         }
+        state.claudeCodeConfigs = sanitizeClaudeCodeConfigs(state.claudeCodeConfigs)
+        state.codexConfigs = sanitizeCodexConfigs(state.codexConfigs)
         if (state.projectDefaultDirectoryMode === undefined) {
           state.projectDefaultDirectoryMode = 'last-used'
         }
@@ -819,6 +931,8 @@ export const useSettingsStore = create<SettingsStore>()(
         promptRecommendationModels: state.promptRecommendationModels,
         newSessionDefaultModel: state.newSessionDefaultModel,
         mainModelSelectionMode: state.mainModelSelectionMode,
+        claudeCodeConfigs: state.claudeCodeConfigs,
+        codexConfigs: state.codexConfigs,
         projectDefaultDirectoryMode: state.projectDefaultDirectoryMode,
         projectDefaultDirectory: state.projectDefaultDirectory,
         lastProjectDirectory: state.lastProjectDirectory,

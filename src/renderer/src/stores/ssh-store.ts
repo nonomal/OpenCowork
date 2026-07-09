@@ -47,6 +47,7 @@ export interface SshTab {
   connectionId: string
   connectionName: string
   title: string
+  surface?: 'bottom' | 'right'
   projectId?: string | null
   filePath?: string
   status?: 'connecting' | 'connected' | 'error'
@@ -613,6 +614,7 @@ interface SshStore {
   openTab: (tab: SshTab) => void
   closeTab: (tabId: string) => void
   setActiveTab: (tabId: string | null) => void
+  setTabSurface: (tabId: string, surface: 'bottom' | 'right') => void
   replaceTab: (tabId: string, tab: SshTab) => void
 
   // Session file tabs
@@ -1471,6 +1473,7 @@ export const useSshStore = create<SshStore>()((set, get) => ({
           connectionName: conn.name,
           title: conn.name,
           projectId: projectId ?? null,
+          surface: 'bottom',
           status: 'connecting'
         }
       ],
@@ -1498,7 +1501,8 @@ export const useSshStore = create<SshStore>()((set, get) => ({
       connectionId,
       connectionName: conn.name,
       title: conn.name,
-      projectId: projectId ?? null
+      projectId: projectId ?? null,
+      surface: stillOpen.surface ?? 'bottom'
     })
     get().setActiveTerminal(sessionId)
     return resolvedTabId
@@ -1609,6 +1613,11 @@ export const useSshStore = create<SshStore>()((set, get) => ({
     set((s) => ({
       activeTabId: tabId,
       workspaceSection: tabId ? 'terminal' : s.workspaceSection
+    })),
+
+  setTabSurface: (tabId, surface) =>
+    set((s) => ({
+      openTabs: s.openTabs.map((tab) => (tab.id === tabId ? { ...tab, surface } : tab))
     })),
 
   replaceTab: (tabId, tab) => {
