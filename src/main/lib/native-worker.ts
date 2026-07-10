@@ -34,6 +34,29 @@ const REQUIRED_NATIVE_WORKER_METHODS = [
   'sync/files-delete'
 ]
 
+let nativeWorkerStartupBarrier: Promise<void> | null = null
+
+/**
+ * Delay the first worker spawn until process-wide startup prerequisites (notably
+ * the macOS login-shell environment) settle. Requests may be registered and
+ * queued immediately, allowing the BrowserWindow to load without spawning the
+ * worker with a stale PATH.
+ */
+export function setNativeWorkerStartupBarrier(barrier: Promise<void>): void {
+  const guarded = barrier.catch((error) => {
+    console.warn(
+      '[NativeWorker] startup barrier failed; continuing with current environment:',
+      error
+    )
+  })
+  const tracked = guarded.finally(() => {
+    if (nativeWorkerStartupBarrier === tracked) {
+      nativeWorkerStartupBarrier = null
+    }
+  })
+  nativeWorkerStartupBarrier = tracked
+}
+
 type PendingRequest = {
   method: string
   startedAt: number
@@ -100,6 +123,9 @@ class NativeWorkerManager {
   }
 
   async ensureStarted(): Promise<void> {
+    if (this.isRunning) return
+    const startupBarrier = nativeWorkerStartupBarrier
+    if (startupBarrier) await startupBarrier
     if (this.isRunning) return
     // A caller explicitly asking for the worker re-arms supervision even if a
     // prior stop() disabled it (e.g. macOS window-all-closed then reopen).

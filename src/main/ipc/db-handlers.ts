@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain as electronIpcMain } from 'electron'
 import { initializeDatabase } from '../db/database'
 import * as sessionsDao from '../db/sessions-dao'
 import * as projectsDao from '../db/projects-dao'
@@ -231,7 +231,15 @@ function normalizeGoalEventMetadata(value: unknown): Record<string, unknown> | n
 }
 
 export async function registerDbHandlers(options: RegisterDbHandlersOptions = {}): Promise<void> {
-  await initializeDatabase()
+  const databaseReady = initializeDatabase()
+  const ipcMain = {
+    handle(channel: string, listener: Parameters<typeof electronIpcMain.handle>[1]): void {
+      electronIpcMain.handle(channel, async (event, ...args) => {
+        await databaseReady
+        return listener(event, ...args)
+      })
+    }
+  }
 
   async function addMessagesBatch(msgs: messagesDao.MessageInput[]): Promise<{ success: boolean }> {
     if (!Array.isArray(msgs) || msgs.length === 0) return { success: true }
@@ -908,4 +916,6 @@ export async function registerDbHandlers(options: RegisterDbHandlersOptions = {}
     await tasksDao.deleteTasksBySession(sessionId)
     return encodeMessagePackPayload({ success: true })
   })
+
+  await databaseReady
 }

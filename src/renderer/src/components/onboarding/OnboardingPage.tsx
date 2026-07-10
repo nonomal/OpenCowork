@@ -56,6 +56,7 @@ import {
   resolveLanguageLabel,
   resolveLanguageName
 } from '@renderer/lib/i18n-language'
+import { changeI18nLanguage } from '@renderer/locales'
 import {
   isMissingFileErrorMessage,
   joinFsPath,
@@ -239,7 +240,7 @@ function StepButton({
 }
 
 export function OnboardingPage(): React.JSX.Element {
-  const { t, i18n } = useTranslation('common')
+  const { t } = useTranslation('common')
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   const persistedLanguage = useSettingsStore((s) => s.language)
   const persistedName = useSettingsStore((s) => s.userName)
@@ -288,9 +289,9 @@ export function OnboardingPage(): React.JSX.Element {
     (nextLanguage: OnboardingLanguage) => {
       setLanguage(nextLanguage)
       updateSettings({ language: nextLanguage })
-      void i18n.changeLanguage(nextLanguage)
+      void changeI18nLanguage(nextLanguage)
     },
-    [i18n, updateSettings]
+    [updateSettings]
   )
 
   const loadSoulTemplates = useCallback(async (): Promise<void> => {

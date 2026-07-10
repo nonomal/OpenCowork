@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import i18n from '../../locales'
+import i18n, { changeI18nLanguage } from '../../locales'
 import { useSettingsStore } from '@renderer/stores/settings-store'
 import { usePetStore } from '@renderer/stores/pet-store'
 import { usePetSkinStore } from '@renderer/stores/pet-skin-store'
@@ -26,7 +26,7 @@ export function PetWindow(): React.JSX.Element {
 
   useEffect(() => {
     if (i18n.language !== language) {
-      void i18n.changeLanguage(language)
+      void changeI18nLanguage(language)
     }
   }, [language])
 

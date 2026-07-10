@@ -1,11 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
 import { useTranslation } from 'react-i18next'
-import { Layout } from './components/layout/Layout'
-import { DetachedSessionPage } from './components/layout/DetachedSessionPage'
-import { SshPage } from './components/ssh/SshPage'
-import { OnboardingPage } from './components/onboarding/OnboardingPage'
 import { Toaster } from './components/ui/sonner'
 import { Button } from './components/ui/button'
 import { ConfirmDialogProvider } from './components/ui/confirm-dialog'
@@ -31,29 +26,19 @@ import { useSshStore } from './stores/ssh-store'
 import { useTaskStore } from './stores/task-store'
 import { useTeamStore } from './stores/team-store'
 import { useUIStore } from './stores/ui-store'
-import { registerAllTools, updateWebSearchToolRegistration } from './lib/tools'
-import { updateAppPluginToolRegistration } from './lib/app-plugin'
-import { refreshExtensionTools } from './lib/extensions/extension-tools'
 import { registerAllViewers } from './lib/preview/register-viewers'
-import {
-  createMarkdownComponents,
-  MARKDOWN_REHYPE_PLUGINS,
-  MARKDOWN_REMARK_PLUGINS
-} from './lib/preview/viewers/markdown-components'
 import { initChannelEventListener } from './stores/channel-store'
 import { usePluginAutoReply } from './hooks/use-plugin-auto-reply'
 import { toast } from 'sonner'
-import i18n from './locales'
+import i18n, { changeI18nLanguage } from './locales'
 import { cronEvents } from './lib/tools/cron-events'
 import { useCronStore, type CronAgentLogEntry } from './stores/cron-store'
 import { ipcClient } from './lib/ipc/ipc-client'
 import { IPC } from './lib/ipc/channels'
-import { attachRendererToolBridge } from './lib/ipc/renderer-tool-bridge'
 import { agentStream } from './lib/ipc/agent-stream-receiver'
 import { nanoid } from 'nanoid'
 import type { UnifiedMessage } from './lib/api/types'
 import { NotifyToastContainer } from './components/notify/NotifyWindow'
-import { ChangelogDialog } from './components/changelog/ChangelogDialog'
 import {
   installAgentRuntimeSyncListener,
   withAgentRuntimeSyncSuppressed,
@@ -67,17 +52,51 @@ import {
   subscribeGlobalMemoryUpdates,
   type GlobalMemorySnapshot
 } from './lib/agent/memory-files'
+import './stores/quota-store'
+
+const Layout = lazy(async () => {
+  const mod = await import('./components/layout/Layout')
+  return { default: mod.Layout }
+})
+
+const DetachedSessionPage = lazy(async () => {
+  const mod = await import('./components/layout/DetachedSessionPage')
+  return { default: mod.DetachedSessionPage }
+})
+
+const OnboardingPage = lazy(async () => {
+  const mod = await import('./components/onboarding/OnboardingPage')
+  return { default: mod.OnboardingPage }
+})
+
+const ChangelogDialog = lazy(async () => {
+  const mod = await import('./components/changelog/ChangelogDialog')
+  return { default: mod.ChangelogDialog }
+})
+
+const UpdateReleaseNotes = lazy(async () => {
+  const mod = await import('./components/updater/UpdateReleaseNotes')
+  return { default: mod.UpdateReleaseNotes }
+})
 
 // Register synchronous viewers immediately at startup
 registerAllViewers()
 initProviderStore()
 initAppPluginStore()
-attachRendererToolBridge()
 agentStream.attach()
+
+// UI-bound runtime bridges are needed only after the app surface begins mounting.
+// Loading them asynchronously keeps their tool implementations off the bootstrap path.
+void import('./lib/ipc/renderer-tool-bridge')
+  .then(({ attachRendererToolBridge }) => attachRendererToolBridge())
+  .catch((err) => console.error('[App] Failed to attach renderer tool bridge:', err))
 
 // Register tools (async because SubAgents are loaded from .md files via IPC)
 initExtensionStore()
-  .then(() => registerAllTools())
+  .then(async () => {
+    const { registerAllTools } = await import('./lib/tools')
+    return registerAllTools()
+  })
   .catch((err) => console.error('[App] Failed to register tools:', err))
 
 // Initialize channel incoming event listener
@@ -86,6 +105,32 @@ initChannelEventListener()
 const GLOBAL_MEMORY_REMINDER_MARKER = '[global-memory-update]'
 const RENDERER_OOM_RECOVERY_PARAM = 'ocRecoverRendererOom'
 const globalMemoryVersionBySession = new Map<string, number>()
+
+function AppSurfaceFallback(): React.JSX.Element {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
+      <Loader2 className="size-5 animate-spin text-muted-foreground" />
+    </div>
+  )
+}
+
+function syncWebSearchToolRegistration(enabled: boolean): void {
+  void import('./lib/tools')
+    .then(({ updateWebSearchToolRegistration }) => updateWebSearchToolRegistration(enabled))
+    .catch((error) => console.error('[App] Failed to update web search tool:', error))
+}
+
+function syncAppPluginToolRegistration(): void {
+  void import('./lib/app-plugin')
+    .then(({ updateAppPluginToolRegistration }) => updateAppPluginToolRegistration())
+    .catch((error) => console.error('[App] Failed to update app plugin tools:', error))
+}
+
+function reloadExtensionTools(): void {
+  void import('./lib/extensions/extension-tools')
+    .then(({ refreshExtensionTools }) => refreshExtensionTools())
+    .catch((error) => console.error('[App] Failed to refresh extension tools:', error))
+}
 
 function normalizeVersion(version: string | null | undefined): string {
   return (version ?? '').trim().replace(/^v/i, '')
@@ -114,11 +159,6 @@ interface AvailableUpdate {
   currentVersion: string
   newVersion: string
   releaseNotes: string
-}
-
-function isSshWindowView(): boolean {
-  const search = new URLSearchParams(window.location.search)
-  return search.get('appView') === 'ssh'
 }
 
 function getAppView(): string | null {
@@ -196,7 +236,6 @@ function App(): React.JSX.Element {
   const appView = useMemo(() => getAppView(), [])
   const detachedSessionId = useMemo(() => getDetachedSessionId(), [])
   const sessionWindowView = appView === 'session' && !!detachedSessionId
-  const sshWindowView = useMemo(() => isSshWindowView(), [])
   const rendererOomRecoveryRef = useRef(consumeRendererOomRecoveryFlag())
   const cronLogBufferRef = useRef<CronAgentLogEntry[]>([])
   const cronLogFlushTimerRef = useRef<number | null>(null)
@@ -206,7 +245,7 @@ function App(): React.JSX.Element {
   )
 
   // Initialize plugin auto-reply agent loop listener only in the main app window.
-  usePluginAutoReply(!sessionWindowView && !sshWindowView)
+  usePluginAutoReply(!sessionWindowView)
 
   useEffect(() => {
     if (useSettingsStore.persist.hasHydrated()) {
@@ -360,13 +399,13 @@ function App(): React.JSX.Element {
 
   // Navigate to the pet studio when requested from the pet window's menu.
   useEffect(() => {
-    if (sessionWindowView || sshWindowView) return
+    if (sessionWindowView) return
     return ipcClient.on('pet:sync-event', (payload) => {
       if ((payload as { kind?: string } | null)?.kind === 'open-studio') {
         useUIStore.getState().openSettingsPage('pet')
       }
     })
-  }, [sessionWindowView, sshWindowView])
+  }, [sessionWindowView])
 
   useEffect(() => {
     const offSessionUpdated = ipcClient.on(IPC.CHAT_SESSION_UPDATED, (data: unknown) => {
@@ -808,28 +847,28 @@ function App(): React.JSX.Element {
   const language = useSettingsStore((s) => s.language)
   useEffect(() => {
     if (i18n.language !== language) {
-      i18n.changeLanguage(language)
+      void changeI18nLanguage(language)
     }
   }, [language])
 
   // Update web search tool registration based on settings
   const webSearchEnabled = useSettingsStore((s) => s.webSearchEnabled)
   useEffect(() => {
-    updateWebSearchToolRegistration(webSearchEnabled)
+    syncWebSearchToolRegistration(webSearchEnabled)
   }, [webSearchEnabled])
 
   useEffect(() => {
-    updateAppPluginToolRegistration()
+    syncAppPluginToolRegistration()
 
     const unsubscribePlugin = useAppPluginStore.subscribe(() => {
-      updateAppPluginToolRegistration()
+      syncAppPluginToolRegistration()
     })
     const unsubscribeProvider = useProviderStore.subscribe(() => {
-      updateAppPluginToolRegistration()
+      syncAppPluginToolRegistration()
     })
     const unsubscribeChat = useChatStore.subscribe((state, previousState) => {
       if (state.activeProjectId !== previousState.activeProjectId) {
-        updateAppPluginToolRegistration()
+        syncAppPluginToolRegistration()
       }
     })
 
@@ -843,7 +882,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const unsubscribeChat = useChatStore.subscribe((state, previousState) => {
       if (state.activeProjectId !== previousState.activeProjectId) {
-        void refreshExtensionTools()
+        reloadExtensionTools()
       }
     })
 
@@ -867,26 +906,14 @@ function App(): React.JSX.Element {
   const hasUpdateNotice = Boolean(availableUpdate || downloadedUpdateVersion)
   const updateDialogVersion = downloadedUpdateVersion ?? availableUpdate?.newVersion ?? ''
 
-  if (sshWindowView) {
-    return (
-      <ErrorBoundary>
-        <ThemeProvider defaultTheme={theme}>
-          <ThemeRuntimeSync />
-          <SshPage />
-          <Toaster position="bottom-left" theme="system" richColors />
-          <ConfirmDialogProvider />
-          <NotifyToastContainer />
-        </ThemeProvider>
-      </ErrorBoundary>
-    )
-  }
-
   if (sessionWindowView && detachedSessionId) {
     return (
       <ErrorBoundary>
         <ThemeProvider defaultTheme={theme}>
           <ThemeRuntimeSync />
-          <DetachedSessionPage sessionId={detachedSessionId} />
+          <Suspense fallback={<AppSurfaceFallback />}>
+            <DetachedSessionPage sessionId={detachedSessionId} />
+          </Suspense>
           <Toaster position="bottom-left" theme="system" richColors />
           <ConfirmDialogProvider />
           <NotifyToastContainer />
@@ -913,7 +940,9 @@ function App(): React.JSX.Element {
       <ErrorBoundary>
         <ThemeProvider defaultTheme={theme}>
           <ThemeRuntimeSync />
-          <OnboardingPage />
+          <Suspense fallback={<AppSurfaceFallback />}>
+            <OnboardingPage />
+          </Suspense>
           <Toaster position="bottom-left" theme="system" richColors />
         </ThemeProvider>
       </ErrorBoundary>
@@ -924,19 +953,21 @@ function App(): React.JSX.Element {
     <ErrorBoundary>
       <ThemeProvider defaultTheme={theme}>
         <ThemeRuntimeSync />
-        <Layout
-          updateInfo={
-            hasUpdateNotice
-              ? {
-                  newVersion: updateDialogVersion,
-                  downloading: updateDownloadPending,
-                  downloadProgress: updateDownloadProgress,
-                  downloaded: !!downloadedUpdateVersion
-                }
-              : null
-          }
-          onOpenUpdateDialog={() => setUpdateDialogOpen(true)}
-        />
+        <Suspense fallback={<AppSurfaceFallback />}>
+          <Layout
+            updateInfo={
+              hasUpdateNotice
+                ? {
+                    newVersion: updateDialogVersion,
+                    downloading: updateDownloadPending,
+                    downloadProgress: updateDownloadProgress,
+                    downloaded: !!downloadedUpdateVersion
+                  }
+                : null
+            }
+            onOpenUpdateDialog={() => setUpdateDialogOpen(true)}
+          />
+        </Suspense>
 
         <Dialog open={hasUpdateNotice && updateDialogOpen} onOpenChange={setUpdateDialogOpen}>
           <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-2xl">
@@ -967,13 +998,11 @@ function App(): React.JSX.Element {
               </div>
               {availableUpdate?.releaseNotes ? (
                 <div className="prose prose-sm dark:prose-invert max-w-none">
-                  <ReactMarkdown
-                    remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-                    rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                    components={createMarkdownComponents()}
+                  <Suspense
+                    fallback={<div className="h-20 animate-pulse rounded-md bg-muted/50" />}
                   >
-                    {availableUpdate.releaseNotes}
-                  </ReactMarkdown>
+                    <UpdateReleaseNotes>{availableUpdate.releaseNotes}</UpdateReleaseNotes>
+                  </Suspense>
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">{t('app.update.noReleaseNotes')}</p>
@@ -1034,10 +1063,14 @@ function App(): React.JSX.Element {
           </DialogContent>
         </Dialog>
 
-        <ChangelogDialog
-          open={changelogDialogOpen}
-          onOpenChange={(open) => useUIStore.getState().setChangelogDialogOpen(open)}
-        />
+        {changelogDialogOpen ? (
+          <Suspense fallback={null}>
+            <ChangelogDialog
+              open
+              onOpenChange={(open) => useUIStore.getState().setChangelogDialogOpen(open)}
+            />
+          </Suspense>
+        ) : null}
 
         <Toaster position="bottom-left" theme="system" richColors />
         <ConfirmDialogProvider />

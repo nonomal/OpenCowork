@@ -7,18 +7,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@renderer/comp
 import { TooltipProvider } from '@renderer/components/ui/tooltip'
 import { TitleBar } from './TitleBar'
 import { WorkspaceSidebar } from './WorkspaceSidebar'
-import { RightPanel } from './RightPanel'
-import { SubAgentExecutionDetail } from './SubAgentExecutionDetail'
 import { ChatHomePage } from '@renderer/components/chat/ChatHomePage'
 import { ProjectHomePage } from '@renderer/components/chat/ProjectHomePage'
-import { ProjectArchivePage } from '@renderer/components/chat/ProjectArchivePage'
-import { GitPage } from '@renderer/components/chat/GitPage'
 import { KeyboardShortcutsDialog } from '@renderer/components/settings/KeyboardShortcutsDialog'
 import { PermissionDialog } from '@renderer/components/cowork/PermissionDialog'
 import { ConversationGuideDialog } from '@renderer/components/chat/ConversationGuideDialog'
-import { SettingsPage } from '@renderer/components/settings/SettingsPage'
 import { CommandPalette } from './CommandPalette'
-import { SessionConversationPane } from './SessionConversationPane'
 import { ErrorBoundary } from '@renderer/components/error-boundary'
 import { useUIStore, type AppMode } from '@renderer/stores/ui-store'
 import { useChatStore, type SessionMode } from '@renderer/stores/chat-store'
@@ -69,6 +63,36 @@ const DrawPage = lazy(async () => {
 const TasksPage = lazy(async () => {
   const mod = await import('../tasks/TasksPage')
   return { default: mod.TasksPage }
+})
+
+const SettingsPage = lazy(async () => {
+  const mod = await import('@renderer/components/settings/SettingsPage')
+  return { default: mod.SettingsPage }
+})
+
+const ProjectArchivePage = lazy(async () => {
+  const mod = await import('@renderer/components/chat/ProjectArchivePage')
+  return { default: mod.ProjectArchivePage }
+})
+
+const GitPage = lazy(async () => {
+  const mod = await import('@renderer/components/chat/GitPage')
+  return { default: mod.GitPage }
+})
+
+const SessionConversationPane = lazy(async () => {
+  const mod = await import('./SessionConversationPane')
+  return { default: mod.SessionConversationPane }
+})
+
+const RightPanel = lazy(async () => {
+  const mod = await import('./RightPanel')
+  return { default: mod.RightPanel }
+})
+
+const SubAgentExecutionDetail = lazy(async () => {
+  const mod = await import('./SubAgentExecutionDetail')
+  return { default: mod.SubAgentExecutionDetail }
 })
 
 const MIN_MAIN_WORKSPACE_WIDTH_WITH_SIDEBAR = 720
@@ -787,14 +811,18 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
                 key={chatView === 'channels' ? 'project-channels' : 'project-archive'}
                 className="flex flex-1 min-w-0 flex-col overflow-hidden"
               >
-                <ProjectArchivePage />
+                <Suspense fallback={<LazyPageFallback />}>
+                  <ProjectArchivePage />
+                </Suspense>
               </PageTransition>
             ) : chatView === 'git' ? (
               <PageTransition
                 key="project-git"
                 className="flex flex-1 min-w-0 flex-col overflow-hidden"
               >
-                <GitPage />
+                <Suspense fallback={<LazyPageFallback />}>
+                  <GitPage />
+                </Suspense>
               </PageTransition>
             ) : (
               <PageTransition
@@ -863,10 +891,12 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
                     </div>
                   )}
                 >
-                  <div className="flex flex-1 overflow-hidden">
-                    <SessionConversationPane windowHeaderOwnsTitle />
-                    <RightPanel />
-                  </div>
+                  <Suspense fallback={<LazyPageFallback />}>
+                    <div className="flex flex-1 overflow-hidden">
+                      <SessionConversationPane windowHeaderOwnsTitle />
+                      <RightPanel />
+                    </div>
+                  </Suspense>
                 </ErrorBoundary>
               </PageTransition>
             )}
@@ -895,11 +925,13 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
               {t('subAgentsPanel.executionDetailTitle', { defaultValue: 'Execution details' })}
             </DialogTitle>
           </DialogHeader>
-          <SubAgentExecutionDetail
-            toolUseId={subAgentExecutionDetailToolUseId}
-            inlineText={subAgentExecutionDetailInlineText ?? undefined}
-            onClose={closeSubAgentExecutionDetail}
-          />
+          <Suspense fallback={<LazyPageFallback />}>
+            <SubAgentExecutionDetail
+              toolUseId={subAgentExecutionDetailToolUseId}
+              inlineText={subAgentExecutionDetailInlineText ?? undefined}
+              onClose={closeSubAgentExecutionDetail}
+            />
+          </Suspense>
         </DialogContent>
       </Dialog>
 

@@ -9,6 +9,7 @@ import {
   nativeImage,
   dialog,
   session,
+  net,
   type IpcMainEvent
 } from 'electron'
 
@@ -46,11 +47,11 @@ import { registerAgentsHandlers } from './ipc/agents-handlers'
 import { registerPromptsHandlers } from './ipc/prompts-handlers'
 import { registerCommandsHandlers } from './ipc/commands-handlers'
 import { registerProcessManagerHandlers, killAllManagedProcesses } from './ipc/process-manager'
-import { registerTerminalHandlers, killAllTerminalSessions } from './ipc/terminal-handlers'
 import { registerDbHandlers } from './ipc/db-handlers'
 import { registerGoalRuntimeHandlers } from './ipc/goal-runtime-handlers'
 import { registerMemoryAutomationHandlers } from './ipc/memory-automation-handlers'
 import { registerConfigHandlers } from './ipc/secure-key-store'
+import { registerAiProviderHandlers } from './ipc/ai-provider-handlers'
 import { registerExtensionHandlers } from './ipc/extension-handlers'
 import { registerChannelHandlers, autoStartChannels } from './ipc/channel-handlers'
 import { ChannelManager } from './channels/channel-manager'
@@ -69,27 +70,28 @@ import { registerScreenshotHandlers } from './ipc/screenshot-handlers'
 import { registerWebSearchHandlers } from './ipc/web-search-handlers'
 import { registerBrowserHandlers } from './ipc/browser-handlers'
 import { registerOauthHandlers } from './ipc/oauth-handlers'
-import { registerImageGifHandlers } from './ipc/image-gif-handlers'
 import { registerGitHandlers } from './ipc/git-handlers'
-import { registerMigrationHandlers } from './ipc/migration-handlers'
 import { registerSyncHandlers } from './ipc/sync-handlers'
 import { registerHooksHandlers } from './ipc/hooks-handlers'
 import { initializeHookRuntimeSettings } from './hooks/hooks-service'
 import { registerSidecarHandlers, getSidecarManager } from './ipc/sidecar-manager'
-import { getNativeWorker, stopNativeWorker } from './lib/native-worker'
+import {
+  getNativeWorker,
+  setNativeWorkerStartupBarrier,
+  stopNativeWorker
+} from './lib/native-worker'
 import { registerTeamRuntimeHandlers } from './ipc/team-runtime-handlers'
 import { loadPersistedJobs, cancelAllJobs } from './cron/cron-scheduler'
 import { McpManager } from './mcp/mcp-manager'
 import { closeDb } from './db/database'
 import { cleanupExpiredUsageEvents } from './db/usage-events-dao'
-import { registerSshHandlers, closeAllSshSessions } from './ipc/ssh-handlers'
 import {
   writeCrashLog,
+  writeCrashLogDeferred,
   getCrashLogDir,
   getNativeCrashDumpsDir,
   startNativeCrashReporter
 } from './crash-logger'
-import { setupAutoUpdater } from './updater'
 import { safeSendMessagePackToWindow } from './window-ipc'
 import { registerMessagePackHandler } from './ipc/messagepack-handler'
 import {
@@ -104,39 +106,10 @@ import {
   resolveBrowserSessionStorageMode
 } from './browser/browser-emulation'
 
-import { createFeishuService } from './channels/providers/feishu/feishu-service'
-import { FeishuApi } from './channels/providers/feishu/feishu-api'
-import { createDingTalkService } from './channels/providers/dingtalk/dingtalk-service'
-import { createTelegramService } from './channels/providers/telegram/telegram-service'
-import { parseTelegramWsMessage } from './channels/providers/telegram/parse-ws-message'
-import { createDiscordService } from './channels/providers/discord/discord-service'
-import { parseDiscordWsMessage } from './channels/providers/discord/parse-ws-message'
-import { createWhatsAppService } from './channels/providers/whatsapp/whatsapp-service'
-import { parseWhatsAppWsMessage } from './channels/providers/whatsapp/parse-ws-message'
-import { createWeComService } from './channels/providers/wecom/wecom-service'
-import { parseWeComWsMessage } from './channels/providers/wecom/parse-ws-message'
-import { createQQService } from './channels/providers/qq/qq-service'
-import { parseQQWsMessage } from './channels/providers/qq/parse-ws-message'
-import { createWeixinService } from './channels/providers/weixin/weixin-service'
 import { setPluginManager } from './channels/auto-reply'
 
 const channelManager = new ChannelManager()
 setPluginManager(channelManager)
-channelManager.registerFactory('feishu-bot', createFeishuService)
-// Feishu uses official SDK WSClient — no generic parser needed
-channelManager.registerFactory('dingtalk-bot', createDingTalkService)
-// DingTalk uses built-in Stream protocol handling — no generic parser needed
-channelManager.registerFactory('telegram-bot', createTelegramService)
-channelManager.registerParser('telegram-bot', parseTelegramWsMessage)
-channelManager.registerFactory('discord-bot', createDiscordService)
-channelManager.registerParser('discord-bot', parseDiscordWsMessage)
-channelManager.registerFactory('whatsapp-bot', createWhatsAppService)
-channelManager.registerParser('whatsapp-bot', parseWhatsAppWsMessage)
-channelManager.registerFactory('wecom-bot', createWeComService)
-channelManager.registerParser('wecom-bot', parseWeComWsMessage)
-channelManager.registerFactory('qq-bot', createQQService)
-channelManager.registerParser('qq-bot', parseQQWsMessage)
-channelManager.registerFactory('weixin-official', createWeixinService)
 
 const mcpManager = new McpManager()
 
@@ -144,6 +117,8 @@ let mainWindow: BrowserWindow | null = null
 let sshWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuiting = false
+let killAllTerminalSessions: () => void = () => {}
+let closeAllSshSessions: () => void = () => {}
 const detachedSessionWindows = new Map<string, BrowserWindow>()
 const visibleSessionWindowIds = new Map<string, Set<number>>()
 
@@ -334,6 +309,14 @@ function guessExtensionFromMimeType(mediaType?: string): string {
   }
 }
 
+async function downloadUrlBuffer(url: string): Promise<Buffer> {
+  const response = await net.fetch(url, { redirect: 'follow' })
+  if (!response.ok) {
+    throw new Error(`Image download failed: HTTP ${response.status}`)
+  }
+  return Buffer.from(await response.arrayBuffer())
+}
+
 function persistGeneratedImageFile(args: {
   buffer: Buffer
   mediaType?: string
@@ -391,7 +374,7 @@ async function handleImagePersistGenerated(
     if (typeof args.data === 'string' && args.data.trim()) {
       buffer = Buffer.from(args.data, 'base64')
     } else if (typeof args.url === 'string' && args.url.trim()) {
-      buffer = await FeishuApi.downloadUrl(args.url)
+      buffer = await downloadUrlBuffer(args.url)
     } else {
       return { error: 'Missing image data or url' }
     }
@@ -410,7 +393,7 @@ async function handleImageFetchBase64(
   args: ImageFetchBase64Args
 ): Promise<{ data?: string; mimeType?: string; error?: string }> {
   try {
-    const buffer = await FeishuApi.downloadUrl(args.url)
+    const buffer = await downloadUrlBuffer(args.url)
     const fileExt = extname(args.url.split('?')[0]).toLowerCase()
     const mimeType =
       fileExt === '.jpg' || fileExt === '.jpeg'
@@ -435,7 +418,7 @@ function recordStartupStep(
   phase: 'start' | 'success' | 'failure',
   details?: unknown
 ): void {
-  recordCrash('main_startup_step', {
+  writeCrashLogDeferred('main_startup_step', {
     step,
     phase,
     ...(details === undefined ? {} : { details })
@@ -443,25 +426,27 @@ function recordStartupStep(
 }
 
 function runLoggedStartupStep<T>(step: string, task: () => T): T {
+  const startedAt = Date.now()
   recordStartupStep(step, 'start')
   try {
     const result = task()
-    recordStartupStep(step, 'success')
+    recordStartupStep(step, 'success', { durationMs: Date.now() - startedAt })
     return result
   } catch (error) {
-    recordStartupStep(step, 'failure', { error })
+    recordStartupStep(step, 'failure', { durationMs: Date.now() - startedAt, error })
     throw error
   }
 }
 
 async function runLoggedStartupStepAsync<T>(step: string, task: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now()
   recordStartupStep(step, 'start')
   try {
     const result = await task()
-    recordStartupStep(step, 'success')
+    recordStartupStep(step, 'success', { durationMs: Date.now() - startedAt })
     return result
   } catch (error) {
-    recordStartupStep(step, 'failure', { error })
+    recordStartupStep(step, 'failure', { durationMs: Date.now() - startedAt, error })
     throw error
   }
 }
@@ -639,6 +624,90 @@ function scheduleUsageEventsStartupCleanup(): void {
   setTimeout(runCleanup, USAGE_EVENTS_STARTUP_CLEANUP_DELAY_MS)
   const interval = setInterval(runCleanup, USAGE_EVENTS_CLEANUP_INTERVAL_MS)
   interval.unref?.()
+}
+
+let deferredIpcHandlersPromise: Promise<void> | null = null
+
+function ensureDeferredIpcHandlers(): Promise<void> {
+  deferredIpcHandlersPromise ??= runLoggedStartupStepAsync(
+    'register_deferred_ipc_handlers',
+    async () => {
+      const [terminalModule, sshModule, imageGifModule, migrationModule] = await Promise.all([
+        import('./ipc/terminal-handlers'),
+        import('./ipc/ssh-handlers'),
+        import('./ipc/image-gif-handlers'),
+        import('./ipc/migration-handlers')
+      ])
+
+      terminalModule.registerTerminalHandlers()
+      killAllTerminalSessions = terminalModule.killAllTerminalSessions
+      closeAllSshSessions = sshModule.closeAllSshSessions
+      imageGifModule.registerImageGifHandlers()
+      migrationModule.registerMigrationHandlers()
+      await sshModule.registerSshHandlers()
+    }
+  )
+  return deferredIpcHandlersPromise
+}
+
+let channelStartupPromise: Promise<void> | null = null
+
+function startChannelServices(): Promise<void> {
+  channelStartupPromise ??= runLoggedStartupStepAsync('channel_services_startup', async () => {
+    const { registerBuiltInChannelProviders } = await import('./channels/register-providers')
+    registerBuiltInChannelProviders(channelManager)
+    await autoStartChannels(channelManager)
+  })
+  return channelStartupPromise
+}
+
+type AutoUpdaterModule = typeof import('./updater')
+
+const autoUpdateOptions = {
+  getMainWindow: (): BrowserWindow | null => mainWindow,
+  markAppWillQuit: (): void => {
+    isQuiting = true
+  }
+}
+
+let autoUpdaterStartupPromise: Promise<AutoUpdaterModule> | null = null
+
+function startAutoUpdater(): Promise<AutoUpdaterModule> {
+  autoUpdaterStartupPromise ??= import('./updater').then((updaterModule) => {
+    updaterModule.setupAutoUpdater(autoUpdateOptions)
+    return updaterModule
+  })
+
+  return autoUpdaterStartupPromise
+}
+
+function registerUpdaterHandlers(updaterReady: Promise<AutoUpdaterModule>): void {
+  const withUpdater = async <T>(
+    operation: (updaterModule: AutoUpdaterModule) => T | Promise<T>
+  ): Promise<T | { success: false; error: string }> => {
+    try {
+      return await operation(await updaterReady)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn('[Updater] Deferred startup failed:', error)
+      return { success: false, error: message }
+    }
+  }
+
+  // Register the lightweight IPC boundary before renderer navigation. The heavyweight
+  // electron-updater module still waits for settings and proxy initialization.
+  registerMessagePackHandler<void>('update:check', () =>
+    withUpdater((updaterModule) => updaterModule.requestUpdateCheck())
+  )
+  registerMessagePackHandler<void>('update:download', () =>
+    withUpdater((updaterModule) => updaterModule.requestUpdateDownload())
+  )
+  registerMessagePackHandler<void>('update:status', () =>
+    withUpdater((updaterModule) => updaterModule.getUpdateStatus())
+  )
+  registerMessagePackHandler<void>('update:install', () =>
+    withUpdater((updaterModule) => updaterModule.requestUpdateInstall(autoUpdateOptions))
+  )
 }
 
 function showMainWindow(): void {
@@ -1156,6 +1225,8 @@ async function createSshWindow(): Promise<void> {
     return
   }
 
+  await ensureDeferredIpcHandlers()
+
   sshWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -1257,32 +1328,55 @@ if (gotSingleInstanceLock) {
     optimizer = utils.optimizer
     is = utils.is
 
-    await runLoggedStartupStepAsync('sync_macos_shell_environment', syncMacOSShellEnvironment)
-    try {
-      await runLoggedStartupStepAsync('native_worker_settings_startup', async () => {
+    const shellEnvironmentReady = runLoggedStartupStepAsync(
+      'sync_macos_shell_environment',
+      syncMacOSShellEnvironment
+    )
+    setNativeWorkerStartupBarrier(shellEnvironmentReady)
+
+    const settingsStartup = runLoggedStartupStepAsync(
+      'native_worker_settings_startup',
+      async () => {
         await getNativeWorker().ensureStarted()
         await initializeSettingsCache()
         initializeHookRuntimeSettings()
-      })
-      console.log('[NativeWorker] settings startup ready')
-    } catch (error) {
-      console.warn(
-        `[NativeWorker] settings startup failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      )
-    }
-    await runLoggedStartupStepAsync('configure_system_proxy', configureSystemProxy)
-    const browserEmulationStatus = runLoggedStartupStep(
-      'configure_builtin_browser_session',
-      configureBuiltInBrowserSession
+      }
     )
+    void settingsStartup
+      .then(() => console.log('[NativeWorker] settings startup ready'))
+      .catch((error) => {
+        console.warn(
+          `[NativeWorker] settings startup failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        )
+      })
+
+    const networkConfigurationReady = settingsStartup
+      .catch(() => undefined)
+      .then(async () => {
+        await runLoggedStartupStepAsync('configure_system_proxy', configureSystemProxy)
+        const browserEmulationStatus = runLoggedStartupStep(
+          'configure_builtin_browser_session',
+          configureBuiltInBrowserSession
+        )
+        recordCrash('browser_emulation_configured', browserEmulationStatus)
+      })
+    void networkConfigurationReady.catch((error) => {
+      console.warn('[Main] Post-settings startup failed:', error)
+    })
+
+    const updaterReady = networkConfigurationReady.then(startAutoUpdater)
+    registerUpdaterHandlers(updaterReady)
+    void updaterReady.catch((error) => {
+      console.warn('[Updater] Startup prerequisite failed:', error)
+    })
 
     recordCrash('app_started', {
       userDataPath: app.getPath('userData'),
       crashLogDir: getCrashLogDir(),
       nativeCrashDumpsDir: getNativeCrashDumpsDir(),
-      browserEmulation: browserEmulationStatus
+      browserEmulation: 'initializing'
     })
     console.log(`[CrashLogger] Logs will be written to ${getCrashLogDir()}`)
     console.log(`[CrashLogger] Native crash dumps will be written to ${getNativeCrashDumpsDir()}`)
@@ -1332,31 +1426,22 @@ if (gotSingleInstanceLock) {
     registerPromptsHandlers()
     registerCommandsHandlers()
     registerProcessManagerHandlers()
-    registerTerminalHandlers()
 
-    try {
-      await runLoggedStartupStepAsync('native_worker_startup', () =>
-        getNativeWorker().ensureStarted()
-      )
-      console.log('[NativeWorker] startup ready')
-    } catch (error) {
-      console.warn(
-        `[NativeWorker] startup failed: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-
-    await runLoggedStartupStepAsync('register_db_handlers', () =>
+    const databaseReady = runLoggedStartupStepAsync('register_db_handlers', () =>
       registerDbHandlers({
         onSessionDeleted: (sessionId) => {
           closeDetachedSessionWindow(sessionId)
         }
       })
     )
+    void databaseReady.catch((error) => {
+      console.error('[DB] Startup failed:', error)
+    })
     registerGoalRuntimeHandlers()
     registerMemoryAutomationHandlers()
     registerConfigHandlers()
+    registerAiProviderHandlers()
     registerExtensionHandlers(mcpManager)
-    await runLoggedStartupStepAsync('register_ssh_handlers', registerSshHandlers)
     registerChannelHandlers(channelManager)
     registerMcpHandlers(mcpManager)
     registerCronHandlers()
@@ -1367,27 +1452,12 @@ if (gotSingleInstanceLock) {
 
     registerSidecarHandlers()
     registerTeamRuntimeHandlers()
-
-    try {
-      const sidecarReady = await runLoggedStartupStepAsync('sidecar_global_startup', () =>
-        getSidecarManager().ensureStarted()
-      )
-      console.log(`[Sidecar] global startup ${sidecarReady ? 'ready' : 'unavailable'}`)
-    } catch (error) {
-      console.warn(
-        `[Sidecar] global startup failed: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-
-    await runLoggedStartupStepAsync('load_persisted_jobs', loadPersistedJobs)
     registerNotifyHandlers()
     registerPetHandlers({ loadRendererWindow, showMainWindow })
     registerWebSearchHandlers()
     registerBrowserHandlers()
     registerOauthHandlers()
-    registerImageGifHandlers()
     registerGitHandlers()
-    registerMigrationHandlers()
     registerSyncHandlers()
 
     // Clipboard/image payloads can be large; renderer callers use MessagePack where possible.
@@ -1446,7 +1516,7 @@ if (gotSingleInstanceLock) {
         const win = BrowserWindow.getFocusedWindow()
         if (!win) return { canceled: true }
         try {
-          const buffer = await FeishuApi.downloadUrl(args.url)
+          const buffer = await downloadUrlBuffer(args.url)
           const rawName =
             args.defaultName?.trim() ||
             `image-${Date.now()}${extname(args.url.split('?')[0]) || '.png'}`
@@ -1463,25 +1533,45 @@ if (gotSingleInstanceLock) {
       }
     )
 
-    // Auto-start plugins with autoStart feature enabled
-    void autoStartChannels(channelManager)
-    void autoConnectMcpServers(mcpManager)
-
     setMacDockIcon()
     runLoggedStartupStep('create_main_window', createWindow)
     scheduleUsageEventsStartupCleanup()
 
     createTray()
 
-    void installBuiltinPets().then(() => openPetWindowOnStartupIfEnabled())
-
-    setupAutoUpdater({
-      getMainWindow: () => mainWindow,
-      markAppWillQuit: () => {
-        isQuiting = true
-      }
+    // Optional runtimes start after navigation begins. Their IPC boundaries are either
+    // already registered or installed in the background well before a user can invoke them.
+    void ensureDeferredIpcHandlers().catch((error) => {
+      console.warn('[Main] Deferred IPC startup failed:', error)
     })
+    void networkConfigurationReady
+      .then(() => startChannelServices())
+      .catch((error) => {
+        console.warn('[Channels] Startup failed:', error)
+      })
+    void networkConfigurationReady
+      .then(() => autoConnectMcpServers(mcpManager))
+      .catch((error) => {
+        console.warn('[MCP] Auto-connect failed:', error)
+      })
+    void runLoggedStartupStepAsync('sidecar_global_startup', () =>
+      getSidecarManager().ensureStarted()
+    )
+      .then((sidecarReady) => {
+        console.log(`[Sidecar] global startup ${sidecarReady ? 'ready' : 'unavailable'}`)
+      })
+      .catch((error) => {
+        console.warn(
+          `[Sidecar] global startup failed: ${error instanceof Error ? error.message : String(error)}`
+        )
+      })
+    void databaseReady
+      .then(() => runLoggedStartupStepAsync('load_persisted_jobs', loadPersistedJobs))
+      .catch((error) => {
+        console.warn('[Cron] Failed to restore persisted jobs:', error)
+      })
 
+    void installBuiltinPets().then(() => openPetWindowOnStartupIfEnabled())
     recordStartupStep('app_when_ready', 'success')
 
     app.on('activate', function () {

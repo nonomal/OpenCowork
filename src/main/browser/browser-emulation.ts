@@ -267,7 +267,20 @@ export function getBuiltInBrowserStorageSessions(): Session[] {
 }
 
 export function flushBuiltInBrowserStorage(): void {
-  for (const browserSession of getBuiltInBrowserStorageSessions()) {
+  // A second instance can quit before Electron exposes session.defaultSession.
+  // Treat storage flushing as best-effort during shutdown instead of turning
+  // that lifecycle race into an uncaught exception.
+  if (!app.isReady()) return
+
+  let browserSessions: Session[]
+  try {
+    browserSessions = getBuiltInBrowserStorageSessions()
+  } catch (error) {
+    console.warn('[Browser] Browser sessions unavailable during shutdown:', error)
+    return
+  }
+
+  for (const browserSession of browserSessions) {
     try {
       browserSession.flushStorageData()
     } catch (error) {

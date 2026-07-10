@@ -1,6 +1,5 @@
 import * as React from 'react'
 import { Check, ImageDown, Eye, Code2, ZoomIn } from 'lucide-react'
-import mermaid from 'mermaid'
 import { Button } from '@renderer/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@renderer/components/ui/dialog'
 import {
@@ -45,7 +44,7 @@ export function MermaidBlock({ code }: { code: string }): React.JSX.Element {
       }
 
       try {
-        applyMermaidTheme()
+        const mermaid = await applyMermaidTheme()
         const result = await mermaid.render(`mermaid-${renderId}-${Date.now()}`, source)
         if (cancelled) return
         setSvg(result.svg)

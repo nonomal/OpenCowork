@@ -1,4 +1,5 @@
 import 'katex/contrib/mhchem'
+import { lazy, Suspense } from 'react'
 import type { Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
@@ -7,7 +8,11 @@ import { useChatStore } from '@renderer/stores/chat-store'
 import { useUIStore } from '@renderer/stores/ui-store'
 import { IPC } from '../../ipc/channels'
 import { ipcClient } from '../../ipc/ipc-client'
-import { MermaidBlock } from './MermaidBlock'
+
+const MermaidBlock = lazy(async () => {
+  const mod = await import('./MermaidBlock')
+  return { default: mod.MermaidBlock }
+})
 
 const HTTP_URL_RE = /^https?:\/\//i
 const FILE_URL_RE = /^file:\/\//i
@@ -364,7 +369,17 @@ export function createMarkdownComponents(filePath?: string): Components {
       }
 
       if (language === 'mermaid') {
-        return <MermaidBlock code={code} />
+        return (
+          <Suspense
+            fallback={
+              <pre className="not-prose my-3 overflow-x-auto rounded-md border border-border/50 bg-muted/60 p-3 text-xs leading-relaxed text-foreground">
+                <code className="font-mono text-inherit">{code}</code>
+              </pre>
+            }
+          >
+            <MermaidBlock code={code} />
+          </Suspense>
+        )
       }
 
       return (

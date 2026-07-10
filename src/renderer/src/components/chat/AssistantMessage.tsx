@@ -3,7 +3,6 @@ import { useState, useCallback, useMemo, useEffect, useId, type ReactNode } from
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import Markdown, { type Components } from 'react-markdown'
-import mermaid from 'mermaid'
 import {
   applyMermaidTheme,
   copyMermaidToClipboard,
@@ -1004,7 +1003,7 @@ function MermaidCodeBlock({ code }: { code: string }): React.JSX.Element {
         return
       }
       try {
-        applyMermaidTheme()
+        const mermaid = await applyMermaidTheme()
         const result = await mermaid.render(`mermaid-chat-${diagramKey}-${Date.now()}`, source)
         if (cancelled) return
         setSvg(result.svg)

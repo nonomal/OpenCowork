@@ -44,18 +44,17 @@ export class ChannelManager {
       return
     }
 
-    const service = factory(instance, notify)
-
-    // Wire parser if the service extends BasePluginService
-    const parser = this.parsers.get(instance.type)
-    if (parser && typeof (service as BasePluginService).setParser === 'function') {
-      ;(service as BasePluginService).setParser(parser)
-    }
-
-    this.services.set(instance.id, service)
-    this.statuses.set(instance.id, 'stopped')
-
     try {
+      const service = await factory(instance, notify)
+
+      // Lazy factories may register their parser while resolving the provider module.
+      const parser = this.parsers.get(instance.type)
+      if (parser && typeof (service as BasePluginService).setParser === 'function') {
+        ;(service as BasePluginService).setParser(parser)
+      }
+
+      this.services.set(instance.id, service)
+      this.statuses.set(instance.id, 'stopped')
       await service.start()
       this.statuses.set(instance.id, 'running')
       console.log(`[ChannelManager] Started channel: ${instance.name} (${instance.id})`)

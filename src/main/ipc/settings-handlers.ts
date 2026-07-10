@@ -1,4 +1,4 @@
-import { session } from 'electron'
+import { app, session } from 'electron'
 import { getNativeWorker } from '../lib/native-worker'
 import { registerMessagePackHandler } from './messagepack-handler'
 
@@ -50,11 +50,12 @@ export async function reloadSettingsCache(): Promise<Record<string, unknown>> {
   return await hydratePromise
 }
 
-// Synchronous callers read the hydrated in-memory snapshot. Startup now hydrates this before use.
+// Synchronous callers read the in-memory snapshot. Before Electron is ready, keep this accessor
+// side-effect free: pre-ready browser-path setup and rejected second instances must not spawn the
+// Native Worker. Normal startup explicitly hydrates the cache after app readiness.
 export function readSettings(): Record<string, unknown> {
-  if (settingsCache) return settingsCache
-  settingsCache = {}
-  void initializeSettingsCache()
+  settingsCache ??= {}
+  if (app.isReady() && !settingsHydrated) void initializeSettingsCache()
   return settingsCache
 }
 
