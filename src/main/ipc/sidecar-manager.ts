@@ -32,7 +32,7 @@ import {
   desktopInputType
 } from './desktop-control'
 import { getNativeAgentRuntimeManager } from './native-agent-runtime'
-import { getNativeSshConnectionPayload } from './ssh-handlers'
+import { getNativeSshConnectionPayload } from './ssh-connection-payload'
 import {
   executeChannelSpecificPluginTool,
   executePluginAction,
