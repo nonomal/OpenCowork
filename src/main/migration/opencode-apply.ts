@@ -11,6 +11,12 @@ import type {
 } from '../../shared/migration-types'
 import { createMigrationBackup } from './migration-backup'
 import { buildOpenCodeMigrationPreview } from './opencode-preview'
+import {
+  getAiProviderDirectory,
+  getAiProviderStoreFiles,
+  readPersistedProviderStore,
+  writePersistedProviderStore
+} from '../lib/ai-provider-store'
 import type {
   AIModelConfig,
   AIProvider,
@@ -24,18 +30,13 @@ import type {
 } from './types'
 
 const DATA_DIR = path.join(os.homedir(), '.open-cowork')
-const CONFIG_PATH = path.join(DATA_DIR, 'config.json')
+const AI_PROVIDER_DIR = getAiProviderDirectory(DATA_DIR)
 const COMMANDS_DIR = path.join(DATA_DIR, 'commands')
 const AGENTS_DIR = path.join(DATA_DIR, 'agents')
 const MCP_PATH = path.join(DATA_DIR, 'mcp-servers.json')
 const MEMORY_PATH = path.join(DATA_DIR, 'MEMORY.md')
 const MEMORY_SECTION_START = '<!-- opencode-migration:start -->'
 const MEMORY_SECTION_END = '<!-- opencode-migration:end -->'
-
-interface ProviderPersistBucket {
-  state: Record<string, unknown>
-  version: number
-}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -61,22 +62,6 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
 function writeJsonFile(filePath: string, data: unknown): void {
   ensureDirForFile(filePath)
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
-}
-
-function readConfigRoot(): Record<string, unknown> {
-  return readJsonFile<Record<string, unknown>>(CONFIG_PATH, {})
-}
-
-function readProviderBucket(configRoot: Record<string, unknown>): ProviderPersistBucket {
-  const rawBucket = isPlainObject(configRoot['opencowork-providers'])
-    ? (configRoot['opencowork-providers'] as Record<string, unknown>)
-    : {}
-  return {
-    state: isPlainObject(rawBucket.state)
-      ? { ...(rawBucket.state as Record<string, unknown>) }
-      : {},
-    version: typeof rawBucket.version === 'number' ? rawBucket.version : 0
-  }
 }
 
 function readExistingMcpServers(): McpServerConfig[] {
@@ -240,7 +225,9 @@ function buildBackupFileList(
       item.kind === 'mainModelSelection' ||
       item.kind === 'fastModelSelection'
     ) {
-      filePaths.add(CONFIG_PATH)
+      for (const filePath of getAiProviderStoreFiles()) {
+        filePaths.add(filePath)
+      }
     }
 
     if (item.kind === 'mcp') {
@@ -339,9 +326,8 @@ export function applyOpenCodeMigration(
     }
   }
 
-  const configRoot = readConfigRoot()
-  const providerBucket = readProviderBucket(configRoot)
-  const providerState = providerBucket.state
+  const persistedProviderStore = readPersistedProviderStore() ?? { state: {}, version: 0 }
+  const providerState = { ...persistedProviderStore.state }
   const providers = Array.isArray(providerState.providers)
     ? cloneValue(providerState.providers as AIProvider[])
     : []
@@ -657,7 +643,7 @@ export function applyOpenCodeMigration(
         createSuccessResult(
           item,
           action,
-          CONFIG_PATH,
+          AI_PROVIDER_DIR,
           `${provider.name} / ${model.name} set as ${payload.route === 'main' ? 'main model' : 'quick model'}`
         )
       )
@@ -695,11 +681,10 @@ export function applyOpenCodeMigration(
 
   if (configChanged) {
     providerState.providers = providers
-    configRoot['opencowork-providers'] = {
+    writePersistedProviderStore({
       state: providerState,
-      version: providerBucket.version
-    }
-    writeJsonFile(CONFIG_PATH, configRoot)
+      version: persistedProviderStore.version
+    })
   }
 
   if (mcpChanged) {

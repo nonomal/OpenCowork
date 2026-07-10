@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { getNativeSshConnectionPayload } from './ssh-handlers'
+import { getNativeSshConnectionPayload } from './ssh-connection-payload'
 import { getNativeWorker } from '../lib/native-worker'
 import {
   decodeMessagePackPayload,
@@ -446,7 +446,10 @@ export function registerGitHandlers(): void {
   })
 
   registerGitMessagePackHandler<GitTarget>('git:get-repo-summary', async (args) => {
-    const result = await nativeGitRequest<NativeGitStatusDetailedResult>('git/status-detailed', args)
+    const result = await nativeGitRequest<NativeGitStatusDetailedResult>(
+      'git/status-detailed',
+      args
+    )
     if (!result.success) return result
     const summary: GitRepoSummary = {
       branch: result.status.branch,

@@ -2,6 +2,7 @@ import type { BuiltinProviderPreset } from './types'
 
 export const deepseekPreset: BuiltinProviderPreset = {
   builtinId: 'deepseek',
+  version: 1,
   name: 'DeepSeek',
   type: 'anthropic',
   defaultBaseUrl: 'https://api.deepseek.com/anthropic',

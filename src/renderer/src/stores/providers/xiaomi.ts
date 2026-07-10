@@ -75,6 +75,7 @@ const xiaomiTextModels: AIModelConfig[] = [
 
 export const xiaomiCodingPreset: BuiltinProviderPreset = {
   builtinId: 'xiaomi-coding',
+  version: 1,
   name: '小米（套餐）',
   type: 'anthropic',
   defaultBaseUrl: 'https://token-plan-cn.xiaomimimo.com/anthropic',
@@ -88,6 +89,7 @@ export const xiaomiCodingPreset: BuiltinProviderPreset = {
 
 export const xiaomiPreset: BuiltinProviderPreset = {
   builtinId: 'xiaomi',
+  version: 1,
   name: '小米',
   type: 'openai-chat',
   defaultBaseUrl: 'https://api.xiaomimimo.com/v1',

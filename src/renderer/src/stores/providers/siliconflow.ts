@@ -2,6 +2,7 @@ import type { BuiltinProviderPreset } from './types'
 
 export const siliconflowPreset: BuiltinProviderPreset = {
   builtinId: 'siliconflow',
+  version: 1,
   name: '硅基流动',
   type: 'openai-chat',
   defaultBaseUrl: 'https://api.siliconflow.cn/v1',

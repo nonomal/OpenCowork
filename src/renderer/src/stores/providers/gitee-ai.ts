@@ -2,6 +2,7 @@ import type { BuiltinProviderPreset } from './types'
 
 export const giteeAiPreset: BuiltinProviderPreset = {
   builtinId: 'gitee-ai',
+  version: 1,
   name: 'Gitee AI',
   type: 'openai-chat',
   defaultBaseUrl: 'https://ai.gitee.com/v1',

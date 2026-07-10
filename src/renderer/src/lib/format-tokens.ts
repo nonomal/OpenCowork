@@ -1,4 +1,6 @@
-import { encode } from 'gpt-tokenizer'
+// Import the encoding directly. The package root also includes the much larger
+// o200k model catalog, even though this estimator is intentionally cl100k-based.
+import { encode } from 'gpt-tokenizer/encoding/cl100k_base'
 import type { TokenUsage, AIModelConfig, ProviderType } from './api/types'
 
 /**

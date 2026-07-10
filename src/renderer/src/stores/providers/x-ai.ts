@@ -24,6 +24,7 @@ import type { BuiltinProviderPreset } from './types'
 // 'openai-responses'；defaultBaseUrl 无需变动。
 export const xaiPreset: BuiltinProviderPreset = {
   builtinId: 'xai',
+  version: 1,
   name: 'xAI',
   type: 'openai-responses',
   defaultBaseUrl: 'https://api.x.ai/v1',

@@ -2,6 +2,7 @@ import type { BuiltinProviderPreset } from './types'
 
 export const openrouterPreset: BuiltinProviderPreset = {
   builtinId: 'openrouter',
+  version: 1,
   name: 'OpenRouter',
   type: 'openai-chat',
   defaultBaseUrl: 'https://openrouter.ai/api/v1',

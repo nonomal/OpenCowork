@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react'
-import mermaid from 'mermaid'
+
+type MermaidApi = (typeof import('mermaid'))['default']
+
+let mermaidPromise: Promise<MermaidApi> | null = null
+
+function loadMermaid(): Promise<MermaidApi> {
+  mermaidPromise ??= import('mermaid').then((module) => module.default)
+  return mermaidPromise
+}
 
 function readCssVar(name: string, fallback: string): string {
   if (typeof window === 'undefined') return fallback
@@ -46,7 +54,8 @@ function isDarkTheme(): boolean {
   return document.documentElement.classList.contains('dark')
 }
 
-export function applyMermaidTheme(): void {
+export async function applyMermaidTheme(): Promise<MermaidApi> {
+  const mermaid = await loadMermaid()
   const { vars } = buildThemeVars()
   mermaid.initialize({
     startOnLoad: false,
@@ -55,6 +64,7 @@ export function applyMermaidTheme(): void {
     theme: 'base',
     themeVariables: vars
   })
+  return mermaid
 }
 
 export function useMermaidThemeVersion(): number {
@@ -268,6 +278,7 @@ function prepareSvgForImageLoad(
 async function tryRenderWithoutHtmlLabels(
   source: string
 ): Promise<{ svg: string; width: number; height: number } | null> {
+  const mermaid = await loadMermaid()
   const { foreground, vars } = buildThemeVars()
 
   const container = document.createElement('div')
@@ -295,7 +306,7 @@ async function tryRenderWithoutHtmlLabels(
     return null
   } finally {
     document.body.removeChild(container)
-    applyMermaidTheme()
+    await applyMermaidTheme()
   }
 }
 

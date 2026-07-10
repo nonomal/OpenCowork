@@ -2,6 +2,7 @@ import type { BuiltinProviderPreset } from './types'
 
 export const baiduCodingPreset: BuiltinProviderPreset = {
   builtinId: 'baidu-coding',
+  version: 1,
   name: '百度智能云（套餐）',
   type: 'anthropic',
   defaultBaseUrl: 'https://qianfan.baidubce.com/anthropic/coding',
@@ -137,6 +138,7 @@ export const baiduCodingPreset: BuiltinProviderPreset = {
 
 export const baiduPreset: BuiltinProviderPreset = {
   builtinId: 'baidu',
+  version: 1,
   name: '百度智能云（官方）',
   type: 'openai-chat',
   defaultBaseUrl: 'https://qianfan.baidubce.com/v2',

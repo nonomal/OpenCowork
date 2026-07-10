@@ -12,9 +12,12 @@ import type {
 import { builtinProviderPresets } from './providers'
 import type { BuiltinProviderPreset } from './providers'
 import { resolveCopilotApiBaseUrl, resolveCopilotModelId } from '../lib/auth/copilot'
-import { normalizeResponsesImageGenerationConfig } from '../lib/api/responses-image-generation'
+import {
+  isResponsesImageGenerationEnabled,
+  normalizeResponsesImageGenerationConfig
+} from '../lib/api/responses-image-generation'
 import { resolveProviderUserAgent } from '../lib/api/api-user-agent'
-import { configStorage } from '../lib/ipc/config-storage'
+import { aiProviderStorage } from '../lib/ipc/ai-provider-storage'
 import { useSettingsStore } from './settings-store'
 
 export { builtinProviderPresets }
@@ -80,6 +83,11 @@ function cloneManagedModelConfig(model: ManagedModelConfig): ManagedModelConfig 
   return cloneValue(model)
 }
 
+function normalizePresetVersion(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+  return Math.max(0, Math.floor(value))
+}
+
 function toManagedModelConfig(model: AIModelConfig): ManagedModelConfig {
   const cloned = cloneModelConfig(model)
   const id = cloned.id.trim()
@@ -108,69 +116,6 @@ function getManagedModelFromCollection(
 ): ManagedModelConfig | undefined {
   const modelKey = normalizeModelKey(modelId)
   return managedModels.find((model) => model.normalizedKey === modelKey)
-}
-
-function scoreManagedModelRichness(model: AIModelConfig | ManagedModelConfig): number {
-  const candidate = model as AIModelConfig
-  const keys: Array<keyof AIModelConfig> = [
-    'type',
-    'category',
-    'icon',
-    'contextLength',
-    'enableExtendedContextCompression',
-    'contextCompressionThreshold',
-    'maxOutputTokens',
-    'inputPrice',
-    'outputPrice',
-    'cacheCreationPrice',
-    'cacheHitPrice',
-    'premiumRequestMultiplier',
-    'availablePlans',
-    'supportsVision',
-    'supportsFunctionCall',
-    'supportsThinking',
-    'supportsComputerUse',
-    'enableComputerUse',
-    'enableBuiltinSearch',
-    'thinkingConfig',
-    'responseSummary',
-    'responsesImageGeneration',
-    'enablePromptCache',
-    'enableSystemPromptCache',
-    'cacheTtl',
-    'requestOverrides',
-    'serviceTier',
-    'websocketUrl',
-    'websocketMode'
-  ]
-
-  let score = 0
-  for (const key of keys) {
-    if (!isMissingModelValue(candidate[key])) {
-      score += 1
-    }
-  }
-
-  if (candidate.thinkingConfig?.bodyParams) {
-    score += Object.keys(candidate.thinkingConfig.bodyParams).length
-  }
-  if (candidate.thinkingConfig?.disabledBodyParams) {
-    score += Object.keys(candidate.thinkingConfig.disabledBodyParams).length
-  }
-  if (candidate.thinkingConfig?.reasoningEffortLevels?.length) {
-    score += candidate.thinkingConfig.reasoningEffortLevels.length
-  }
-  if (candidate.requestOverrides?.headers) {
-    score += Object.keys(candidate.requestOverrides.headers).length
-  }
-  if (candidate.requestOverrides?.body) {
-    score += Object.keys(candidate.requestOverrides.body).length
-  }
-  if (candidate.requestOverrides?.omitBodyKeys?.length) {
-    score += candidate.requestOverrides.omitBodyKeys.length
-  }
-
-  return score
 }
 
 function mergeMissingValue(target: unknown, source: unknown): { value: unknown; changed: boolean } {
@@ -234,13 +179,53 @@ function collectBuiltinManagedModels(): ManagedModelConfig[] {
     for (const model of preset.defaultModels) {
       const candidate = toManagedModelConfig(model)
       const existing = managedByKey.get(candidate.normalizedKey)
-      if (!existing || scoreManagedModelRichness(candidate) > scoreManagedModelRichness(existing)) {
+      if (!existing) {
         managedByKey.set(candidate.normalizedKey, candidate)
+        continue
       }
+
+      // Provider order defines the canonical values. Later presets only enrich fields the
+      // canonical model does not define, so one extra capability cannot replace its context.
+      managedByKey.set(
+        candidate.normalizedKey,
+        mergeManagedModelMissingFields(existing, candidate).model
+      )
     }
   }
 
   return Array.from(managedByKey.values())
+}
+
+function replaceManagedModelsForUpgradedPresets(
+  existingModels: ManagedModelConfig[],
+  tombstones: string[],
+  upgradedPresets: BuiltinProviderPreset[]
+): Pick<ProviderStore, 'managedModels' | 'managedModelTombstones'> {
+  const builtinModels = collectBuiltinManagedModels()
+  const builtinByKey = new Map(builtinModels.map((model) => [model.normalizedKey, model] as const))
+  const upgradedKeys = new Set(
+    upgradedPresets.flatMap((preset) =>
+      preset.defaultModels.map((model) => normalizeModelKey(model.id))
+    )
+  )
+  const deprecatedKeys = new Set(
+    upgradedPresets.flatMap((preset) =>
+      (preset.deprecatedModelIds ?? []).map((modelId) => normalizeModelKey(modelId))
+    )
+  )
+  const replacementKeys = new Set([...upgradedKeys, ...deprecatedKeys])
+  const replacementModels = Array.from(upgradedKeys)
+    .map((modelKey) => builtinByKey.get(modelKey))
+    .filter((model): model is ManagedModelConfig => Boolean(model))
+  const preservedModels = existingModels.filter(
+    (model) => !replacementKeys.has(model.normalizedKey)
+  )
+
+  return {
+    managedModels: sortManagedModels([...preservedModels, ...replacementModels]),
+    // A newer preset intentionally restores models previously removed from that preset's defaults.
+    managedModelTombstones: tombstones.filter((modelKey) => !replacementKeys.has(modelKey))
+  }
 }
 
 function sortManagedModels(models: ManagedModelConfig[]): ManagedModelConfig[] {
@@ -338,6 +323,7 @@ function createProviderFromPreset(preset: BuiltinProviderPreset): AIProvider {
     enabled: preset.defaultEnabled ?? false,
     models,
     builtinId: preset.builtinId,
+    presetVersion: preset.version,
     createdAt: Date.now(),
     requiresApiKey: preset.requiresApiKey ?? true,
     ...(preset.useSystemProxy !== undefined ? { useSystemProxy: preset.useSystemProxy } : {}),
@@ -415,13 +401,18 @@ export function isModelComputerUseEnabled(
 // Providers whose native/server-side web search we can inject. Anthropic exposes
 // the `web_search_20250305` server tool; the OpenAI Responses API exposes the
 // `web_search` tool. Other protocols (openai-chat, gemini, images) have no
-// drop-in equivalent, so the toggle is inert there.
+// drop-in equivalent. Speaking the protocol is not enough — many relay endpoints
+// don't ship the server tool — so support is an explicit per-model opt-in.
 export function modelSupportsBuiltinSearch(
   model: AIModelConfig | null | undefined,
   providerType?: ProviderType
 ): boolean {
-  const requestType = model?.type ?? providerType
-  return requestType === 'anthropic' || requestType === 'openai-responses'
+  if (!model) return false
+  const requestType = model.type ?? providerType
+  return (
+    (requestType === 'anthropic' || requestType === 'openai-responses') &&
+    model.supportsBuiltinSearch === true
+  )
 }
 
 export function isModelBuiltinSearchEnabled(
@@ -429,6 +420,43 @@ export function isModelBuiltinSearchEnabled(
   providerType?: ProviderType
 ): boolean {
   return modelSupportsBuiltinSearch(model, providerType) && model?.enableBuiltinSearch === true
+}
+
+export function modelSupportsResponsesWebsocket(
+  model: AIModelConfig | null | undefined,
+  providerType?: ProviderType
+): boolean {
+  if (!model) return false
+  const requestType = model.type ?? providerType
+  return requestType === 'openai-responses' && model.supportsWebsocket === true
+}
+
+export function modelSupportsResponsesImageGeneration(
+  model: AIModelConfig | null | undefined,
+  providerType?: ProviderType
+): boolean {
+  if (!model) return false
+  const requestType = model.type ?? providerType
+  return requestType === 'openai-responses' && model.supportsImageGeneration === true
+}
+
+/**
+ * Resolve the effective `image_generation` tool config for a request. Always returns an
+ * explicit `enabled` flag for Responses models — the runtime treats a missing config as
+ * enabled, so unsupported models must send `enabled: false` rather than nothing.
+ */
+export function resolveModelResponsesImageGeneration(
+  model: AIModelConfig | null | undefined,
+  providerType?: ProviderType
+): ProviderConfig['responsesImageGeneration'] {
+  const requestType = model?.type ?? providerType
+  if (requestType !== 'openai-responses') return undefined
+  return {
+    ...normalizeResponsesImageGenerationConfig(model?.responsesImageGeneration),
+    enabled:
+      modelSupportsResponsesImageGeneration(model, providerType) &&
+      isResponsesImageGenerationEnabled(model?.responsesImageGeneration)
+  }
 }
 
 export function normalizeProviderBaseUrl(
@@ -531,6 +559,22 @@ function resolveProviderAccountId(provider: AIProvider): string | undefined {
   return accountId ? accountId : undefined
 }
 
+function resolveResponsesWebsocket(
+  model: AIModelConfig | null | undefined,
+  provider: AIProvider,
+  requestType: ProviderType
+): Pick<ProviderConfig, 'websocketUrl' | 'websocketMode'> {
+  if (requestType !== 'openai-responses') return {}
+  if (!modelSupportsResponsesWebsocket(model, requestType)) {
+    // Explicit 'disabled' so a provider-level default can't re-enable the transport downstream.
+    return { websocketMode: 'disabled' }
+  }
+  return {
+    websocketUrl: model?.websocketUrl ?? provider.websocketUrl,
+    websocketMode: model?.websocketMode ?? provider.websocketMode
+  }
+}
+
 function mergeBuiltinModels(
   existingModels: AIModelConfig[],
   presetModels: AIModelConfig[],
@@ -559,6 +603,64 @@ function mergeBuiltinModels(
   }
 
   return merged
+}
+
+function restoreBuiltinProviderModels(
+  provider: AIProvider,
+  preset: BuiltinProviderPreset
+): AIProvider {
+  const existingByKey = new Map(
+    provider.models.map((model) => [normalizeModelKey(model.id), model] as const)
+  )
+  const presetKeys = new Set(preset.defaultModels.map((model) => normalizeModelKey(model.id)))
+  const deprecatedKeys = new Set(
+    (preset.deprecatedModelIds ?? []).map((modelId) => normalizeModelKey(modelId))
+  )
+  const models = preset.defaultModels.map((presetModel) => {
+    const existingModel = existingByKey.get(normalizeModelKey(presetModel.id))
+    const restoredModel = omitUnsupportedDisabledThinkingParams(cloneModelConfig(presetModel))
+    return existingModel ? { ...restoredModel, enabled: existingModel.enabled } : restoredModel
+  })
+
+  for (const existingModel of provider.models) {
+    const modelKey = normalizeModelKey(existingModel.id)
+    if (!presetKeys.has(modelKey) && !deprecatedKeys.has(modelKey)) {
+      models.push(existingModel)
+    }
+  }
+
+  return { ...provider, models, presetVersion: preset.version }
+}
+
+function upgradeBuiltinProviderFromPreset(
+  provider: AIProvider,
+  preset: BuiltinProviderPreset
+): AIProvider {
+  const restored = restoreBuiltinProviderModels(provider, preset)
+  const defaultModel = preset.defaultModel
+    ? (resolveModelIdByKey(restored.models, preset.defaultModel) ?? preset.defaultModel)
+    : undefined
+
+  // Keep credentials and authentication state from the persisted provider, but let the newer
+  // built-in preset own its endpoint, protocol, defaults, and built-in model specifications.
+  return {
+    ...restored,
+    name: preset.name.trim(),
+    type: preset.type,
+    baseUrl: preset.defaultBaseUrl.trim(),
+    requiresApiKey: preset.requiresApiKey ?? true,
+    useSystemProxy: preset.useSystemProxy,
+    userAgent: preset.userAgent,
+    defaultModel,
+    authMode: preset.authMode ?? 'apiKey',
+    oauthConfig: preset.oauthConfig ? cloneValue(preset.oauthConfig) : undefined,
+    channelConfig: preset.channelConfig ? cloneValue(preset.channelConfig) : undefined,
+    requestOverrides: preset.requestOverrides ? cloneValue(preset.requestOverrides) : undefined,
+    instructionsPrompt: preset.instructionsPrompt,
+    ui: preset.ui ? cloneValue(preset.ui) : undefined,
+    websocketUrl: preset.websocketUrl,
+    websocketMode: preset.websocketMode
+  }
 }
 
 function resolveProviderDefaultModelId(provider: AIProvider): string {
@@ -691,6 +793,8 @@ interface ProviderStore {
   addManagedModel: (model: AIModelConfig) => void
   updateManagedModel: (modelId: string, model: AIModelConfig) => void
   removeManagedModel: (modelId: string) => void
+  /** Restore global defaults and matching built-in provider copies without touching credentials. */
+  resetModelConfigurationToDefaults: () => void
   getManagedModelById: (modelId: string) => ManagedModelConfig | null
   addModel: (providerId: string, model: AIModelConfig) => void
   updateModel: (providerId: string, modelId: string, patch: Partial<AIModelConfig>) => void
@@ -1010,6 +1114,25 @@ export const useProviderStore = create<ProviderStore>()(
           }
         }),
 
+      resetModelConfigurationToDefaults: () =>
+        set((state) => {
+          const managedModels = sortManagedModels(collectBuiltinManagedModels())
+          const presetById = new Map(
+            builtinProviderPresets.map((preset) => [preset.builtinId, preset] as const)
+          )
+          const providers = state.providers.map((provider) => {
+            const preset = provider.builtinId ? presetById.get(provider.builtinId) : undefined
+            return preset ? restoreBuiltinProviderModels(provider, preset) : provider
+          })
+
+          return {
+            managedModels,
+            managedModelTombstones: [],
+            providers,
+            ...buildNormalizedProviderState(state, providers)
+          }
+        }),
+
       getManagedModelById: (modelId) => {
         const modelKey = normalizeModelKey(modelId)
         return get().managedModels.find((model) => model.normalizedKey === modelKey) ?? null
@@ -1251,14 +1374,17 @@ export const useProviderStore = create<ProviderStore>()(
           activeModel?.requestOverrides,
           activeModel?.id ?? activeModelId
         )
-        const websocketUrl = activeModel?.websocketUrl ?? provider.websocketUrl
-        const websocketMode = activeModel?.websocketMode ?? provider.websocketMode
+        const { websocketUrl, websocketMode } = resolveResponsesWebsocket(
+          activeModel,
+          provider,
+          requestType
+        )
         const serviceTier = resolveServiceTier(activeModel, provider.builtinId)
         const accountId = resolveProviderAccountId(provider)
-        const responsesImageGeneration =
-          requestType === 'openai-responses'
-            ? normalizeResponsesImageGenerationConfig(activeModel?.responsesImageGeneration)
-            : undefined
+        const responsesImageGeneration = resolveModelResponsesImageGeneration(
+          activeModel,
+          requestType
+        )
         return {
           type: requestType,
           apiKey: provider.apiKey,
@@ -1372,14 +1498,14 @@ export const useProviderStore = create<ProviderStore>()(
           model?.requestOverrides,
           model?.id ?? resolvedModelId
         )
-        const websocketUrl = model?.websocketUrl ?? provider.websocketUrl
-        const websocketMode = model?.websocketMode ?? provider.websocketMode
+        const { websocketUrl, websocketMode } = resolveResponsesWebsocket(
+          model,
+          provider,
+          requestType
+        )
         const serviceTier = resolveServiceTier(model, provider.builtinId)
         const accountId = resolveProviderAccountId(provider)
-        const responsesImageGeneration =
-          requestType === 'openai-responses'
-            ? normalizeResponsesImageGenerationConfig(model?.responsesImageGeneration)
-            : undefined
+        const responsesImageGeneration = resolveModelResponsesImageGeneration(model, requestType)
         return {
           type: requestType,
           apiKey: provider.apiKey,
@@ -1475,14 +1601,17 @@ export const useProviderStore = create<ProviderStore>()(
           fastModel?.requestOverrides,
           fastModel?.id ?? model
         )
-        const websocketUrl = fastModel?.websocketUrl ?? provider.websocketUrl
-        const websocketMode = fastModel?.websocketMode ?? provider.websocketMode
+        const { websocketUrl, websocketMode } = resolveResponsesWebsocket(
+          fastModel,
+          provider,
+          requestType
+        )
         const serviceTier = resolveServiceTier(fastModel, provider.builtinId)
         const accountId = resolveProviderAccountId(provider)
-        const responsesImageGeneration =
-          requestType === 'openai-responses'
-            ? normalizeResponsesImageGenerationConfig(fastModel?.responsesImageGeneration)
-            : undefined
+        const responsesImageGeneration = resolveModelResponsesImageGeneration(
+          fastModel,
+          requestType
+        )
         return {
           type: requestType,
           apiKey: provider.apiKey,
@@ -1541,7 +1670,7 @@ export const useProviderStore = create<ProviderStore>()(
     }),
     {
       name: 'opencowork-providers',
-      storage: createJSONStorage(() => configStorage),
+      storage: createJSONStorage(() => aiProviderStorage),
       partialize: (state) => ({
         providers: state.providers,
         managedModels: state.managedModels,
@@ -1655,7 +1784,25 @@ function migrateLegacyOAuthProviders(): void {
  */
 function ensureBuiltinPresets(): void {
   migrateLegacyOAuthProviders()
+  const currentProviders = useProviderStore.getState().providers
+  const upgradedPresets = builtinProviderPresets.filter((preset) => {
+    const existing = currentProviders.find((provider) => provider.builtinId === preset.builtinId)
+    return Boolean(existing && preset.version > normalizePresetVersion(existing.presetVersion))
+  })
+
+  if (upgradedPresets.length > 0) {
+    const state = useProviderStore.getState()
+    useProviderStore.setState(
+      replaceManagedModelsForUpgradedPresets(
+        state.managedModels,
+        state.managedModelTombstones,
+        upgradedPresets
+      )
+    )
+  }
+  // Add models from other presets without overwriting their locally managed values.
   syncManagedModelsWithBuiltins()
+
   for (const preset of builtinProviderPresets) {
     const existing = useProviderStore
       .getState()
@@ -1665,6 +1812,20 @@ function ensureBuiltinPresets(): void {
       const provider = createProviderFromPreset(preset)
       useProviderStore.getState().addProvider(provider)
     } else {
+      const localPresetVersion = normalizePresetVersion(existing.presetVersion)
+      if (preset.version > localPresetVersion) {
+        const upgraded = upgradeBuiltinProviderFromPreset(existing, preset)
+        const { id: _id, ...patch } = upgraded
+        void _id
+        useProviderStore.getState().updateProvider(existing.id, patch)
+        continue
+      }
+
+      // Never downgrade persisted built-in configuration when an older app is opened.
+      if (localPresetVersion > preset.version) {
+        continue
+      }
+
       // Sync provider-level fields from preset (e.g. requiresApiKey, userAgent, defaultModel)
       const patch: Partial<Omit<AIProvider, 'id'>> = {}
       if (existing.requiresApiKey !== (preset.requiresApiKey ?? true)) {

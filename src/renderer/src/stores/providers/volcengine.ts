@@ -2,6 +2,7 @@ import type { BuiltinProviderPreset } from './types'
 
 export const volcenginePreset: BuiltinProviderPreset = {
   builtinId: 'volcengine',
+  version: 1,
   name: '火山引擎',
   type: 'openai-chat',
   defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',

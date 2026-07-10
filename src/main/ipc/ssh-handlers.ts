@@ -36,6 +36,7 @@ import {
 } from './agent-change-handlers'
 import { safeSendMessagePackToAllWindows, safeSendMessagePackToWindow } from '../window-ipc'
 import { getNativeWorker } from '../lib/native-worker'
+import { toNativeSshConnection } from './ssh-connection-payload'
 import {
   decodeMessagePackPayload,
   encodeMessagePackPayload,
@@ -693,64 +694,6 @@ async function resolveProxyJumpTarget(
       proxyJump: null
     })
   }
-}
-
-function formatNativeProxyJumpConnection(connection: SshConfigConnection): string {
-  const host = connection.host.includes(':') ? `[${connection.host}]` : connection.host
-  const prefix = connection.username ? `${connection.username}@` : ''
-  return connection.port && connection.port !== 22
-    ? `${prefix}${host}:${connection.port}`
-    : `${prefix}${host}`
-}
-
-function resolveNativeProxyJump(target: SshConfigConnection): string | null {
-  const raw = target.proxyJump?.trim()
-  if (!raw) return null
-
-  const saved = getSshConnection(raw)
-  if (saved) {
-    return formatNativeProxyJumpConnection(createDerivedConnection(saved, { proxyJump: null }))
-  }
-
-  const parsed = parseOpenSshJumpString(raw)
-  if (!parsed || (!raw.includes('@') && !raw.includes(':'))) return raw
-  return formatNativeProxyJumpConnection(
-    createDerivedConnection(target, {
-      id: `jump:${raw}`,
-      name: raw,
-      host: parsed.host,
-      port: parsed.port ?? 22,
-      username: parsed.username ?? target.username,
-      proxyJump: null
-    })
-  )
-}
-
-function toNativeSshConnection(connection: SshConfigConnection): Record<string, unknown> {
-  const authFields: Record<string, unknown> = {}
-  if (connection.authType === 'password') {
-    authFields.password = connection.password
-  } else if (connection.authType === 'privateKey') {
-    authFields.privateKeyPath = connection.privateKeyPath
-    authFields.passphrase = connection.passphrase
-  }
-
-  return {
-    id: connection.id,
-    host: connection.host,
-    port: connection.port,
-    username: connection.username,
-    authType: connection.authType,
-    proxyJump: resolveNativeProxyJump(connection),
-    ...authFields
-  }
-}
-
-export function getNativeSshConnectionPayload(
-  connectionId: string
-): Record<string, unknown> | null {
-  const connection = getSshConnection(connectionId)
-  return connection ? toNativeSshConnection(connection) : null
 }
 
 export async function execNativeSshCommand(

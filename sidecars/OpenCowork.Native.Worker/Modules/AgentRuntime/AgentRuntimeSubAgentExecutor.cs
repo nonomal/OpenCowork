@@ -15,24 +15,6 @@ internal static partial class AgentRuntimeSubAgentExecutor
     private const string AgentsDirectoryName = ".open-cowork/agents";
     private const string CustomSubAgentType = "custom";
 
-    private static readonly string[] DefaultTools = ["Read", "Glob", "Grep", "LS", "Skill"];
-    private static readonly HashSet<string> PlanModeInvestigationTools = new(StringComparer.Ordinal)
-    {
-        "Read",
-        "Glob",
-        "Grep",
-        "LS",
-        "Skill",
-        "WebSearch",
-        "WebFetch"
-    };
-    private static readonly string[] MandatoryDisallowedTools =
-    [
-        "Task",
-        "AskUserQuestion",
-        "EnterPlanMode",
-        "ExitPlanMode"
-    ];
     private static readonly JsonWriterOptions WriterOptions = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
@@ -156,12 +138,8 @@ internal static partial class AgentRuntimeSubAgentExecutor
         try
         {
             var promptMessage = BuildPromptMessage(call.Input, definition.InitialPrompt);
-            var parentTools = ReadToolDefinitions(parameters);
-            var innerTools = ResolveTools(
-                definition,
-                parentTools,
-                JsonHelpers.GetBool(parameters, "planMode", false));
-            innerTools.Add(BuildSubmitReportToolDefinition());
+            var innerTools = ReadToolDefinitions(parameters);
+            AddSubmitReportToolDefinition(innerTools);
 
             var provider = BuildProvider(parameters, definition);
             var childParameters = BuildChildParameters(
@@ -302,8 +280,6 @@ internal static partial class AgentRuntimeSubAgentExecutor
                 CustomSubAgentType,
                 JsonHelpers.GetString(input, "description")?.Trim() ?? "Custom sub-agent",
                 BuildDefaultSystemPrompt(JsonHelpers.GetString(parameters, "workingFolder")),
-                ["*"],
-                MandatoryDisallowedTools,
                 DefaultMaxTurns,
                 null,
                 null,
@@ -369,10 +345,6 @@ internal static partial class AgentRuntimeSubAgentExecutor
             return null;
         }
 
-        var tools = GetFrontmatterStringList(frontmatter, "tools") ??
-            GetFrontmatterStringList(frontmatter, "allowedTools") ??
-            ["Read", "Glob", "Grep", "LS", "Bash"];
-        var disallowedTools = GetFrontmatterStringList(frontmatter, "disallowedTools") ?? [];
         var maxTurns = GetFrontmatterInt(frontmatter, "maxTurns") ??
             GetFrontmatterInt(frontmatter, "maxIterations") ??
             DefaultMaxTurns;
@@ -385,8 +357,6 @@ internal static partial class AgentRuntimeSubAgentExecutor
             name.Trim(),
             description.Trim(),
             body.Length == 0 ? $"You are {name}, a specialized agent." : body,
-            tools,
-            disallowedTools,
             maxTurns,
             GetFrontmatterString(frontmatter, "initialPrompt"),
             GetFrontmatterString(frontmatter, "model"),
@@ -711,9 +681,24 @@ internal static partial class AgentRuntimeSubAgentExecutor
                 ? provider
                 : throw new InvalidOperationException("Task requires a provider config.");
 
+        // An explicit per-call model override or an agent's frontmatter model pins the model
+        // onto the parent provider (same endpoint/key). Otherwise sub-agents default to the
+        // configured fast provider — a full provider config the renderer attaches, which may
+        // live on a different provider than the parent. Falls back to the parent when no fast
+        // provider is configured.
+        var hasExplicitModel =
+            !string.IsNullOrWhiteSpace(modelOverride) || !string.IsNullOrWhiteSpace(definition.Model);
+        var baseProvider = parentProvider;
+        if (!hasExplicitModel &&
+            parameters.TryGetProperty("subAgentProvider", out var fastProvider) &&
+            fastProvider.ValueKind == JsonValueKind.Object)
+        {
+            baseProvider = fastProvider;
+        }
+
         return CreateObject(writer =>
         {
-            foreach (var property in parentProvider.EnumerateObject())
+            foreach (var property in baseProvider.EnumerateObject())
             {
                 if (property.NameEquals("systemPrompt") ||
                     property.NameEquals("temperature") ||
@@ -725,6 +710,8 @@ internal static partial class AgentRuntimeSubAgentExecutor
                 property.WriteTo(writer);
             }
 
+            // Prompt-cache key stays namespaced to the parent run so sibling sub-agents of the
+            // same definition can share cached context, independent of which provider they run on.
             if (ShouldSetSubAgentPromptCacheKey(parentProvider) &&
                 JsonHelpers.GetString(parentProvider, "promptCacheKey") is { Length: > 0 } parentPromptCacheKey)
             {
@@ -742,7 +729,7 @@ internal static partial class AgentRuntimeSubAgentExecutor
             {
                 writer.WriteString("model", definition.Model);
             }
-            else if (JsonHelpers.GetString(parentProvider, "model") is { Length: > 0 } model)
+            else if (JsonHelpers.GetString(baseProvider, "model") is { Length: > 0 } model)
             {
                 writer.WriteString("model", model);
             }
@@ -750,7 +737,7 @@ internal static partial class AgentRuntimeSubAgentExecutor
             {
                 writer.WriteNumber("temperature", definition.Temperature.Value);
             }
-            else if (parentProvider.TryGetProperty("temperature", out var temperature))
+            else if (baseProvider.TryGetProperty("temperature", out var temperature))
             {
                 writer.WritePropertyName("temperature");
                 temperature.WriteTo(writer);
@@ -881,7 +868,9 @@ internal static partial class AgentRuntimeSubAgentExecutor
             }
             writer.WriteEndArray();
             writer.WriteNumber("maxIterations", Math.Max(1, definition.MaxTurns));
-            writer.WriteBoolean("forceApproval", false);
+            writer.WriteBoolean(
+                "forceApproval",
+                JsonHelpers.GetBool(parentParameters, "forceApproval", false));
             writer.WriteString("callerAgent", definition.Name);
             writer.WriteBoolean("captureFinalMessages", true);
             writer.WriteBoolean("submitReportEnabled", true);
@@ -961,40 +950,13 @@ internal static partial class AgentRuntimeSubAgentExecutor
         return result;
     }
 
-    private static List<JsonElement> ResolveTools(
-        SubAgentDefinitionNative definition,
-        IReadOnlyList<JsonElement> allTools,
-        bool restrictToPlanModeInvestigation = false)
+    private static void AddSubmitReportToolDefinition(List<JsonElement> tools)
     {
-        var requested = definition.Tools.Count > 0 ? definition.Tools : DefaultTools;
-        var requestedSet = new HashSet<string>(requested, StringComparer.Ordinal);
-        var disallowedSet = new HashSet<string>(MandatoryDisallowedTools, StringComparer.Ordinal);
-        foreach (var toolName in definition.DisallowedTools)
-        {
-            disallowedSet.Add(toolName);
-        }
-
-        var allowAll = requestedSet.Contains("*");
-        var resolved = new List<JsonElement>();
-        foreach (var tool in allTools)
-        {
-            var name = JsonHelpers.GetString(tool, "name");
-            if (string.IsNullOrWhiteSpace(name) ||
-                disallowedSet.Contains(name) ||
-                AgentRuntimePlanExecutor.IsPlanTool(name))
-            {
-                continue;
-            }
-            if (restrictToPlanModeInvestigation && !PlanModeInvestigationTools.Contains(name))
-            {
-                continue;
-            }
-            if (allowAll || requestedSet.Contains(name))
-            {
-                resolved.Add(tool.Clone());
-            }
-        }
-        return resolved;
+        tools.RemoveAll(tool => string.Equals(
+            JsonHelpers.GetString(tool, "name"),
+            SubmitReportToolName,
+            StringComparison.Ordinal));
+        tools.Add(BuildSubmitReportToolDefinition());
     }
 
     private static JsonElement BuildSubmitReportToolDefinition()
@@ -1031,8 +993,8 @@ internal static partial class AgentRuntimeSubAgentExecutor
         builder.AppendLine("You are a specialized OpenCowork sub-agent dispatched by a parent agent.");
         builder.AppendLine("Complete exactly one focused task. You do not see the earlier conversation.");
         builder.AppendLine("Use available tools decisively, verify your work, and keep changes scoped to the delegated task.");
-        builder.AppendLine("You have broad tool access except Task, AskUserQuestion, and plan-mode tools.");
-        builder.AppendLine("Do not create, finalize, approve, or execute plans; report plan suggestions to the parent agent.");
+        builder.AppendLine("You inherit the same tools and tool permissions exposed to the parent agent for this run.");
+        builder.AppendLine("You may use Task for further delegation when it is available and materially helps complete the work.");
         if (!string.IsNullOrWhiteSpace(workingFolder))
         {
             builder.AppendLine($"Working folder: {workingFolder}");
@@ -1058,29 +1020,6 @@ internal static partial class AgentRuntimeSubAgentExecutor
     private static double? GetFrontmatterDouble(string frontmatter, string key)
     {
         return double.TryParse(GetFrontmatterString(frontmatter, key), out var value) ? value : null;
-    }
-
-    private static IReadOnlyList<string>? GetFrontmatterStringList(string frontmatter, string key)
-    {
-        var raw = GetFrontmatterString(frontmatter, key);
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return null;
-        }
-
-        var normalized = raw.Trim();
-        if (normalized.StartsWith("[", StringComparison.Ordinal) &&
-            normalized.EndsWith("]", StringComparison.Ordinal))
-        {
-            normalized = normalized[1..^1];
-        }
-
-        var values = normalized
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(item => item.Trim().Trim('"', '\''))
-            .Where(item => item.Length > 0)
-            .ToArray();
-        return values.Length == 0 ? null : values;
     }
 
     private static RendererToolResult ErrorResult(string message)
@@ -1164,8 +1103,6 @@ internal static partial class AgentRuntimeSubAgentExecutor
         string Name,
         string Description,
         string SystemPrompt,
-        IReadOnlyList<string> Tools,
-        IReadOnlyList<string> DisallowedTools,
         int MaxTurns,
         string? InitialPrompt,
         string? Model,

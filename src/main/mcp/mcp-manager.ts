@@ -1,4 +1,4 @@
-import { McpClientWrapper } from './mcp-client'
+import type { McpClientWrapper } from './mcp-client'
 import type { McpServerConfig, McpServerInfo } from './mcp-types'
 
 /**
@@ -16,6 +16,7 @@ export class McpManager {
       await this.disconnectServer(config.id)
     }
 
+    const { McpClientWrapper } = await import('./mcp-client')
     const client = new McpClientWrapper(config)
     this.clients.set(config.id, client)
 

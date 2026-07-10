@@ -7,6 +7,7 @@ const KIMI_CLIENT_ID = '17e5f671-d194-4dfb-9706-5516cb48c098'
 // Price fields below are USD per 1M tokens; Kimi publishes CNY prices, so values are converted.
 export const moonshotCodingPreset: BuiltinProviderPreset = {
   builtinId: 'moonshot-coding',
+  version: 1,
   name: 'Moonshot（套餐）',
   type: 'openai-chat',
   defaultBaseUrl: 'https://api.kimi.com/coding/v1',
@@ -62,6 +63,7 @@ export const moonshotCodingPreset: BuiltinProviderPreset = {
 
 export const moonshotPreset: BuiltinProviderPreset = {
   builtinId: 'moonshot',
+  version: 1,
   name: 'Moonshot（官方）',
   type: 'openai-chat',
   defaultBaseUrl: 'https://api.moonshot.cn/v1',

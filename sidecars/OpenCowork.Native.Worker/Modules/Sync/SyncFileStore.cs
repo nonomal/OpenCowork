@@ -20,7 +20,7 @@ internal static class SyncFileStore
         "MEMORY.md"
     ];
 
-    private static readonly string[] DataDirectoryIncludes = ["agents", "commands", "prompts", "memory"];
+    private static readonly string[] DataDirectoryIncludes = ["agents", "commands", "prompts", "memory", "ai-provider"];
     private static readonly string[] LocalOnlyConfigKeys = [PromptCacheInstallIdConfigKey];
 
     private static readonly JsonSerializerOptions JsonOptions = new()

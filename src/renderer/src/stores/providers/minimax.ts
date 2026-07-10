@@ -2,6 +2,7 @@ import type { BuiltinProviderPreset } from './types'
 
 export const minimaxCodingPreset: BuiltinProviderPreset = {
   builtinId: 'minimax-coding',
+  version: 1,
   name: 'MiniMax（套餐）',
   type: 'anthropic',
   defaultBaseUrl: 'https://api.minimaxi.com/anthropic',
@@ -121,6 +122,7 @@ export const minimaxCodingPreset: BuiltinProviderPreset = {
 
 export const minimaxPreset: BuiltinProviderPreset = {
   builtinId: 'minimax',
+  version: 1,
   name: 'MiniMax（官方）',
   type: 'anthropic',
   defaultBaseUrl: 'https://api.minimaxi.com/anthropic',

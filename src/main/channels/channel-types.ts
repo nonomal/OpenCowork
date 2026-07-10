@@ -154,7 +154,7 @@ export interface MessagingChannelService {
 export type ChannelServiceFactory = (
   instance: ChannelInstance,
   notify: (event: ChannelEvent) => void
-) => MessagingChannelService
+) => MessagingChannelService | Promise<MessagingChannelService>
 
 /** WebSocket message parser — converts raw WS frames to normalized data */
 export type ChannelWsMessageParser = (raw: string) => ChannelIncomingMessageData | null

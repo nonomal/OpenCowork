@@ -3,7 +3,6 @@ import { useState, useCallback, useMemo, useEffect, useId, type ReactNode } from
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import Markdown, { type Components } from 'react-markdown'
-import mermaid from 'mermaid'
 import {
   applyMermaidTheme,
   copyMermaidToClipboard,
@@ -58,8 +57,10 @@ import type {
 import { useSettingsStore } from '@renderer/stores/settings-store'
 import { ToolCallCard, WidgetOutputBlock } from './ToolCallCard'
 import { FileChangeCard } from './FileChangeCard'
+import { BashArtifactsCard } from './BashArtifactsCard'
 import { SubAgentCard } from './SubAgentCard'
 import { ThinkingBlock } from './ThinkingBlock'
+import { CollapsibleHeightPanel } from './CollapsibleHeightPanel'
 import { TeamEventCard } from './TeamEventCard'
 import { AskUserQuestionCard } from './AskUserQuestionCard'
 import { OrchestrationBlock } from './OrchestrationBlock'
@@ -290,6 +291,34 @@ function buildToolCallRenderState(
 
 function shouldShowToolInMessageList(name: string): boolean {
   return !isHiddenExecutionToolName(name)
+}
+
+interface BashArtifactEntry {
+  path: string
+  size: number
+}
+
+function decodeBashArtifacts(
+  output: ToolResultContent | undefined
+): { artifacts: BashArtifactEntry[]; truncated?: number } | null {
+  if (typeof output !== 'string') return null
+  const decoded = decodeStructuredToolResult(output)
+  if (!decoded || Array.isArray(decoded)) return null
+  const artifacts = decoded.artifacts
+  if (!Array.isArray(artifacts) || artifacts.length === 0) return null
+
+  const entries = artifacts.filter(
+    (entry): entry is BashArtifactEntry =>
+      !!entry &&
+      typeof entry === 'object' &&
+      typeof (entry as BashArtifactEntry).path === 'string' &&
+      typeof (entry as BashArtifactEntry).size === 'number'
+  )
+  if (entries.length === 0) return null
+
+  const truncated =
+    typeof decoded.artifactsTruncated === 'number' ? decoded.artifactsTruncated : undefined
+  return { artifacts: entries, truncated }
 }
 
 function isWorkspaceCollapsibleTool(name: string): boolean {
@@ -1004,7 +1033,7 @@ function MermaidCodeBlock({ code }: { code: string }): React.JSX.Element {
         return
       }
       try {
-        applyMermaidTheme()
+        const mermaid = await applyMermaidTheme()
         const result = await mermaid.render(`mermaid-chat-${diagramKey}-${Date.now()}`, source)
         if (cancelled) return
         setSvg(result.svg)
@@ -2458,6 +2487,37 @@ export function AssistantMessage({
           </ScaleIn>
         )
       }
+      if (block.name === 'Bash' || block.name === 'Shell') {
+        const toolCallState = buildToolCallRenderState(block, {
+          isStreaming,
+          toolResults,
+          liveToolCallMap: effectiveLiveToolCallMap,
+          executionItem
+        })
+        const bashArtifacts = decodeBashArtifacts(toolCallState.output)
+        return (
+          <ScaleIn key={key} className={liveScaleInClassName}>
+            <ToolCallCard
+              toolUseId={toolCallState.toolUseId}
+              name={toolCallState.name}
+              input={toolCallState.input}
+              output={toolCallState.output}
+              status={toolCallState.status}
+              error={toolCallState.error}
+              startedAt={toolCallState.startedAt}
+              completedAt={toolCallState.completedAt}
+              forceOpen={executionItem?.forceExpanded}
+            />
+            {bashArtifacts ? (
+              <BashArtifactsCard
+                artifacts={bashArtifacts.artifacts}
+                truncated={bashArtifacts.truncated}
+              />
+            ) : null}
+          </ScaleIn>
+        )
+      }
+
       // Generic ToolCallCard — only ordinary context tools are hidden by the workspace collapse.
       const toolCallState = buildToolCallRenderState(block, {
         isStreaming,
@@ -2500,7 +2560,8 @@ export function AssistantMessage({
         .map((toolUseId) => {
           const item = toolExecutionOutline.itemByToolUseId.get(toolUseId)
           if (!item || item.visibility === 'hidden') return null
-          if (item.visibility === 'ordinary' && collapsed) return null
+          // Keep ordinary tools mounted for collapsible runs so close tween can measure height.
+          if (item.visibility === 'ordinary' && collapsed && !run.showToggle) return null
 
           const block = normalizedContent[item.blockIndex]
           if (!block || block.type !== 'tool_use') return null
@@ -2523,7 +2584,13 @@ export function AssistantMessage({
               onClick={() => toggleToolRunCollapsed(run)}
             />
           ) : null}
-          {renderedTools}
+          {run.showToggle ? (
+            <CollapsibleHeightPanel open={!collapsed} className="overflow-hidden">
+              <div className="space-y-2">{renderedTools}</div>
+            </CollapsibleHeightPanel>
+          ) : (
+            renderedTools
+          )}
         </React.Fragment>
       )
     }

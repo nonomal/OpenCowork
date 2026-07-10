@@ -2,6 +2,7 @@ import type { BuiltinProviderPreset } from './types'
 
 export const googlePreset: BuiltinProviderPreset = {
   builtinId: 'google',
+  version: 1,
   name: 'Google Gemini',
   type: 'openai-chat',
   defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',

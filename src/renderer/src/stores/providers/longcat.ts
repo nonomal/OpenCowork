@@ -11,6 +11,7 @@ const deprecatedLongCatModelIds = [
 
 export const longcatPreset: BuiltinProviderPreset = {
   builtinId: 'longcat',
+  version: 1,
   name: 'LongCat',
   type: 'openai-chat',
   defaultBaseUrl: 'https://api.longcat.chat/openai/v1',

@@ -195,6 +195,10 @@ function normalizePositiveInteger(value: unknown): number | undefined {
   return undefined
 }
 
+function toRoundedTokenThousands(value: number): number {
+  return Math.round(value / 1_000)
+}
+
 function readDiscoveredModelInteger(
   model: Record<string, unknown>,
   keys: string[]
@@ -361,6 +365,15 @@ function buildManagedModelProviderSourceIndex(
 
 // --- Fetch models from provider API ---
 
+// The ChatGPT Codex backend requires a client_version query param (the version Codex CLI reports).
+const CODEX_CLIENT_VERSION_FALLBACK = '0.144.1'
+
+function withCodexClientVersion(url: string, userAgent?: string): string {
+  const version =
+    userAgent?.match(/codex_cli_rs\/(\d+(?:\.\d+)*)/i)?.[1] ?? CODEX_CLIENT_VERSION_FALLBACK
+  return `${url}${url.includes('?') ? '&' : '?'}client_version=${encodeURIComponent(version)}`
+}
+
 async function fetchModelsFromProvider(
   type: ProviderType,
   baseUrl: string,
@@ -393,7 +406,10 @@ async function fetchModelsFromProvider(
 
   // For OpenAI-compatible providers: GET /v1/models
   if (type === 'openai-chat' || type === 'openai-responses') {
-    const url = `${(baseUrl || 'https://api.openai.com').replace(/\/+$/, '')}/models`
+    let url = `${(baseUrl || 'https://api.openai.com').replace(/\/+$/, '')}/models`
+    if (builtinId === 'codex-oauth') {
+      url = withCodexClientVersion(url, resolvedUserAgent)
+    }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json'
     }
@@ -610,12 +626,18 @@ function ModelFormDialog({
     initial?.supportsComputerUse ?? false
   )
   const [enableComputerUse, setEnableComputerUse] = useState(initial?.enableComputerUse ?? false)
-  const [enableBuiltinSearch, setEnableBuiltinSearch] = useState(() => {
-    if (initial?.enableBuiltinSearch !== undefined) return initial.enableBuiltinSearch
-    // Supported protocols default to on, matching the built-in preset behavior.
-    const resolvedType = initial?.type ?? providerType
-    return resolvedType === 'anthropic' || resolvedType === 'openai-responses'
-  })
+  const [supportsBuiltinSearch, setSupportsBuiltinSearch] = useState(
+    initial?.supportsBuiltinSearch ?? false
+  )
+  // Defaults to on so checking "supports" immediately activates the search tool.
+  const [enableBuiltinSearch, setEnableBuiltinSearch] = useState(
+    initial?.enableBuiltinSearch ?? true
+  )
+  const [supportsFastMode, setSupportsFastMode] = useState(initial?.serviceTier === 'priority')
+  const [supportsWebsocket, setSupportsWebsocket] = useState(initial?.supportsWebsocket ?? false)
+  const [supportsImageGeneration, setSupportsImageGeneration] = useState(
+    initial?.supportsImageGeneration ?? false
+  )
   const [icon, setIcon] = useState(initial?.icon ?? '')
   const [responseSummary, setResponseSummary] = useState<'auto' | 'concise' | 'detailed' | 'none'>(
     initial?.responseSummary ?? 'none'
@@ -682,7 +704,11 @@ function ModelFormDialog({
     setSupportsFunctionCall(model.supportsFunctionCall ?? true)
     setSupportsComputerUse(model.supportsComputerUse ?? false)
     setEnableComputerUse(model.enableComputerUse ?? false)
-    setEnableBuiltinSearch(model.enableBuiltinSearch ?? false)
+    setSupportsBuiltinSearch(model.supportsBuiltinSearch ?? false)
+    setEnableBuiltinSearch(model.enableBuiltinSearch ?? true)
+    setSupportsFastMode(model.serviceTier === 'priority')
+    setSupportsWebsocket(model.supportsWebsocket ?? false)
+    setSupportsImageGeneration(model.supportsImageGeneration ?? false)
     setIcon(model.icon ?? '')
     setResponseSummary(model.responseSummary ?? 'none')
     setWebsocketMode(model.websocketMode ?? 'disabled')
@@ -726,6 +752,7 @@ function ModelFormDialog({
   const requestType = typeOverride === 'none' ? providerType : typeOverride
   const isResponsesModel = requestType === 'openai-responses'
   const isAnthropicModel = requestType === 'anthropic'
+  const isOpenAiChatModel = requestType === 'openai-chat'
   const handleSave = (): void => {
     const modelId = id.trim()
     if (!modelId) return
@@ -804,9 +831,17 @@ function ModelFormDialog({
     model.supportsComputerUse = supportsComputerUse
     model.enableComputerUse = supportsComputerUse && enableComputerUse
     if (isAnthropicModel || isResponsesModel) {
-      model.enableBuiltinSearch = enableBuiltinSearch
+      model.supportsBuiltinSearch = supportsBuiltinSearch
+      model.enableBuiltinSearch = supportsBuiltinSearch && enableBuiltinSearch
     } else {
+      delete model.supportsBuiltinSearch
       delete model.enableBuiltinSearch
+    }
+    if (isResponsesModel || isOpenAiChatModel) {
+      if (supportsFastMode) model.serviceTier = 'priority'
+      else delete model.serviceTier
+    } else {
+      delete model.serviceTier
     }
     if (icon.trim()) model.icon = icon.trim()
     else delete model.icon
@@ -815,7 +850,9 @@ function ModelFormDialog({
     model.enableSystemPromptCache = enableSystemPromptCache
     model.cacheTtl = cacheTtl
     if (isResponsesModel) {
-      model.websocketMode = websocketMode
+      model.supportsWebsocket = supportsWebsocket
+      model.websocketMode = supportsWebsocket ? websocketMode : 'disabled'
+      model.supportsImageGeneration = supportsImageGeneration
       const outputCompression = responsesImageGenerationOutputCompression.trim()
         ? normalizeResponsesImageGenerationOutputCompression(
             Number(responsesImageGenerationOutputCompression)
@@ -827,7 +864,7 @@ function ModelFormDialog({
           )
         : undefined
       model.responsesImageGeneration = {
-        enabled: responsesImageGenerationEnabled,
+        enabled: supportsImageGeneration && responsesImageGenerationEnabled,
         ...(responsesImageGenerationAction !== RESPONSES_IMAGE_GENERATION_DEFAULT_OPTION
           ? { action: responsesImageGenerationAction }
           : {}),
@@ -855,6 +892,8 @@ function ModelFormDialog({
     } else {
       delete model.responsesImageGeneration
       delete model.websocketMode
+      delete model.supportsWebsocket
+      delete model.supportsImageGeneration
     }
     // preserve thinking config if editing
     if (initial?.supportsThinking) model.supportsThinking = initial.supportsThinking
@@ -1177,7 +1216,8 @@ function ModelFormDialog({
                       {t('provider.responsesWebsocket')}
                     </span>
                     <Switch
-                      checked={websocketMode === 'auto'}
+                      checked={supportsWebsocket && websocketMode === 'auto'}
+                      disabled={!supportsWebsocket}
                       onCheckedChange={(v) => setWebsocketMode(v ? 'auto' : 'disabled')}
                     />
                   </div>
@@ -1186,11 +1226,12 @@ function ModelFormDialog({
                       {t('provider.responsesImageGeneration')}
                     </span>
                     <Switch
-                      checked={responsesImageGenerationEnabled}
+                      checked={supportsImageGeneration && responsesImageGenerationEnabled}
+                      disabled={!supportsImageGeneration}
                       onCheckedChange={setResponsesImageGenerationEnabled}
                     />
                   </div>
-                  {responsesImageGenerationEnabled && (
+                  {supportsImageGeneration && responsesImageGenerationEnabled && (
                     <div className="space-y-2 rounded-md border border-border/60 p-2">
                       <div className="grid grid-cols-2 gap-2">
                         <div className="space-y-1">
@@ -1533,18 +1574,80 @@ function ModelFormDialog({
                   onCheckedChange={setEnableComputerUse}
                 />
               </div>
-              {(isAnthropicModel || isResponsesModel) && (
+              {(isResponsesModel || isOpenAiChatModel) && (
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex flex-col">
                     <span className="text-xs text-muted-foreground">
-                      {t('provider.enableBuiltinSearch')}
+                      {t('provider.supportsFastMode')}
                     </span>
                     <span className="text-[11px] text-muted-foreground/70">
-                      {t('provider.enableBuiltinSearchDesc')}
+                      {t('provider.supportsFastModeDesc')}
                     </span>
                   </div>
-                  <Switch checked={enableBuiltinSearch} onCheckedChange={setEnableBuiltinSearch} />
+                  <Switch checked={supportsFastMode} onCheckedChange={setSupportsFastMode} />
                 </div>
+              )}
+              {isResponsesModel && (
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground">
+                      {t('provider.supportsWebsocket')}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground/70">
+                      {t('provider.supportsWebsocketDesc')}
+                    </span>
+                  </div>
+                  <Switch checked={supportsWebsocket} onCheckedChange={setSupportsWebsocket} />
+                </div>
+              )}
+              {isResponsesModel && (
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground">
+                      {t('provider.supportsImageGeneration')}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground/70">
+                      {t('provider.supportsImageGenerationDesc')}
+                    </span>
+                  </div>
+                  <Switch
+                    checked={supportsImageGeneration}
+                    onCheckedChange={setSupportsImageGeneration}
+                  />
+                </div>
+              )}
+              {(isAnthropicModel || isResponsesModel) && (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-muted-foreground">
+                        {t('provider.supportsBuiltinSearch')}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground/70">
+                        {t('provider.supportsBuiltinSearchDesc')}
+                      </span>
+                    </div>
+                    <Switch
+                      checked={supportsBuiltinSearch}
+                      onCheckedChange={setSupportsBuiltinSearch}
+                    />
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-muted-foreground">
+                        {t('provider.enableBuiltinSearch')}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground/70">
+                        {t('provider.enableBuiltinSearchDesc')}
+                      </span>
+                    </div>
+                    <Switch
+                      checked={supportsBuiltinSearch && enableBuiltinSearch}
+                      disabled={!supportsBuiltinSearch}
+                      onCheckedChange={setEnableBuiltinSearch}
+                    />
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -2097,7 +2200,7 @@ function ProviderConfigPanel({ provider }: { provider: AIProvider }): React.JSX.
         }
       }
       const result = await invokeApiRequest({
-        url: `${baseUrl}/models`,
+        url: withCodexClientVersion(`${baseUrl}/models`, headers['User-Agent']),
         method: 'GET',
         headers,
         useSystemProxy: activeProvider.useSystemProxy
@@ -2202,6 +2305,9 @@ function ProviderConfigPanel({ provider }: { provider: AIProvider }): React.JSX.
         applyHeaderOverrides(model)
       } else if (isResponses) {
         url = `${baseUrl}/models`
+        if (activeProvider.builtinId === 'codex-oauth') {
+          url = withCodexClientVersion(url, headers['User-Agent'])
+        }
         method = 'GET'
         if (authToken) headers['Authorization'] = `Bearer ${authToken}`
         if (activeProvider.oauth?.accountId) {
@@ -3320,14 +3426,14 @@ function ProviderConfigPanel({ provider }: { provider: AIProvider }): React.JSX.
                           {model.contextLength && (
                             <span className="rounded-full bg-muted/45 px-2 py-0.5">
                               {t('provider.modelMetaContext', {
-                                count: Math.round(model.contextLength / 1024)
+                                count: toRoundedTokenThousands(model.contextLength)
                               })}
                             </span>
                           )}
                           {model.maxOutputTokens && (
                             <span className="rounded-full bg-muted/45 px-2 py-0.5">
                               {t('provider.modelMetaOutput', {
-                                count: Math.round(model.maxOutputTokens / 1024)
+                                count: toRoundedTokenThousands(model.maxOutputTokens)
                               })}
                             </span>
                           )}
@@ -3498,6 +3604,9 @@ export function ModelManagementPanel(): React.JSX.Element {
   const addManagedModel = useProviderStore((s) => s.addManagedModel)
   const updateManagedModel = useProviderStore((s) => s.updateManagedModel)
   const removeManagedModel = useProviderStore((s) => s.removeManagedModel)
+  const resetModelConfigurationToDefaults = useProviderStore(
+    (s) => s.resetModelConfigurationToDefaults
+  )
 
   const [modelSearch, setModelSearch] = useState('')
   const [providerFilter, setProviderFilter] = useState(ALL_PROVIDER_FILTER)
@@ -3571,11 +3680,28 @@ export function ModelManagementPanel(): React.JSX.Element {
     return true
   }
 
+  const handleRestoreManagedModelDefaults = async (): Promise<void> => {
+    const ok = await confirm({
+      title: t('provider.modelManagementRestoreDefaultsConfirm'),
+      description: t('provider.modelManagementRestoreDefaultsDesc'),
+      confirmLabel: t('provider.modelManagementRestoreDefaults'),
+      variant: 'destructive'
+    })
+    if (!ok) return
+
+    resetModelConfigurationToDefaults()
+    setModelSearch('')
+    setProviderFilter(ALL_PROVIDER_FILTER)
+    setEditingModel(null)
+    setEditingThinkingModel(null)
+    toast.success(t('provider.modelManagementRestoreDefaultsDone'))
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl bg-background shadow-sm">
       <div className="shrink-0 border-b bg-muted/10 px-5 py-4">
         <div className="flex flex-col gap-4">
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex min-w-0 items-start gap-3">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border bg-background text-primary shadow-xs">
                 <Layers className="size-4" />
@@ -3589,15 +3715,26 @@ export function ModelManagementPanel(): React.JSX.Element {
                 </p>
               </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 rounded-lg px-3 text-xs"
-              onClick={() => setAddModelOpen(true)}
-            >
-              <Plus className="size-3.5" />
-              {t('provider.addModel')}
-            </Button>
+            <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 rounded-lg px-3 text-xs text-muted-foreground"
+                onClick={() => void handleRestoreManagedModelDefaults()}
+              >
+                <RefreshCw className="size-3.5" />
+                {t('provider.modelManagementRestoreDefaults')}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 rounded-lg px-3 text-xs"
+                onClick={() => setAddModelOpen(true)}
+              >
+                <Plus className="size-3.5" />
+                {t('provider.addModel')}
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -3845,14 +3982,14 @@ export function ModelManagementPanel(): React.JSX.Element {
                         {model.contextLength && (
                           <span className="rounded-full bg-muted/45 px-2 py-0.5">
                             {t('provider.modelMetaContext', {
-                              count: Math.round(model.contextLength / 1024)
+                              count: toRoundedTokenThousands(model.contextLength)
                             })}
                           </span>
                         )}
                         {model.maxOutputTokens && (
                           <span className="rounded-full bg-muted/45 px-2 py-0.5">
                             {t('provider.modelMetaOutput', {
-                              count: Math.round(model.maxOutputTokens / 1024)
+                              count: toRoundedTokenThousands(model.maxOutputTokens)
                             })}
                           </span>
                         )}

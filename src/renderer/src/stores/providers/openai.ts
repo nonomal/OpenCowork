@@ -2,6 +2,8 @@ import type { BuiltinProviderPreset } from './types'
 
 export const openaiPreset: BuiltinProviderPreset = {
   builtinId: 'openai',
+  // v2: server-tool capability flags (supportsBuiltinSearch/supportsImageGeneration)
+  version: 2,
   name: 'OpenAI',
   type: 'openai-chat',
   defaultBaseUrl: 'https://api.openai.com/v1',
@@ -342,7 +344,7 @@ export const openaiPreset: BuiltinProviderPreset = {
       enabled: true,
       serviceTier: 'priority',
       // Synced with Codex's model catalog: 400K total window − 128K reserved output.
-      contextLength: 272_000,
+      contextLength: 372_000,
       maxOutputTokens: 128_000,
       supportsVision: true,
       supportsFunctionCall: false,
@@ -368,7 +370,7 @@ export const openaiPreset: BuiltinProviderPreset = {
       enabled: true,
       serviceTier: 'priority',
       // Synced with Codex's model catalog: 400K total window − 128K reserved output.
-      contextLength: 272_000,
+      contextLength: 372_000,
       maxOutputTokens: 128_000,
       supportsVision: true,
       supportsFunctionCall: false,
@@ -396,7 +398,7 @@ export const openaiPreset: BuiltinProviderPreset = {
       enabled: true,
       serviceTier: 'priority',
       // Synced with Codex's model catalog: 400K total window − 128K reserved output.
-      contextLength: 272_000,
+      contextLength: 372_000,
       maxOutputTokens: 128_000,
       supportsVision: true,
       supportsFunctionCall: false,

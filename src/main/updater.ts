@@ -5,7 +5,6 @@ import { autoUpdater } from 'electron-updater'
 import { writeCrashLog } from './crash-logger'
 import { safeSendMessagePackToWindow } from './window-ipc'
 import { readSettings } from './ipc/settings-handlers'
-import { registerMessagePackHandler } from './ipc/messagepack-handler'
 import { getUpdateDistributionInfo, isAutoInstallUpdateSupported } from './distribution'
 
 type WindowGetter = () => BrowserWindow | null
@@ -442,6 +441,117 @@ function installDownloadedUpdate(
   return { success: true }
 }
 
+export async function requestUpdateCheck(): Promise<
+  | {
+      success: true
+      available: boolean
+      currentVersion: string
+      latestVersion: string | null
+      skipped: boolean
+      distribution: ReturnType<typeof getUpdateDistributionInfo>['distribution']
+      supportsAutoInstall: boolean
+      releaseUrl: string
+    }
+  | { success: false; error: string }
+> {
+  try {
+    console.log('[Updater] User requested update check')
+    const unsupportedReason = getUpdaterUnsupportedReason()
+    if (unsupportedReason) {
+      return { success: false, error: unsupportedReason }
+    }
+
+    const result = (await checkForUpdatesSafely()) as { updateInfo?: { version?: string } } | null
+    const currentVersion = normalizeVersion(app.getVersion())
+
+    if (!result) {
+      return {
+        success: true,
+        available: false,
+        currentVersion,
+        latestVersion: null,
+        skipped: true,
+        ...getUpdateDistributionInfo()
+      }
+    }
+
+    const latestVersion = normalizeVersion(result.updateInfo?.version ?? null) || null
+    const available = isNewerVersion(latestVersion, currentVersion)
+    return {
+      success: true,
+      available,
+      currentVersion,
+      latestVersion,
+      skipped: false,
+      ...getUpdateDistributionInfo()
+    }
+  } catch (error) {
+    const message = formatErrorMessage(error)
+    if (shouldReportUpdaterError(message)) {
+      console.error('[Updater] Check failed:', error)
+    }
+    return { success: false, error: message }
+  }
+}
+
+export async function requestUpdateDownload(): Promise<
+  | { success: true }
+  | {
+      success: false
+      error: string
+      manualDownload?: boolean
+      distribution?: ReturnType<typeof getUpdateDistributionInfo>['distribution']
+      supportsAutoInstall?: boolean
+      releaseUrl?: string
+    }
+> {
+  try {
+    console.log('[Updater] User requested download')
+    if (!isAutoInstallUpdateSupported()) {
+      return {
+        success: false,
+        manualDownload: true,
+        error: GREEN_UPDATE_MESSAGE,
+        ...getUpdateDistributionInfo()
+      }
+    }
+
+    const unsupportedReason = getUpdaterUnsupportedReason()
+    if (unsupportedReason) {
+      return { success: false, error: unsupportedReason }
+    }
+
+    await downloadUpdateSafely()
+    return { success: true }
+  } catch (error) {
+    const message = formatErrorMessage(error)
+    if (shouldReportUpdaterError(message)) {
+      console.error('[Updater] Download failed:', error)
+    }
+    return { success: false, error: message }
+  }
+}
+
+export function getUpdateStatus(): {
+  success: true
+  downloadedVersion: string | null
+  distribution: ReturnType<typeof getUpdateDistributionInfo>['distribution']
+  supportsAutoInstall: boolean
+  releaseUrl: string
+} {
+  return {
+    success: true,
+    downloadedVersion: isAutoInstallUpdateSupported() ? downloadedUpdateVersion : null,
+    ...getUpdateDistributionInfo()
+  }
+}
+
+export function requestUpdateInstall(
+  options: AutoUpdateOptions
+): { success: true } | { success: false; error: string } {
+  return installDownloadedUpdate(options)
+}
+
 export function setupAutoUpdater(options: AutoUpdateOptions): void {
   if (initialized) return
   initialized = true
@@ -451,83 +561,6 @@ export function setupAutoUpdater(options: AutoUpdateOptions): void {
     // This uses dev-app-update.yml in the project root.
     autoUpdater.forceDevUpdateConfig = true
   }
-
-  registerMessagePackHandler<void>('update:check', async () => {
-    try {
-      console.log('[Updater] User requested update check')
-      const unsupportedReason = getUpdaterUnsupportedReason()
-      if (unsupportedReason) {
-        return { success: false, error: unsupportedReason }
-      }
-
-      const result = (await checkForUpdatesSafely()) as { updateInfo?: { version?: string } } | null
-      const currentVersion = normalizeVersion(app.getVersion())
-
-      if (!result) {
-        return {
-          success: true,
-          available: false,
-          currentVersion,
-          latestVersion: null,
-          skipped: true,
-          ...getUpdateDistributionInfo()
-        }
-      }
-
-      const latestVersion = normalizeVersion(result.updateInfo?.version ?? null) || null
-      const available = isNewerVersion(latestVersion, currentVersion)
-      return {
-        success: true,
-        available,
-        currentVersion,
-        latestVersion,
-        skipped: false,
-        ...getUpdateDistributionInfo()
-      }
-    } catch (error) {
-      const message = formatErrorMessage(error)
-      if (shouldReportUpdaterError(message)) {
-        console.error('[Updater] Check failed:', error)
-      }
-      return { success: false, error: message }
-    }
-  })
-
-  registerMessagePackHandler<void>('update:download', async () => {
-    try {
-      console.log('[Updater] User requested download')
-      if (!isAutoInstallUpdateSupported()) {
-        return {
-          success: false,
-          manualDownload: true,
-          error: GREEN_UPDATE_MESSAGE,
-          ...getUpdateDistributionInfo()
-        }
-      }
-
-      const unsupportedReason = getUpdaterUnsupportedReason()
-      if (unsupportedReason) {
-        return { success: false, error: unsupportedReason }
-      }
-
-      await downloadUpdateSafely()
-      return { success: true }
-    } catch (error) {
-      const message = formatErrorMessage(error)
-      if (shouldReportUpdaterError(message)) {
-        console.error('[Updater] Download failed:', error)
-      }
-      return { success: false, error: message }
-    }
-  })
-
-  registerMessagePackHandler<void>('update:status', async () => ({
-    success: true,
-    downloadedVersion: isAutoInstallUpdateSupported() ? downloadedUpdateVersion : null,
-    ...getUpdateDistributionInfo()
-  }))
-
-  registerMessagePackHandler<void>('update:install', async () => installDownloadedUpdate(options))
 
   if (!app.isPackaged) {
     console.log('[Updater] Running in development mode - using dev-app-update.yml')

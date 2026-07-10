@@ -10,6 +10,8 @@ import type {
 
 export interface BuiltinProviderPreset {
   builtinId: string
+  /** Monotonic preset version. Increment when built-in values should replace persisted config. */
+  version: number
   name: string
   type: ProviderType
   defaultBaseUrl: string

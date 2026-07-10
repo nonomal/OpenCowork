@@ -2,6 +2,7 @@ import type { BuiltinProviderPreset } from './types'
 
 export const azureOpenaiPreset: BuiltinProviderPreset = {
   builtinId: 'azure-openai',
+  version: 1,
   name: 'Azure OpenAI',
   type: 'openai-chat',
   defaultBaseUrl: '',

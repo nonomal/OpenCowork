@@ -2,6 +2,7 @@ import type { BuiltinProviderPreset } from './types'
 
 export const qwenCodingPreset: BuiltinProviderPreset = {
   builtinId: 'qwen-coding',
+  version: 1,
   name: '通义千问（套餐）',
   type: 'anthropic',
   defaultBaseUrl: 'https://coding.dashscope.aliyuncs.com/apps/anthropic',
@@ -177,6 +178,7 @@ export const qwenCodingPreset: BuiltinProviderPreset = {
 
 export const qwenPreset: BuiltinProviderPreset = {
   builtinId: 'qwen',
+  version: 1,
   name: '通义千问（官方）',
   type: 'openai-chat',
   defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',

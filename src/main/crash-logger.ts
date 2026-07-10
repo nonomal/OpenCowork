@@ -1,5 +1,6 @@
 import { app, crashReporter } from 'electron'
 import { appendFileSync, mkdirSync } from 'fs'
+import { appendFile } from 'fs/promises'
 import { release } from 'os'
 import { join } from 'path'
 import { getDataDir } from './db/database'
@@ -14,9 +15,13 @@ const MAX_DEPTH = 4
 type JsonRecord = Record<string, unknown>
 
 let nativeCrashReporterStarted = false
+let logDirReady = false
+let deferredWriteQueue = Promise.resolve()
 
 function ensureLogDir(): void {
+  if (logDirReady) return
   mkdirSync(LOG_DIR, { recursive: true })
+  logDirReady = true
 }
 
 function getLogFilePath(now: Date): string {
@@ -99,29 +104,48 @@ export interface CrashLogEntry {
   payload?: unknown
 }
 
+function createCrashLogLine(event: string, payload?: unknown): { path: string; line: string } {
+  ensureLogDir()
+  const now = new Date()
+  const entry: CrashLogEntry = {
+    timestamp: now.toISOString(),
+    event,
+    pid: process.pid,
+    ppid: process.ppid,
+    appVersion: getAppVersionSafe(),
+    platform: process.platform,
+    osRelease: release(),
+    versions: {
+      electron: process.versions.electron,
+      node: process.versions.node,
+      chrome: process.versions.chrome,
+      v8: process.versions.v8
+    },
+    ...(payload === undefined ? {} : { payload: truncatePayload(normalizeUnknown(payload)) })
+  }
+  return { path: getLogFilePath(now), line: `${JSON.stringify(entry)}\n` }
+}
+
 export function writeCrashLog(event: string, payload?: unknown): void {
   try {
-    ensureLogDir()
-    const now = new Date()
-    const entry: CrashLogEntry = {
-      timestamp: now.toISOString(),
-      event,
-      pid: process.pid,
-      ppid: process.ppid,
-      appVersion: getAppVersionSafe(),
-      platform: process.platform,
-      osRelease: release(),
-      versions: {
-        electron: process.versions.electron,
-        node: process.versions.node,
-        chrome: process.versions.chrome,
-        v8: process.versions.v8
-      },
-      ...(payload === undefined ? {} : { payload: truncatePayload(normalizeUnknown(payload)) })
-    }
-    appendFileSync(getLogFilePath(now), `${JSON.stringify(entry)}\n`, 'utf8')
-  } catch (err) {
-    console.error('[CrashLogger] Failed to write crash log:', err)
+    const record = createCrashLogLine(event, payload)
+    appendFileSync(record.path, record.line, 'utf8')
+  } catch (error) {
+    console.error('[CrashLogger] Failed to write crash log:', error)
+  }
+}
+
+/** Queue high-volume diagnostics without synchronously flushing the main-process event loop. */
+export function writeCrashLogDeferred(event: string, payload?: unknown): void {
+  try {
+    const record = createCrashLogLine(event, payload)
+    deferredWriteQueue = deferredWriteQueue
+      .then(() => appendFile(record.path, record.line, 'utf8'))
+      .catch((error) => {
+        console.error('[CrashLogger] Failed to write deferred crash log:', error)
+      })
+  } catch (error) {
+    console.error('[CrashLogger] Failed to queue crash log:', error)
   }
 }
 

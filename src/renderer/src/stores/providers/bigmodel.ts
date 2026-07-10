@@ -8,6 +8,7 @@ const glmThinkingConfig = (): ThinkingConfig => ({
 
 export const bigmodelCodingPreset: BuiltinProviderPreset = {
   builtinId: 'bigmodel-coding',
+  version: 1,
   name: '智谱AI（套餐）',
   type: 'anthropic',
   defaultBaseUrl: 'https://open.bigmodel.cn/api/anthropic',
@@ -76,6 +77,7 @@ export const bigmodelCodingPreset: BuiltinProviderPreset = {
 
 export const bigmodelPreset: BuiltinProviderPreset = {
   builtinId: 'bigmodel',
+  version: 1,
   name: '智谱AI（官方）',
   type: 'openai-chat',
   defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',

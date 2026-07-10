@@ -7,6 +7,7 @@ import type {
   MigrationPreviewResult
 } from '../../shared/migration-types'
 import { parseOpenCodeConfig } from './opencode-parser'
+import { getAiProviderDirectory, readPersistedProviderStore } from '../lib/ai-provider-store'
 import type {
   AIModelConfig,
   AIProvider,
@@ -27,7 +28,7 @@ import type {
 } from './types'
 
 const DATA_DIR = path.join(os.homedir(), '.open-cowork')
-const CONFIG_PATH = path.join(DATA_DIR, 'config.json')
+const AI_PROVIDER_DIR = getAiProviderDirectory(DATA_DIR)
 const COMMANDS_DIR = path.join(DATA_DIR, 'commands')
 const AGENTS_DIR = path.join(DATA_DIR, 'agents')
 const MCP_PATH = path.join(DATA_DIR, 'mcp-servers.json')
@@ -47,10 +48,6 @@ interface ExistingAgentEntry {
   name: string
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function readJsonFile<T>(filePath: string, fallback: T): T {
   try {
     if (!fs.existsSync(filePath)) return fallback
@@ -61,11 +58,7 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
 }
 
 function readProviderPersistState(): ProviderPersistState {
-  const config = readJsonFile<Record<string, unknown>>(CONFIG_PATH, {})
-  const bucket = isPlainObject(config['opencowork-providers'])
-    ? (config['opencowork-providers'] as Record<string, unknown>)
-    : {}
-  const state = isPlainObject(bucket.state) ? (bucket.state as Record<string, unknown>) : {}
+  const state = readPersistedProviderStore()?.state ?? {}
 
   return {
     providers: Array.isArray(state.providers) ? (state.providers as AIProvider[]) : [],
@@ -472,6 +465,7 @@ function buildProviderPreviewItems(
       title: source.name,
       sourceLabel: source.key,
       targetLabel: conflict ? conflict.name : draft.provider.name,
+      targetPath: AI_PROVIDER_DIR,
       conflict: Boolean(conflict),
       defaultAction: conflict ? 'replace' : 'create',
       allowedActions: buildAllowedActions(Boolean(conflict)),
@@ -554,6 +548,7 @@ function buildModelSelectionItem(
     targetLabel: sourceProvider
       ? `${sourceProvider.name} / ${sourceModel?.name ?? sourceModelId}`
       : currentLabel,
+    targetPath: AI_PROVIDER_DIR,
     conflict: true,
     defaultAction: warnings.length > 0 ? 'skip' : 'replace',
     allowedActions: ['replace', 'skip'],

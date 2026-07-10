@@ -1,8 +1,8 @@
 import { createIpcStateStorage } from './ipc-state-storage'
 
 /**
- * Custom Zustand StateStorage that delegates to ~/.open-cowork/config.json
- * via IPC. Used for provider configurations including API keys.
+ * Custom Zustand StateStorage that delegates generic application state to
+ * ~/.open-cowork/config.json via IPC. Provider configurations use ai-provider-storage instead.
  */
 export const configStorage = createIpcStateStorage({
   getChannel: 'config:get',

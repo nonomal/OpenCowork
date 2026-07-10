@@ -2,14 +2,20 @@ import { app, BrowserWindow, type WebContents } from 'electron'
 import { safeSendMessagePackToWindow } from '../window-ipc'
 import { registerMessagePackHandler } from './messagepack-handler'
 import { getNativeWorker } from '../lib/native-worker'
-import {
-  createTerminalSession,
-  getTerminalSessionSnapshot,
-  killTerminalSession,
-  onTerminalSessionExit,
-  onTerminalSessionOutput,
-  writeTerminalSession
-} from './terminal-handlers'
+
+type TerminalHandlersModule = typeof import('./terminal-handlers')
+
+let terminalHandlersModule: TerminalHandlersModule | null = null
+let terminalHandlersPromise: Promise<TerminalHandlersModule> | null = null
+
+function loadTerminalHandlers(): Promise<TerminalHandlersModule> {
+  if (terminalHandlersModule) return Promise.resolve(terminalHandlersModule)
+  terminalHandlersPromise ??= import('./terminal-handlers').then((module) => {
+    terminalHandlersModule = module
+    return module
+  })
+  return terminalHandlersPromise
+}
 
 interface ProcessMetadata {
   source?: string
@@ -202,6 +208,12 @@ export function registerProcessManagerHandlers(): void {
     shell?: string
     metadata?: ProcessMetadata
   }>('process:spawn', async (args, event) => {
+    const {
+      createTerminalSession,
+      getTerminalSessionSnapshot,
+      onTerminalSessionExit,
+      onTerminalSessionOutput
+    } = await loadTerminalHandlers()
     const id = `proc-${nextId++}`
     const configuredShell = args.shell?.trim() || undefined
     const cwd = args.cwd || process.cwd()
@@ -275,6 +287,7 @@ export function registerProcessManagerHandlers(): void {
   })
 
   registerMessagePackHandler<{ id: string }>('process:kill', async (args) => {
+    const { killTerminalSession } = await loadTerminalHandlers()
     const managed = processes.get(args.id)
     if (!managed) return { error: 'Process not found' }
     try {
@@ -294,6 +307,7 @@ export function registerProcessManagerHandlers(): void {
   registerMessagePackHandler<{ id: string; input: string; appendNewline?: boolean }>(
     'process:write',
     async (args) => {
+      const { getTerminalSessionSnapshot, writeTerminalSession } = await loadTerminalHandlers()
       const managed = processes.get(args.id)
       if (!managed) return { error: 'Process not found' }
       if (managed.exited || managed.exitCode !== undefined) {
@@ -350,9 +364,10 @@ export function registerProcessManagerHandlers(): void {
 }
 
 export function killAllManagedProcesses(): void {
+  const terminalHandlers = terminalHandlersModule
   processes.forEach((managed) => {
     try {
-      void killTerminalSession(managed.terminalId)
+      if (terminalHandlers) void terminalHandlers.killTerminalSession(managed.terminalId)
       managed.cleanup?.()
     } catch {
       // ignore

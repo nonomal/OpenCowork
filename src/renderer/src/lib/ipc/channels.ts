@@ -89,6 +89,10 @@ export const IPC = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
 
+  // AI provider persistence
+  AI_PROVIDER_GET: 'ai-provider:get',
+  AI_PROVIDER_SET: 'ai-provider:set',
+
   // Input Drafts
   INPUT_DRAFT_GET: 'input-draft:get',
   INPUT_DRAFT_SET: 'input-draft:set',
