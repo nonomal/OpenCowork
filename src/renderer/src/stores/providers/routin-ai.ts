@@ -29,7 +29,9 @@ export const routinAiPreset: BuiltinProviderPreset = {
   ],
   defaultModels: [
     // Kimi K3（2026-07-16，价格与 Moonshot 官方一致）：thinking 常开，走顶层 reasoning_effort
-    // （当前仅 max 档）；temperature/top_p 等采样参数服务端固定，请求中必须省略。
+    // （当前仅 max 档）；temperature/top_p 等采样参数服务端固定，请求中必须省略。输出上限也
+    // 省略（服务端默认 131072）：max_tokens 是遗留别名，推理模型下与思考内容共享预算，
+    // 小值会导致 200 空内容。
     {
       id: 'kimi-k3',
       name: 'Kimi K3',
@@ -48,7 +50,9 @@ export const routinAiPreset: BuiltinProviderPreset = {
         reasoningEffortLevels: ['max'],
         defaultReasoningEffort: 'max'
       },
-      requestOverrides: { omitBodyKeys: ['temperature'] }
+      requestOverrides: {
+        omitBodyKeys: ['temperature', 'max_tokens', 'max_completion_tokens']
+      }
     },
     {
       id: 'kimi-k2.7-code',

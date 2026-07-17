@@ -35,7 +35,20 @@ export interface CopilotQuota {
   fetchedAt: number
 }
 
-export type ProviderQuota = CodexQuota | CopilotQuota
+export interface KimiQuotaWindow extends CodexQuotaWindow {
+  label?: string
+}
+
+// Kimi Code 套餐 `/usages`：顶层 usage 为周额度，limits[] 为滚动窗口（当前线上为 5 小时）。
+export interface KimiQuota {
+  type: 'kimi'
+  weekly?: KimiQuotaWindow
+  windows?: KimiQuotaWindow[]
+  parallelLimit?: number
+  fetchedAt: number
+}
+
+export type ProviderQuota = CodexQuota | CopilotQuota | KimiQuota
 
 export interface QuotaUpdatePayload {
   requestId?: string

@@ -62,7 +62,8 @@ import {
   useQuotaStore,
   type CodexQuota,
   type CodexQuotaWindow,
-  type CopilotQuota
+  type CopilotQuota,
+  type KimiQuotaWindow
 } from '@renderer/stores/quota-store'
 import {
   startProviderOAuth,
@@ -81,6 +82,7 @@ import {
   type OAuthDeviceCodeInfo
 } from '@renderer/lib/auth/oauth'
 import { clearCopilotQuota, exchangeCopilotToken } from '@renderer/lib/auth/copilot'
+import { fetchKimiQuota } from '@renderer/lib/auth/kimi'
 import { AccountListEditor } from './AccountListEditor'
 import type {
   ProviderType,
@@ -1707,6 +1709,10 @@ function ProviderConfigPanel({ provider }: { provider: AIProvider }): React.JSX.
   const isChannelAuth = authMode === 'channel'
   const isCodexProvider = provider.builtinId === 'codex-oauth'
   const isCopilotProvider = provider.builtinId === 'copilot-oauth'
+  const isKimiProvider = isMoonshotProviderConfig({
+    providerBuiltinId: provider.builtinId,
+    baseUrl: provider.baseUrl
+  })
   const supportsManualOAuth = isCodexProvider || isCopilotProvider
 
   const [showKey, setShowKey] = useState(false)
@@ -1762,6 +1768,14 @@ function ProviderConfigPanel({ provider }: { provider: AIProvider }): React.JSX.
       null
     return quota?.type === 'copilot' ? (quota as CopilotQuota) : null
   }, [isCopilotProvider, provider.id, provider.builtinId, quotaByKey])
+  const kimiQuota = useMemo(() => {
+    if (!isKimiProvider) return null
+    const quota =
+      quotaByKey[provider.id] ||
+      (provider.builtinId ? quotaByKey[provider.builtinId] : undefined) ||
+      null
+    return quota?.type === 'kimi' ? quota : null
+  }, [isKimiProvider, provider.id, provider.builtinId, quotaByKey])
   const formatPercent = (value?: number): string | null => {
     if (value === undefined || Number.isNaN(value)) return null
     const rounded = Math.round(value * 10) / 10
@@ -1894,6 +1908,12 @@ function ProviderConfigPanel({ provider }: { provider: AIProvider }): React.JSX.
     if (value === undefined || Number.isNaN(value)) return null
     const rounded = Math.round(value * 100) / 100
     return String(rounded)
+  }
+  const kimiWindowLabel = (quotaWindow: KimiQuotaWindow): string => {
+    if (quotaWindow.windowMinutes === 300) return t('provider.kimiQuota5h')
+    if (quotaWindow.label) return quotaWindow.label
+    const time = formatDurationMinutes(quotaWindow.windowMinutes)
+    return time ? t('provider.kimiQuotaWindowLimit', { time }) : t('provider.kimiQuota5h')
   }
   const formatCredits = (quota: CodexQuota | null): string => {
     if (!quota?.credits) return '-'
@@ -2180,11 +2200,17 @@ function ProviderConfigPanel({ provider }: { provider: AIProvider }): React.JSX.
   }
 
   const handleFetchQuota = async (): Promise<void> => {
-    if (!isCodexProvider && !isCopilotProvider) return
+    if (!isCodexProvider && !isCopilotProvider && !isKimiProvider) return
     setFetchingQuota(true)
     try {
       const activeProvider = await ensureAuthForRequest()
       if (!activeProvider) return
+
+      if (isKimiProvider) {
+        await fetchKimiQuota(activeProvider)
+        toast.success(t('provider.quotaFetched'))
+        return
+      }
 
       if (isCopilotProvider) {
         if (!activeProvider.oauth?.accessToken) {
@@ -2844,6 +2870,49 @@ function ProviderConfigPanel({ provider }: { provider: AIProvider }): React.JSX.
                     {copilotQuota.apiBaseUrl || '-'}
                   </div>
                 </div>
+              </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                {t('provider.codexQuotaUnavailable')}
+              </p>
+            )}
+          </section>
+        )}
+
+        {isKimiProvider && (
+          <section className="space-y-4 pt-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">{t('provider.codexQuotaTitle')}</label>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                disabled={!authReadyForUi || fetchingQuota}
+                onClick={() => void handleFetchQuota()}
+              >
+                {fetchingQuota ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3" />
+                )}
+                {fetchingQuota ? t('provider.fetchingQuota') : t('provider.fetchQuota')}
+              </Button>
+            </div>
+            {kimiQuota ? (
+              <div className="space-y-4">
+                {(kimiQuota.windows ?? []).map((quotaWindow, index) => (
+                  <QuotaProgressBar
+                    key={`${quotaWindow.windowMinutes ?? 'window'}-${index}`}
+                    label={kimiWindowLabel(quotaWindow)}
+                    window={quotaWindow}
+                  />
+                ))}
+                <QuotaProgressBar label={t('provider.kimiQuotaWeekly')} window={kimiQuota.weekly} />
+                {kimiQuota.parallelLimit !== undefined && (
+                  <div className="text-[10px] text-muted-foreground/50 text-right">
+                    {t('provider.kimiQuotaParallel', { count: kimiQuota.parallelLimit })}
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-[11px] text-muted-foreground">
