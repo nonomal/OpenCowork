@@ -599,6 +599,29 @@
         "summary": "模式：{{mode}}"
       }
     },
+    "codegraph": {
+      "title": "代码图谱",
+      "executing": "正在检索代码图谱…",
+      "notIndexed": "索引未就绪",
+      "notIndexedBadge": "索引中",
+      "files": "涉及文件",
+      "result": "图谱结果",
+      "input": "输入参数",
+      "filesCount": "{{count}} 个文件",
+      "symbolsCount": "{{count}} 个符号",
+      "tools": {
+        "explore": "探索",
+        "search": "符号搜索",
+        "node": "节点详情",
+        "callers": "调用方",
+        "callees": "被调用",
+        "impact": "影响分析",
+        "files": "文件清单",
+        "status": "索引状态",
+        "index": "构建索引",
+        "sync": "增量同步"
+      }
+    },
     "browser": {
       "running": "浏览器操作执行中",
       "completed": "浏览器操作已完成",

@@ -659,6 +659,10 @@ export interface AIProvider {
   useSystemProxy?: boolean
   /** Whether to skip TLS certificate validation for this provider's agent requests */
   allowInsecureTls?: boolean
+  /** Whether requests include the temperature parameter. Defaults to true when omitted. */
+  sendTemperature?: boolean
+  /** Whether requests include the max output tokens parameter (max_tokens / max_completion_tokens / max_output_tokens). Defaults to true when omitted. */
+  sendMaxOutputTokens?: boolean
   /** Custom User-Agent header (e.g. Moonshot套餐 requires 'RooCode/3.48.0') */
   userAgent?: string
   /** Default model ID to use when this provider is first selected */

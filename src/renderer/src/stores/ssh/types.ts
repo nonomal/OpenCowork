@@ -26,6 +26,8 @@ export interface SshConnection {
   lastConnectedAt: number | null
   createdAt: number
   updatedAt: number
+  hasPassword: boolean
+  hasPassphrase: boolean
 }
 
 export interface SshSession {
@@ -33,6 +35,16 @@ export interface SshSession {
   connectionId: string
   status: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error'
   error?: string
+}
+
+export type SshConnectLogLevel = 'info' | 'debug' | 'warn' | 'error'
+
+export interface SshConnectLogEntry {
+  seq: number
+  ts: number
+  level: SshConnectLogLevel
+  stage: 'dial' | 'handshake' | 'auth' | 'shell' | 'reconnect'
+  message: string
 }
 
 export interface SshTab {
@@ -111,6 +123,33 @@ export type SftpTransferProgress = {
   totalItems?: number
 }
 
+export type SftpTransferRequest =
+  | {
+      type: 'upload'
+      connectionId: string
+      remoteDir: string
+      localPaths: string[]
+      conflictPolicy?: SftpConflictPolicy
+      resume?: boolean
+    }
+  | {
+      type: 'download'
+      connectionId: string
+      remotePaths: string[]
+      localDir: string
+      conflictPolicy?: SftpConflictPolicy
+      resume?: boolean
+    }
+  | {
+      type: 'remote-copy'
+      sourceConnectionId: string
+      targetConnectionId: string
+      sourcePaths: string[]
+      targetDir: string
+      conflictPolicy?: SftpConflictPolicy
+      resume?: boolean
+    }
+
 export type SftpTransferTask = {
   taskId: string
   type: SftpTransferTaskType
@@ -122,6 +161,8 @@ export type SftpTransferTask = {
   currentItem?: string
   updatedAt: number
   conflictPolicy?: SftpConflictPolicy
+  // Original request, kept so a failed transfer can be retried with resume.
+  request?: SftpTransferRequest
 }
 
 export type SftpConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error'
@@ -165,6 +206,8 @@ export interface SshConnectionRow {
   last_connected_at: number | null
   created_at: number
   updated_at: number
+  has_password?: boolean
+  has_passphrase?: boolean
 }
 
 export function rowToGroup(row: SshGroupRow): SshGroup {
@@ -194,7 +237,9 @@ export function rowToConnection(row: SshConnectionRow): SshConnection {
     sortOrder: row.sort_order,
     lastConnectedAt: row.last_connected_at,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+    hasPassword: row.has_password === true,
+    hasPassphrase: row.has_passphrase === true
   }
 }
 

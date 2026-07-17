@@ -60,7 +60,13 @@
       "Bash(sips -s format png -z 256 256 /Users/token/Desktop/code/OpenCowork/logo.webp --out /tmp/capy-big.png)",
       "Bash(ls -la /tmp/capy-big.png)",
       "Bash(npm install *)",
-      "Bash(grep -E '\\\\.\\(tsx?|vue\\)$')"
+      "Bash(grep -E '\\\\.\\(tsx?|vue\\)$')",
+      "Bash(pkill -f \"electron-vite dev\")",
+      "Bash(pkill -f \"electron.*OpenCowork\")",
+      "Bash(awk '{print $11, $12}')",
+      "Bash(python3 -c ' *)",
+      "Bash(sed -n '/@keyframes thinking-live-label-agile/,/^}/p' src/renderer/src/assets/main.css)",
+      "Bash(sed -n '/@keyframes pending-assistant-bar-breathe/,/^}/p' src/renderer/src/assets/main.css)"
     ]
   }
 }

@@ -298,6 +298,8 @@ interface SshConnectionRow {
   last_connected_at: number | null
   created_at: number
   updated_at: number
+  has_password: boolean
+  has_passphrase: boolean
 }
 
 function ensureSshConfigWatcher(): void {
@@ -335,7 +337,9 @@ function toConnectionRow(connection: SshConnectionMeta): SshConnectionRow {
     sort_order: connection.sortOrder,
     last_connected_at: connection.lastConnectedAt,
     created_at: connection.createdAt,
-    updated_at: connection.updatedAt
+    updated_at: connection.updatedAt,
+    has_password: connection.hasPassword,
+    has_passphrase: connection.hasPassphrase
   }
 }
 

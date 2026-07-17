@@ -536,12 +536,39 @@ function ensureTemperatureOmit(
   return result
 }
 
+/**
+ * Body keys covering the max output tokens parameter across protocols:
+ * openai-chat (max_tokens / max_completion_tokens), openai-responses (max_output_tokens),
+ * anthropic (max_tokens), gemini (maxOutputTokens inside generationConfig).
+ */
+const MAX_OUTPUT_TOKENS_BODY_KEYS = [
+  'max_tokens',
+  'max_completion_tokens',
+  'max_output_tokens',
+  'maxOutputTokens'
+]
+
+function paramCarryOmitOverrides(
+  provider: Pick<AIProvider, 'sendTemperature' | 'sendMaxOutputTokens'> | undefined
+): RequestOverrides | undefined {
+  if (!provider) return undefined
+  const omitBodyKeys: string[] = []
+  if (provider.sendTemperature === false) omitBodyKeys.push('temperature')
+  if (provider.sendMaxOutputTokens === false) omitBodyKeys.push(...MAX_OUTPUT_TOKENS_BODY_KEYS)
+  return omitBodyKeys.length > 0 ? { omitBodyKeys } : undefined
+}
+
 function buildRequestOverrides(
   providerOverrides: RequestOverrides | undefined,
   modelOverrides: RequestOverrides | undefined,
-  modelId?: string
+  modelId?: string,
+  paramCarry?: Pick<AIProvider, 'sendTemperature' | 'sendMaxOutputTokens'>
 ): RequestOverrides | undefined {
-  const merged = mergeRequestOverrides(providerOverrides, modelOverrides)
+  const merged = mergeRequestOverrides(
+    providerOverrides,
+    modelOverrides,
+    paramCarryOmitOverrides(paramCarry)
+  )
   return ensureTemperatureOmit(merged, modelId)
 }
 
@@ -1372,7 +1399,8 @@ export const useProviderStore = create<ProviderStore>()(
         const requestOverrides = buildRequestOverrides(
           provider.requestOverrides,
           activeModel?.requestOverrides,
-          activeModel?.id ?? activeModelId
+          activeModel?.id ?? activeModelId,
+          provider
         )
         const { websocketUrl, websocketMode } = resolveResponsesWebsocket(
           activeModel,
@@ -1496,7 +1524,8 @@ export const useProviderStore = create<ProviderStore>()(
         const requestOverrides = buildRequestOverrides(
           provider.requestOverrides,
           model?.requestOverrides,
-          model?.id ?? resolvedModelId
+          model?.id ?? resolvedModelId,
+          provider
         )
         const { websocketUrl, websocketMode } = resolveResponsesWebsocket(
           model,

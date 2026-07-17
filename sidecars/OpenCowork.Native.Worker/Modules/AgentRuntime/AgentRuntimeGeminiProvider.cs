@@ -270,7 +270,7 @@ internal static class AgentRuntimeGeminiProvider
 
             if (!omitted.Contains("generationConfig"))
             {
-                WriteGenerationConfig(writer, provider);
+                WriteGenerationConfig(writer, provider, omitted);
             }
 
             if (!omitted.Contains("systemInstruction") &&
@@ -430,22 +430,29 @@ internal static class AgentRuntimeGeminiProvider
         writer.WriteEndArray();
     }
 
-    private static void WriteGenerationConfig(Utf8JsonWriter writer, JsonElement provider)
+    private static void WriteGenerationConfig(
+        Utf8JsonWriter writer,
+        JsonElement provider,
+        HashSet<string> omitted)
     {
-        var hasConfig = JsonHelpers.GetDoubleNullable(provider, "temperature") is not null ||
+        var includeTemperature = !omitted.Contains("temperature") &&
+            JsonHelpers.GetDoubleNullable(provider, "temperature") is not null;
+        var includeMaxTokens = !omitted.Contains("maxOutputTokens") &&
             JsonHelpers.GetIntNullable(provider, "maxTokens") is not null;
-        if (!hasConfig)
+        if (!includeTemperature && !includeMaxTokens)
         {
             return;
         }
 
         writer.WritePropertyName("generationConfig");
         writer.WriteStartObject();
-        if (JsonHelpers.GetDoubleNullable(provider, "temperature") is { } temperature)
+        if (includeTemperature &&
+            JsonHelpers.GetDoubleNullable(provider, "temperature") is { } temperature)
         {
             writer.WriteNumber("temperature", temperature);
         }
-        if (JsonHelpers.GetIntNullable(provider, "maxTokens") is { } maxTokens && maxTokens > 0)
+        if (includeMaxTokens &&
+            JsonHelpers.GetIntNullable(provider, "maxTokens") is { } maxTokens && maxTokens > 0)
         {
             writer.WriteNumber("maxOutputTokens", maxTokens);
         }

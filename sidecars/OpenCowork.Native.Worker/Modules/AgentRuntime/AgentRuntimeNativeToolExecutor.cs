@@ -30,8 +30,10 @@ internal static class AgentRuntimeNativeToolExecutor
         "Read", "Write", "Edit", "NotebookEdit", "LS", "Glob", "Grep", "Bash", "Shell"
     };
 
-    private static readonly Dictionary<string, Dictionary<string, FileSnapshot>> ReadSnapshotsByRun =
+    private static readonly Dictionary<string, Dictionary<string, ReadHistoryEntry>> ReadSnapshotsByRun =
         new(StringComparer.Ordinal);
+
+    private readonly record struct ReadHistoryEntry(FileSnapshot Snapshot, string? Hash);
 
     public static bool CanExecute(string toolName, JsonElement parameters)
     {
@@ -607,7 +609,7 @@ internal static class AgentRuntimeNativeToolExecutor
             async () =>
             {
                 var content = await File.ReadAllTextAsync(path, Encoding.UTF8, cancellationToken);
-                RecordRead(parameters, path);
+                RecordRead(parameters, path, content);
                 var offset = Math.Max(1, JsonHelpers.GetInt(input, "offset", 1));
                 var limit = Math.Max(1, Math.Min(JsonHelpers.GetInt(input, "limit", ReadDefaultLimit), ReadDefaultLimit));
                 var lines = content.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
@@ -648,7 +650,8 @@ internal static class AgentRuntimeNativeToolExecutor
             throw new InvalidOperationException("Write requires a content string");
         }
 
-        var guardError = AssertCurrentFileMatchesLastRead(parameters, path, "Write", allowMissingFile: true);
+        var guardError = await AssertCurrentFileMatchesLastReadAsync(
+            parameters, path, "Write", allowMissingFile: true, cancellationToken);
         if (guardError is not null)
         {
             throw new InvalidOperationException(guardError);
@@ -671,7 +674,7 @@ internal static class AgentRuntimeNativeToolExecutor
 
                 await File.WriteAllTextAsync(path, content, Encoding.UTF8, cancellationToken);
                 var tracked = RecordTextWriteChange(parameters, call, path, before, BuildLightTextSnapshot(content));
-                RecordRead(parameters, path);
+                RecordRead(parameters, path, content);
                 return EncodeJsonObject(writer =>
                 {
                     writer.WriteBoolean("success", true);
@@ -706,7 +709,8 @@ internal static class AgentRuntimeNativeToolExecutor
             return EncodeError("new_string must be different from old_string");
         }
 
-        var guardError = AssertCurrentFileMatchesLastRead(parameters, path, "Edit", allowMissingFile: false);
+        var guardError = await AssertCurrentFileMatchesLastReadAsync(
+            parameters, path, "Edit", allowMissingFile: false, cancellationToken);
         if (guardError is not null)
         {
             return EncodeError(guardError);
@@ -748,7 +752,7 @@ internal static class AgentRuntimeNativeToolExecutor
                     : ReplaceFirst(content, matchedVariant.Value.Text, replacementText);
                 await File.WriteAllTextAsync(path, updated, Encoding.UTF8, cancellationToken);
                 var tracked = RecordTextWriteChange(parameters, call, path, before, BuildLightTextSnapshot(updated));
-                RecordRead(parameters, path);
+                RecordRead(parameters, path, updated);
                 return EncodeJsonObject(writer =>
                 {
                     writer.WriteBoolean("success", true);
@@ -772,7 +776,8 @@ internal static class AgentRuntimeNativeToolExecutor
             return EncodeError("NotebookEdit requires notebook_path or file_path");
         }
 
-        var guardError = AssertCurrentFileMatchesLastRead(parameters, path, "NotebookEdit", allowMissingFile: false);
+        var guardError = await AssertCurrentFileMatchesLastReadAsync(
+            parameters, path, "NotebookEdit", allowMissingFile: false, cancellationToken);
         if (guardError is not null)
         {
             return EncodeError(guardError);
@@ -840,7 +845,7 @@ internal static class AgentRuntimeNativeToolExecutor
                 var updated = notebook.ToJsonString(NotebookJsonOptions) + "\n";
                 await File.WriteAllTextAsync(path, updated, Encoding.UTF8, cancellationToken);
                 var tracked = RecordTextWriteChange(parameters, call, path, before, BuildLightTextSnapshot(updated));
-                RecordRead(parameters, path);
+                RecordRead(parameters, path, updated);
                 return EncodeJsonObject(writer =>
                 {
                     writer.WriteBoolean("success", true);
@@ -1799,7 +1804,7 @@ internal static class AgentRuntimeNativeToolExecutor
         return matchedVariant.Eol ?? DetectDominantEolStyle(content);
     }
 
-    private static void RecordRead(JsonElement parameters, string path)
+    private static void RecordRead(JsonElement parameters, string path, string content)
     {
         var runId = JsonHelpers.GetString(parameters, "runId");
         if (string.IsNullOrWhiteSpace(runId))
@@ -1808,24 +1813,25 @@ internal static class AgentRuntimeNativeToolExecutor
         }
 
         var fullPath = Path.GetFullPath(path);
-        var snapshot = CaptureSnapshot(fullPath);
+        var entry = new ReadHistoryEntry(CaptureSnapshot(fullPath), HashText(content));
         var key = NormalizeReadHistoryPath(fullPath);
         lock (ReadSnapshotsByRun)
         {
             if (!ReadSnapshotsByRun.TryGetValue(runId, out var snapshots))
             {
-                snapshots = new Dictionary<string, FileSnapshot>(StringComparer.Ordinal);
+                snapshots = new Dictionary<string, ReadHistoryEntry>(StringComparer.Ordinal);
                 ReadSnapshotsByRun[runId] = snapshots;
             }
-            snapshots[key] = snapshot;
+            snapshots[key] = entry;
         }
     }
 
-    private static string? AssertCurrentFileMatchesLastRead(
+    private static async Task<string?> AssertCurrentFileMatchesLastReadAsync(
         JsonElement parameters,
         string path,
         string toolName,
-        bool allowMissingFile)
+        bool allowMissingFile,
+        CancellationToken cancellationToken)
     {
         var runId = JsonHelpers.GetString(parameters, "runId");
         if (string.IsNullOrWhiteSpace(runId))
@@ -1840,13 +1846,13 @@ internal static class AgentRuntimeNativeToolExecutor
             return null;
         }
 
-        FileSnapshot? previous = null;
+        ReadHistoryEntry? previous = null;
         lock (ReadSnapshotsByRun)
         {
             if (ReadSnapshotsByRun.TryGetValue(runId, out var snapshots) &&
-                snapshots.TryGetValue(NormalizeReadHistoryPath(fullPath), out var snapshot))
+                snapshots.TryGetValue(NormalizeReadHistoryPath(fullPath), out var entry))
             {
-                previous = snapshot;
+                previous = entry;
             }
         }
 
@@ -1855,12 +1861,31 @@ internal static class AgentRuntimeNativeToolExecutor
             return $"{toolName} requires the file to be read in this agent turn first. Call Read on {fullPath} and retry.";
         }
 
-        if (!previous.Value.Equals(current))
+        if (previous.Value.Snapshot.Equals(current))
         {
-            return $"{toolName} refused to edit because the file changed since it was last read in this turn. Call Read on {fullPath} again and retry.";
+            return null;
         }
 
-        return null;
+        // Size/mtime are only a proxy for "changed". When they differ, fall back to a
+        // content comparison so a file that was re-saved or touched without an actual
+        // edit is not falsely refused. Only refuse when the content truly changed.
+        if (current.Exists && previous.Value.Hash is { } previousHash)
+        {
+            try
+            {
+                var currentText = await File.ReadAllTextAsync(fullPath, Encoding.UTF8, cancellationToken);
+                if (string.Equals(HashText(currentText), previousHash, StringComparison.Ordinal))
+                {
+                    return null;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Could not read the file to compare content; refuse conservatively below.
+            }
+        }
+
+        return $"{toolName} refused to edit because the file changed since it was last read in this turn. Call Read on {fullPath} again and retry.";
     }
 
     private static FileSnapshot CaptureSnapshot(string path)

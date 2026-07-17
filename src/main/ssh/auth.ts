@@ -19,6 +19,14 @@ export interface ResolvedJumpTarget {
   connection: SshConnectionWithSecrets
 }
 
+export type SshConnectLogLevel = 'info' | 'debug' | 'warn' | 'error'
+export type SshConnectStage = 'dial' | 'handshake' | 'auth' | 'shell' | 'reconnect'
+export type SshConnectLogger = (
+  level: SshConnectLogLevel,
+  stage: SshConnectStage,
+  message: string
+) => void
+
 export function toLayeredError(
   stage: LayeredSshError['stage'],
   message: string,
@@ -77,7 +85,8 @@ export function formatLayeredError(
 }
 
 export async function buildConnectConfig(
-  connection: SshConnectionWithSecrets
+  connection: SshConnectionWithSecrets,
+  onDebug?: (message: string) => void
 ): Promise<ConnectConfig> {
   if (!connection) throw new Error('Connection not found')
 
@@ -89,6 +98,11 @@ export async function buildConnectConfig(
     keepaliveCountMax: 3,
     readyTimeout: 30000
   }
+
+  // ssh2's debug callback surfaces protocol-level events (ident exchange,
+  // KEXINIT, negotiated algorithms, auth method attempts) — the real
+  // connection log the UI shows.
+  if (onDebug) config.debug = onDebug
 
   if (connection.authType === 'password') {
     if (!connection.password) {
@@ -231,22 +245,40 @@ async function connectClient(client: Client, config: ConnectConfig): Promise<voi
   })
 }
 
+function describeAuth(connection: SshConnectionWithSecrets): string {
+  if (connection.authType === 'password') return 'password'
+  if (connection.authType === 'privateKey') return `private key (${connection.privateKeyPath ?? '?'})`
+  return 'ssh-agent'
+}
+
 export async function connectWithProxyJump(
-  connection: SshConnectionWithSecrets
+  connection: SshConnectionWithSecrets,
+  logger?: SshConnectLogger
 ): Promise<{ client: Client; jumpClient?: Client }> {
-  const targetConfig = await buildConnectConfig(connection)
+  const targetDebug = logger ? (msg: string): void => logger('debug', 'handshake', msg) : undefined
+  const targetConfig = await buildConnectConfig(connection, targetDebug)
   const jumpTarget = await resolveProxyJumpTarget(connection)
+
   if (!jumpTarget) {
+    logger?.('info', 'dial', `Connecting to ${connection.host}:${connection.port}`)
+    logger?.('info', 'auth', `Authenticating as ${connection.username} via ${describeAuth(connection)}`)
     const client = new Client()
     await connectClient(client, targetConfig)
+    logger?.('info', 'auth', 'Authentication succeeded')
     return { client }
   }
 
   const jumpClient = new Client()
   try {
-    await connectClient(jumpClient, await buildConnectConfig(jumpTarget.connection))
+    logger?.('info', 'dial', `Connecting to jump host ${jumpTarget.label}`)
+    const jumpDebug = logger
+      ? (msg: string): void => logger('debug', 'handshake', `[jump] ${msg}`)
+      : undefined
+    await connectClient(jumpClient, await buildConnectConfig(jumpTarget.connection, jumpDebug))
+    logger?.('info', 'auth', 'Jump host authenticated')
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    logger?.('error', 'auth', `Jump host failed: ${message}`)
     throw isAuthFailureMessage(message)
       ? toLayeredError('jump_auth', message, err)
       : toLayeredError('jump_connect', message, err)
@@ -254,14 +286,18 @@ export async function connectWithProxyJump(
 
   const targetClient = new Client()
   try {
+    logger?.('info', 'dial', `Opening tunnel to ${connection.host}:${connection.port}`)
     const stream = await new Promise<ClientChannel>((resolve, reject) => {
       jumpClient.forwardOut('127.0.0.1', 0, connection.host, connection.port, (err, channel) => {
         if (err) return reject(err)
         resolve(channel)
       })
     })
+    logger?.('info', 'dial', 'Tunnel established')
+    logger?.('info', 'auth', `Authenticating as ${connection.username} via ${describeAuth(connection)}`)
 
     await connectClient(targetClient, { ...targetConfig, sock: stream })
+    logger?.('info', 'auth', 'Target host authenticated')
     return { client: targetClient, jumpClient }
   } catch (err) {
     try {
@@ -270,6 +306,7 @@ export async function connectWithProxyJump(
       // ignore
     }
     const message = err instanceof Error ? err.message : String(err)
+    logger?.('error', 'auth', `Target host failed: ${message}`)
     throw isAuthFailureMessage(message)
       ? toLayeredError('target_auth', message, err)
       : toLayeredError('target_connect', message, err)

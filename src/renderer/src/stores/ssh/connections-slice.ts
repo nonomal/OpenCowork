@@ -196,7 +196,9 @@ export const createConnectionsSlice: StateCreator<SshStore, [], [], SshConnectio
           sortOrder: maxOrder + 1,
           lastConnectedAt: null,
           createdAt: now,
-          updatedAt: now
+          updatedAt: now,
+          hasPassword: Boolean(data.password),
+          hasPassphrase: Boolean(data.passphrase)
         }
       ]
     }))
@@ -227,6 +229,8 @@ export const createConnectionsSlice: StateCreator<SshStore, [], [], SshConnectio
           if (data.keepAliveInterval !== undefined) {
             updated.keepAliveInterval = data.keepAliveInterval
           }
+          if (data.password !== undefined) updated.hasPassword = Boolean(data.password)
+          if (data.passphrase !== undefined) updated.hasPassphrase = Boolean(data.passphrase)
           return updated
         }),
         openTabs: nextName

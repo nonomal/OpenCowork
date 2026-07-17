@@ -766,6 +766,18 @@
     "delete": "删除索引",
     "deleting": "正在删除…",
     "indexing": "正在索引…",
+    "progress": {
+      "scan": "扫描文件",
+      "extract": "提取符号",
+      "resolve": "解析引用",
+      "synthesize": "合成图谱",
+      "maintenance": "优化索引",
+      "recreate": "重建索引",
+      "sync": "同步中",
+      "complete": "收尾中",
+      "indexing": "索引中",
+      "files": "{{done}} / {{total}} 个文件"
+    },
     "noProjects": "还没有已索引的项目。点击「索引新目录」构建第一个索引。",
     "notIndexedTitle": "未索引",
     "notIndexedDesc": "该项目还没有图谱索引。",
@@ -819,7 +831,8 @@
       "loading": "正在加载图谱…",
       "depth": "深度",
       "reset": "重置",
-      "nodesEdges": "{{nodes}} 个节点 · {{edges}} 条边"
+      "nodesEdges": "{{nodes}} 个节点 · {{edges}} 条边",
+      "interactionHint": "单击固定聚焦并展开 · 双击以该节点为中心重建"
     },
     "toast": {
       "indexStarted": "已开始索引",

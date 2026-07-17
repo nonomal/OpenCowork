@@ -239,6 +239,8 @@ interface AIProviderConfigRecord {
   requiresApiKey?: boolean
   useSystemProxy?: boolean
   allowInsecureTls?: boolean
+  sendTemperature?: boolean
+  sendMaxOutputTokens?: boolean
   userAgent?: string
   requestOverrides?: RequestOverrides
   instructionsPrompt?: string
@@ -453,10 +455,23 @@ function normalizeProviderBaseUrl(baseUrl: string, requestType: ProviderType): s
   return trimmed
 }
 
+/**
+ * Body keys covering the max output tokens parameter across protocols:
+ * openai-chat (max_tokens / max_completion_tokens), openai-responses (max_output_tokens),
+ * anthropic (max_tokens), gemini (maxOutputTokens inside generationConfig).
+ */
+const MAX_OUTPUT_TOKENS_BODY_KEYS = [
+  'max_tokens',
+  'max_completion_tokens',
+  'max_output_tokens',
+  'maxOutputTokens'
+]
+
 function buildRequestOverrides(
   providerOverrides: RequestOverrides | undefined,
   modelOverrides: RequestOverrides | undefined,
-  modelId?: string
+  modelId?: string,
+  paramCarry?: Pick<AIProviderConfigRecord, 'sendTemperature' | 'sendMaxOutputTokens'>
 ): RequestOverrides | undefined {
   const headers = {
     ...(providerOverrides?.headers ?? {}),
@@ -471,6 +486,12 @@ function buildRequestOverrides(
   )
   if (/^gpt-5/i.test(modelId ?? '')) {
     omitBodyKeys.push('temperature')
+  }
+  if (paramCarry?.sendTemperature === false) {
+    omitBodyKeys.push('temperature')
+  }
+  if (paramCarry?.sendMaxOutputTokens === false) {
+    omitBodyKeys.push(...MAX_OUTPUT_TOKENS_BODY_KEYS)
   }
   return Object.keys(headers).length > 0 || Object.keys(body).length > 0 || omitBodyKeys.length > 0
     ? {
@@ -561,7 +582,8 @@ function buildProviderConfigById(
   const requestOverrides = buildRequestOverrides(
     provider.requestOverrides,
     model?.requestOverrides,
-    modelId
+    modelId,
+    provider
   )
   // Server-tool/transport capabilities are per-model opt-ins (default false): a relay can
   // speak the protocol without supporting the feature, so unsupported models must send an

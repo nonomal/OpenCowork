@@ -4,7 +4,7 @@ import { ipcClient } from '../../lib/ipc/ipc-client'
 import { IPC } from '../../lib/ipc/channels'
 import { toast } from 'sonner'
 import i18n from '@renderer/locales'
-import type { SshSession, SshSessionFile, SshTab } from './types'
+import type { SshConnectLogEntry, SshSession, SshSessionFile, SshTab } from './types'
 import { ensureSshEventsSubscribed } from './events'
 import type { SshStore } from './store'
 
@@ -18,6 +18,10 @@ export interface SshSessionsSlice {
 
   sessionFiles: Record<string, SshSessionFile[]>
   activeSessionFile: Record<string, string | null>
+
+  // Protocol-level connection log, keyed by connectionId.
+  connectLogs: Record<string, SshConnectLogEntry[]>
+  appendConnectLog: (connectionId: string, entry: SshConnectLogEntry, reset: boolean) => void
 
   connect: (connectionId: string) => Promise<string | null>
   openTerminalTab: (connectionId: string, projectId?: string | null) => Promise<string | null>
@@ -52,6 +56,16 @@ export const createSessionsSlice: StateCreator<SshStore, [], [], SshSessionsSlic
 
   sessionFiles: {},
   activeSessionFile: {},
+
+  connectLogs: {},
+  appendConnectLog: (connectionId, entry, reset) => {
+    set((s) => {
+      const prev = reset ? [] : (s.connectLogs[connectionId] ?? [])
+      // Cap so a chatty handshake can't grow unbounded.
+      const next = [...prev, entry].slice(-500)
+      return { connectLogs: { ...s.connectLogs, [connectionId]: next } }
+    })
+  },
 
   // ── Terminal sessions ──
 

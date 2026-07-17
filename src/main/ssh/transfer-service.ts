@@ -228,10 +228,14 @@ function uploadFile(
   sftp: SFTPWrapper,
   localPath: string,
   remotePath: string,
-  onBytes: ProgressSink
+  onBytes: ProgressSink,
+  offset = 0
 ): Promise<void> {
-  const source = fs.createReadStream(localPath, { highWaterMark: STREAM_HIGH_WATER_MARK })
-  const target = sftp.createWriteStream(remotePath)
+  const source = fs.createReadStream(localPath, {
+    highWaterMark: STREAM_HIGH_WATER_MARK,
+    ...(offset > 0 ? { start: offset } : {})
+  })
+  const target = sftp.createWriteStream(remotePath, offset > 0 ? { flags: 'a' } : {})
   return pipeStreams(task, source, target, onBytes)
 }
 
@@ -240,10 +244,14 @@ function downloadFile(
   sftp: SFTPWrapper,
   remotePath: string,
   localPath: string,
-  onBytes: ProgressSink
+  onBytes: ProgressSink,
+  offset = 0
 ): Promise<void> {
-  const source = sftp.createReadStream(remotePath, { highWaterMark: STREAM_HIGH_WATER_MARK })
-  const target = fs.createWriteStream(localPath)
+  const source = sftp.createReadStream(remotePath, {
+    highWaterMark: STREAM_HIGH_WATER_MARK,
+    ...(offset > 0 ? { start: offset } : {})
+  })
+  const target = fs.createWriteStream(localPath, offset > 0 ? { flags: 'a' } : {})
   return pipeStreams(task, source, target, onBytes)
 }
 
@@ -253,13 +261,28 @@ function copyRemoteFile(
   targetSftp: SFTPWrapper,
   sourcePath: string,
   targetPath: string,
-  onBytes: ProgressSink
+  onBytes: ProgressSink,
+  offset = 0
 ): Promise<void> {
   const source = sourceSftp.createReadStream(sourcePath, {
-    highWaterMark: STREAM_HIGH_WATER_MARK
+    highWaterMark: STREAM_HIGH_WATER_MARK,
+    ...(offset > 0 ? { start: offset } : {})
   })
-  const target = targetSftp.createWriteStream(targetPath)
+  const target = targetSftp.createWriteStream(targetPath, offset > 0 ? { flags: 'a' } : {})
   return pipeStreams(task, source, target, onBytes)
+}
+
+// Resume support: when retrying a failed transfer, an existing destination
+// that is complete is skipped and a shorter one is continued from its end.
+// Returns the byte offset to start from, or null to skip the file entirely.
+async function resolveResumeOffset(
+  fileSize: number,
+  destinationSize: number | null
+): Promise<number | null> {
+  if (destinationSize === null) return 0
+  if (destinationSize === fileSize) return null
+  if (destinationSize > 0 && destinationSize < fileSize) return destinationSize
+  return 0
 }
 
 // ── Progress reporting ──
@@ -324,7 +347,7 @@ function makeTransferProgressReporter(
 
 async function runTransferUpload(
   task: TaskState,
-  args: { connectionId: string; remoteDir: string; localPaths: string[] },
+  args: { connectionId: string; remoteDir: string; localPaths: string[]; resume?: boolean },
   conflictPolicy: SshConflictPolicy
 ): Promise<void> {
   await withSshSftp(args.connectionId, async (sftp) => {
@@ -367,7 +390,22 @@ async function runTransferUpload(
         throwIfCanceled(task)
         const destination = path.posix.join(remoteDir, renameTopLevel(file.relPath, finalTop))
         await sftpMkdirRecursive(sftp, path.posix.dirname(destination))
-        await uploadFile(task, sftp, file.sourcePath, destination, reporter.onBytes)
+        let offset = 0
+        if (args.resume) {
+          const existing = await sftpLstat(sftp, destination)
+          const resumeAt = await resolveResumeOffset(
+            file.size,
+            existing ? (existing.size ?? 0) : null
+          )
+          if (resumeAt === null) {
+            totals.currentBytes += file.size
+            reporter.itemDone(file.relPath)
+            continue
+          }
+          offset = resumeAt
+          totals.currentBytes += offset
+        }
+        await uploadFile(task, sftp, file.sourcePath, destination, reporter.onBytes, offset)
         reporter.itemDone(file.relPath)
       }
     }
@@ -377,7 +415,7 @@ async function runTransferUpload(
 
 async function runTransferDownload(
   task: TaskState,
-  args: { connectionId: string; remotePaths: string[]; localDir: string },
+  args: { connectionId: string; remotePaths: string[]; localDir: string; resume?: boolean },
   conflictPolicy: SshConflictPolicy
 ): Promise<void> {
   await withSshSftp(args.connectionId, async (sftp) => {
@@ -426,7 +464,22 @@ async function runTransferDownload(
         throwIfCanceled(task)
         const destination = path.join(args.localDir, renameTopLevel(file.relPath, finalTop))
         await fs.promises.mkdir(path.dirname(destination), { recursive: true })
-        await downloadFile(task, sftp, file.sourcePath, destination, reporter.onBytes)
+        let offset = 0
+        if (args.resume) {
+          const existingSize = await fs.promises
+            .stat(destination)
+            .then((s) => s.size)
+            .catch(() => null)
+          const resumeAt = await resolveResumeOffset(file.size, existingSize)
+          if (resumeAt === null) {
+            totals.currentBytes += file.size
+            reporter.itemDone(file.relPath)
+            continue
+          }
+          offset = resumeAt
+          totals.currentBytes += offset
+        }
+        await downloadFile(task, sftp, file.sourcePath, destination, reporter.onBytes, offset)
         reporter.itemDone(file.relPath)
       }
     }
@@ -441,6 +494,7 @@ async function runTransferRemoteCopy(
     targetConnectionId: string
     sourcePaths: string[]
     targetDir: string
+    resume?: boolean
   },
   conflictPolicy: SshConflictPolicy
 ): Promise<void> {
@@ -493,13 +547,29 @@ async function runTransferRemoteCopy(
           throwIfCanceled(task)
           const destination = path.posix.join(targetDir, renameTopLevel(file.relPath, finalTop))
           await sftpMkdirRecursive(targetSftp, path.posix.dirname(destination))
+          let offset = 0
+          if (args.resume) {
+            const existing = await sftpLstat(targetSftp, destination)
+            const resumeAt = await resolveResumeOffset(
+              file.size,
+              existing ? (existing.size ?? 0) : null
+            )
+            if (resumeAt === null) {
+              totals.currentBytes += file.size
+              reporter.itemDone(file.relPath)
+              continue
+            }
+            offset = resumeAt
+            totals.currentBytes += offset
+          }
           await copyRemoteFile(
             task,
             sourceSftp,
             targetSftp,
             file.sourcePath,
             destination,
-            reporter.onBytes
+            reporter.onBytes,
+            offset
           )
           reporter.itemDone(file.relPath)
         }
@@ -518,6 +588,7 @@ export type TransferStartArgs =
       remoteDir: string
       localPaths: string[]
       conflictPolicy?: SshConflictPolicy
+      resume?: boolean
     }
   | {
       type: 'download'
@@ -525,6 +596,7 @@ export type TransferStartArgs =
       remotePaths: string[]
       localDir: string
       conflictPolicy?: SshConflictPolicy
+      resume?: boolean
     }
   | {
       type: 'remote-copy'
@@ -533,11 +605,13 @@ export type TransferStartArgs =
       sourcePaths: string[]
       targetDir: string
       conflictPolicy?: SshConflictPolicy
+      resume?: boolean
     }
 
 export function startTransferTask(args: TransferStartArgs): { taskId: string } | { error: string } {
   const taskId = `ssh-transfer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  const conflictPolicy = args.conflictPolicy ?? 'skip'
+  // A resumed retry continues into the existing destination: never rename.
+  const conflictPolicy = args.resume ? 'overwrite' : (args.conflictPolicy ?? 'skip')
   const sourceConnectionId =
     args.type === 'remote-copy' ? args.sourceConnectionId : args.connectionId
   const targetConnectionId =

@@ -599,6 +599,29 @@
         "summary": "Mode: {{mode}}"
       }
     },
+    "codegraph": {
+      "title": "CodeGraph",
+      "executing": "Querying the code graph...",
+      "notIndexed": "Index not ready",
+      "notIndexedBadge": "indexing",
+      "files": "Files referenced",
+      "result": "Graph result",
+      "input": "Input",
+      "filesCount": "{{count}} files",
+      "symbolsCount": "{{count}} symbols",
+      "tools": {
+        "explore": "Explore",
+        "search": "Search",
+        "node": "Node",
+        "callers": "Callers",
+        "callees": "Callees",
+        "impact": "Impact",
+        "files": "Files",
+        "status": "Status",
+        "index": "Index",
+        "sync": "Sync"
+      }
+    },
     "browser": {
       "running": "Browser action in progress",
       "completed": "Browser action completed",

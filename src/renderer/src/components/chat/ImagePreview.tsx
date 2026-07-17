@@ -1,6 +1,6 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import { X, Download, Copy, Check } from 'lucide-react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'motion/react'
 import { toast } from 'sonner'
 import { IPC } from '@renderer/lib/ipc/channels'
 import { ipcClient } from '@renderer/lib/ipc/ipc-client'

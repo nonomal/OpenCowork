@@ -130,7 +130,9 @@ interface ConnectionHandle {
 | **M1 连接运行时** | ConnectionManager/Handle + terminal-service 替换 `ssh:connect/data/output` 路径；断线重连 | 终端多 tab 共享一条连接；拔网线 → 自动重连恢复 |
 | **M2 SFTP/exec 归一** | sftp/exec/transfer service 上线，`ssh:fs:*` 切到共享连接；下线 sidecar SSH 调用 | SFTP 双窗格/浏览器/监控全功能；目录浏览无进程 spawn |
 | **M3 渲染端拆分** | store×5 + 容器组件拆分 + 虚拟化；ssh-rpc 集中订阅 | lint/typecheck 过；交互无回归 |
-| **M4 清理+决策点** | 删 ssh-dao/ssh-connection-payload/sidecar Modules/Ssh 与 DbSshTools；评估是否需要 sidecar 传输 fast-path | 死代码为零；`rg 'open-cowork.json'` 仅剩迁移代码 |
+| **M4 清理+决策点** | 删 sidecar Modules/Ssh 死模块；评估是否需要 sidecar 传输 fast-path | 死代码为零；`rg 'open-cowork.json'` 仅剩迁移代码 |
+
+> M4 实施结果（2026-07-17）：sidecar `Modules/Ssh` 删除 14 个文件（约 5.2k 行），**保留** `SshOpenSsh.cs` + `SshSearchTools.cs`（2040 行）——它们服务于 C# native Agent 运行时的 SSH 工具执行与 git-over-SSH（AgentRuntime*Executor / GitTools 直接引用），把这条链切到主进程需要改 Agent 工具执行协议，作为独立后续项。`ssh-connection-payload.ts` 与 `ssh-dao.ts` 均为在用代码（前者按请求向 Agent/git 注入凭据、源头是加密仓储；后者是仓储的持久化层），不删。
 
 风险备注：M1/M2 期间新旧 channel 并存（新名 `ssh:terminal:*` vs 旧 `ssh:data`），渲染端按模块切换，避免大爆炸式替换；Agent 工具链（`AgentRuntimeSshToolExecutor.cs` 及渲染端 ssh 工具）在 M2 一并切到新契约，需单独回归。
 

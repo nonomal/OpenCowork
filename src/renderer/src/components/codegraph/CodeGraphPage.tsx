@@ -13,7 +13,8 @@ import { Button } from '@renderer/components/ui/button'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { useUIStore } from '@renderer/stores/ui-store'
-import { useSettingsStore } from '@renderer/stores/settings-store'
+import { useChatStore } from '@renderer/stores/chat-store'
+import { useAppPluginStore } from '@renderer/stores/app-plugin-store'
 import {
   getCodeGraphAssetStatus,
   useCodeGraphStore,
@@ -22,6 +23,7 @@ import {
 import { CodeGraphDashboard } from './CodeGraphDashboard'
 import { CodeGraphFileTree } from './CodeGraphFileTree'
 import { CodeGraphGraphView } from './CodeGraphGraphView'
+import { CodeGraphIndexProgressBar } from './CodeGraphIndexProgressBar'
 
 type Tab = 'dashboard' | 'files' | 'graph'
 
@@ -72,7 +74,8 @@ export function CodeGraphPage({
   const { t } = useTranslation('layout')
   const closeCodeGraphPage = useUIStore((s) => s.closeCodeGraphPage)
   const openSettingsPage = useUIStore((s) => s.openSettingsPage)
-  const enabled = useSettingsStore((s) => s.codegraphEnabled)
+  const activeProjectId = useChatStore((s) => s.activeProjectId)
+  const enabled = useAppPluginStore((s) => s.isCodeGraphToolAvailable(activeProjectId))
 
   const projects = useCodeGraphStore((s) => s.projects)
   const projectsLoading = useCodeGraphStore((s) => s.projectsLoading)
@@ -81,6 +84,7 @@ export function CodeGraphPage({
   const stats = useCodeGraphStore((s) => s.stats)
   const detailLoading = useCodeGraphStore((s) => s.detailLoading)
   const busyKey = useCodeGraphStore((s) => s.busyKey)
+  const indexProgress = useCodeGraphStore((s) => s.indexProgress)
   const refreshProjects = useCodeGraphStore((s) => s.refreshProjects)
   const selectProject = useCodeGraphStore((s) => s.selectProject)
   const addFolder = useCodeGraphStore((s) => s.addFolder)
@@ -253,7 +257,9 @@ export function CodeGraphPage({
               {t(`codegraphPage.tabs.${key}`)}
             </button>
           ))}
-          {busyKey === `index:${selectedRoot}` ? (
+          {indexProgress ? (
+            <CodeGraphIndexProgressBar progress={indexProgress} className="ml-2 w-56" />
+          ) : busyKey === `index:${selectedRoot}` ? (
             <span className="ml-2 flex items-center gap-1.5 text-[11px] text-amber-600">
               <Spinner className="size-3" />
               {t('codegraphPage.indexing')}
@@ -261,7 +267,7 @@ export function CodeGraphPage({
           ) : null}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {status && !status.indexed && !detailLoading ? (
             <div className="flex h-full items-center justify-center p-6 text-center">
               <div className="max-w-sm">

@@ -8,9 +8,8 @@ import { normalizeLanguageCode } from '@renderer/lib/i18n-language'
 import {
   getLiveOutputComponentClass,
   getLiveOutputCursorClass,
-  getLiveOutputDotClass,
-  getLiveOutputSurfaceClass,
-  getLiveOutputThinkingClass
+  getLiveOutputShimmerClass,
+  getLiveOutputSurfaceClass
 } from '@renderer/lib/live-output-animation'
 import {
   openMarkdownHref,
@@ -200,26 +199,10 @@ export const ThinkingBlock = memo(function ThinkingBlock({
               )}
             </div>
           ) : (
-            <div
-              role="status"
-              aria-live="polite"
-              className={`thinking-live-status ${getLiveOutputThinkingClass(liveOutputAnimationStyle)}`}
-            >
-              <span className="thinking-live-dots" aria-hidden="true">
-                <span
-                  className={getLiveOutputDotClass(liveOutputAnimationStyle)}
-                  style={{ animationDelay: '0ms' }}
-                />
-                <span
-                  className={getLiveOutputDotClass(liveOutputAnimationStyle)}
-                  style={{ animationDelay: '150ms' }}
-                />
-                <span
-                  className={getLiveOutputDotClass(liveOutputAnimationStyle)}
-                  style={{ animationDelay: '300ms' }}
-                />
-              </span>
-              <span className="thinking-live-label">
+            <div role="status" aria-live="polite" className="thinking-live-status">
+              <span
+                className={`thinking-live-label ${getLiveOutputShimmerClass(liveOutputAnimationStyle)}`}
+              >
                 {t('thinking.pending', { defaultValue: 'Thinking' })}
               </span>
               {liveElapsed > 0 && (

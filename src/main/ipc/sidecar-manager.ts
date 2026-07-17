@@ -12,7 +12,11 @@ import {
 import type { AgentStreamEvent, ToolCallStateWire } from '../../shared/agent-stream-protocol'
 import { AGENT_STREAM_PROTOCOL_VERSION } from '../../shared/agent-stream-protocol'
 import type { InteractiveAgentEvent, ToolCallState } from '../../shared/agent-loop-types'
-import { readCodeGraphEnabled, readPermissionPolicySnapshot } from './settings-handlers'
+import {
+  initializeSettingsCache,
+  readCodeGraphEnabled,
+  readPermissionPolicySnapshot
+} from './settings-handlers'
 import {
   SIDECAR_APPROVAL_REQUEST_MSGPACK_CHANNEL,
   SIDECAR_APPROVAL_RESPONSE_MSGPACK_CHANNEL,
@@ -221,6 +225,12 @@ export async function handleCodeGraphRequest(
   params: unknown,
   timeoutMs?: number
 ): Promise<unknown> {
+  // The settings cache hydrates asynchronously after app-ready (readSettings
+  // returns an empty snapshot until then). Awaiting hydration here prevents the
+  // first codegraph/* request on a cold launch from reading codegraphEnabled as
+  // undefined and wrongly reporting "disabled" — the race that made a freshly
+  // launched app show no indexed projects until it was restarted.
+  await initializeSettingsCache()
   if (!readCodeGraphEnabled()) {
     return codeGraphNotReadyResult(
       'CodeGraph is disabled. Enable it in Settings to index this project for code navigation.'

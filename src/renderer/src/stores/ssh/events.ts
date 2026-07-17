@@ -9,6 +9,7 @@ import type {
   SftpTransferProgress,
   SftpTransferStage,
   SftpTransferTaskType,
+  SshConnectLogEntry,
   SshSession,
   SshUploadProgress,
   SshUploadStage,
@@ -130,6 +131,31 @@ export function ensureSshEventsSubscribed(store: SshStoreApi): void {
 
   ipcClient.on('ssh:config:changed', () => {
     void store.getState().loadAll()
+  })
+
+  ipcClient.on('ssh:connect:log', (payload) => {
+    if (!payload || typeof payload !== 'object') return
+    const data = payload as {
+      connectionId?: string
+      level?: SshConnectLogEntry['level']
+      stage?: SshConnectLogEntry['stage']
+      message?: string
+      reset?: boolean
+      seq?: number
+      ts?: number
+    }
+    if (!data.connectionId || !data.message) return
+    store.getState().appendConnectLog(
+      data.connectionId,
+      {
+        seq: data.seq ?? 0,
+        ts: data.ts ?? Date.now(),
+        level: data.level ?? 'info',
+        stage: data.stage ?? 'dial',
+        message: data.message
+      },
+      data.reset === true
+    )
   })
 
   ipcClient.on(IPC.SSH_STATUS, (payload) => {

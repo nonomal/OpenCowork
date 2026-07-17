@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { ImageIcon, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatDurationMs } from '@renderer/lib/format-duration'

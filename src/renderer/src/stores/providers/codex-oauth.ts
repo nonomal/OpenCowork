@@ -38,7 +38,7 @@ export const codexOAuthPreset: BuiltinProviderPreset = {
     usePkce: true
   },
   ui: { hideOAuthSettings: true },
-  userAgent: 'codex_cli_rs/0.144.1 (Windows 10.0.26200; x86_64) vscode/1.105.1',
+  userAgent: 'codex_cli_rs/0.144.5 (Windows 10.0.26200; x86_64) vscode/1.105.1',
   requestOverrides: {
     headers: {
       'openai-beta': 'responses=experimental',

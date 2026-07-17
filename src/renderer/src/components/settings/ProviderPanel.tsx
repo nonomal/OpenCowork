@@ -367,7 +367,7 @@ function buildManagedModelProviderSourceIndex(
 // --- Fetch models from provider API ---
 
 // The ChatGPT Codex backend requires a client_version query param (the version Codex CLI reports).
-const CODEX_CLIENT_VERSION_FALLBACK = '0.144.1'
+const CODEX_CLIENT_VERSION_FALLBACK = '0.144.5'
 
 function withCodexClientVersion(url: string, userAgent?: string): string {
   const version =
@@ -3288,6 +3288,39 @@ function ProviderConfigPanel({ provider }: { provider: AIProvider }): React.JSX.
             <p className="text-[11px] text-muted-foreground">{t('provider.cacheTtlHint')}</p>
           </section>
         )}
+
+        {/* Request parameter carrying (provider-level) */}
+        <section className="space-y-3 mt-5">
+          <label className="text-sm font-medium">{t('provider.requestParams')}</label>
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 space-y-0.5">
+              <p className="text-xs">{t('provider.sendMaxOutputTokens')}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {t('provider.sendMaxOutputTokensHint')}
+              </p>
+            </div>
+            <Switch
+              checked={provider.sendMaxOutputTokens !== false}
+              onCheckedChange={(checked) =>
+                updateProvider(provider.id, { sendMaxOutputTokens: checked })
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 space-y-0.5">
+              <p className="text-xs">{t('provider.sendTemperature')}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {t('provider.sendTemperatureHint')}
+              </p>
+            </div>
+            <Switch
+              checked={provider.sendTemperature !== false}
+              onCheckedChange={(checked) =>
+                updateProvider(provider.id, { sendTemperature: checked })
+              }
+            />
+          </div>
+        </section>
 
         <Separator className="my-5" />
 

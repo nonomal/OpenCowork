@@ -343,6 +343,7 @@ export const IPC = {
   CODEGRAPH_DOWNLOAD_ASSETS: 'codegraph:download-assets',
   CODEGRAPH_REMOVE_ASSETS: 'codegraph:remove-assets',
   CODEGRAPH_DOWNLOAD_PROGRESS: 'codegraph:download-progress',
+  CODEGRAPH_INDEX_PROGRESS: 'codegraph:index-progress',
   BROWSER_EMULATION_STATUS: 'browser:emulation-status',
   BROWSER_IMPORT_COOKIES: 'browser:import-cookies',
 

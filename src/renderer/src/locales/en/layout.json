@@ -766,6 +766,18 @@
     "delete": "Delete index",
     "deleting": "Deleting…",
     "indexing": "Indexing…",
+    "progress": {
+      "scan": "Scanning files",
+      "extract": "Extracting symbols",
+      "resolve": "Resolving references",
+      "synthesize": "Synthesizing",
+      "maintenance": "Optimizing",
+      "recreate": "Rebuilding",
+      "sync": "Syncing",
+      "complete": "Finalizing",
+      "indexing": "Indexing",
+      "files": "{{done}} / {{total}} files"
+    },
     "noProjects": "No indexed projects yet. Click \"Index a folder\" to build your first index.",
     "notIndexedTitle": "Not indexed",
     "notIndexedDesc": "This project has no graph index yet.",
@@ -819,7 +831,8 @@
       "loading": "Loading graph…",
       "depth": "Depth",
       "reset": "Reset",
-      "nodesEdges": "{{nodes}} nodes · {{edges}} edges"
+      "nodesEdges": "{{nodes}} nodes · {{edges}} edges",
+      "interactionHint": "Click: pin focus & expand · Double-click: recenter here"
     },
     "toast": {
       "indexStarted": "Indexing started",

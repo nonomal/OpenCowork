@@ -153,7 +153,7 @@ export function CodeGraphDashboard({
     : t('codegraphPage.freshness.never')
 
   return (
-    <div className="space-y-4 overflow-y-auto p-4">
+    <div className="space-y-4 p-4">
       {/* KPI tiles */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
         <StatTile

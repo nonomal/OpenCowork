@@ -117,7 +117,7 @@ import {
 import { getCacheReadRatio } from '@renderer/lib/format-tokens'
 import {
   getLiveOutputCursorClass,
-  getLiveOutputDotClass,
+  getLiveOutputShimmerClass,
   getLiveOutputSurfaceClass
 } from '@renderer/lib/live-output-animation'
 import {
@@ -1198,22 +1198,10 @@ function GeneralPanel(): React.JSX.Element {
               </span>
               <span className={getLiveOutputCursorClass(settings.liveOutputAnimationStyle)} />
             </div>
-            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="flex gap-1">
-                <span
-                  className={getLiveOutputDotClass(settings.liveOutputAnimationStyle)}
-                  style={{ animationDelay: '0ms' }}
-                />
-                <span
-                  className={getLiveOutputDotClass(settings.liveOutputAnimationStyle)}
-                  style={{ animationDelay: '150ms' }}
-                />
-                <span
-                  className={getLiveOutputDotClass(settings.liveOutputAnimationStyle)}
-                  style={{ animationDelay: '300ms' }}
-                />
+            <div className="mt-3 flex items-center gap-2 text-xs">
+              <span className={getLiveOutputShimmerClass(settings.liveOutputAnimationStyle)}>
+                {t('general.liveOutputAnimation.previewStatus')}
               </span>
-              <span>{t('general.liveOutputAnimation.previewStatus')}</span>
             </div>
           </div>
         </div>

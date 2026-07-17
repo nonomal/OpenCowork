@@ -906,12 +906,30 @@ function App(): React.JSX.Element {
     Boolean(s.getPlugin(CODEGRAPH_PLUGIN_ID)?.enabled)
   )
   const codegraphFullToolSurface = useSettingsStore((s) => s.codegraphFullToolSurface)
+  // The plugin store hydrates asynchronously (IPC-backed configStorage). Gate the
+  // mirror on hydration: pre-hydration state reports the default (disabled) and
+  // would stomp the persisted codegraphEnabled flag to false on every cold launch,
+  // making the first codegraph/* request of the session see "disabled" (the
+  // "CodeGraph shows no projects until the plugin is toggled" bug).
+  const [pluginStoreHydrated, setPluginStoreHydrated] = useState(() =>
+    useAppPluginStore.persist.hasHydrated()
+  )
   useEffect(() => {
+    const unsubscribe = useAppPluginStore.persist.onFinishHydration(() =>
+      setPluginStoreHydrated(true)
+    )
+    // Hydration may have completed between the useState initializer and this
+    // subscription — re-check so we never miss the transition.
+    if (useAppPluginStore.persist.hasHydrated()) setPluginStoreHydrated(true)
+    return unsubscribe
+  }, [])
+  useEffect(() => {
+    if (!pluginStoreHydrated) return
     syncCodeGraphToolRegistration(codegraphPluginEnabled)
     if (useSettingsStore.getState().codegraphEnabled !== codegraphPluginEnabled) {
       useSettingsStore.getState().updateSettings({ codegraphEnabled: codegraphPluginEnabled })
     }
-  }, [codegraphPluginEnabled, codegraphFullToolSurface])
+  }, [pluginStoreHydrated, codegraphPluginEnabled, codegraphFullToolSurface])
 
   useEffect(() => {
     syncAppPluginToolRegistration()

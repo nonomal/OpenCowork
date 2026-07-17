@@ -3,7 +3,8 @@ import type { BuiltinProviderPreset } from './types'
 export const routinAiPreset: BuiltinProviderPreset = {
   builtinId: 'routin-ai',
   // v3: add Grok Imagine image/video models and the dedicated xAI Videos protocol.
-  version: 3,
+  // v4: add Kimi K3 (2026-07-16 发布).
+  version: 4,
   name: 'Routin AI',
   type: 'openai-chat',
   defaultBaseUrl: 'https://api.routin.ai/v1',
@@ -27,6 +28,28 @@ export const routinAiPreset: BuiltinProviderPreset = {
     'claude-3-5-haiku-20241022'
   ],
   defaultModels: [
+    // Kimi K3（2026-07-16，价格与 Moonshot 官方一致）：thinking 常开，走顶层 reasoning_effort
+    // （当前仅 max 档）；temperature/top_p 等采样参数服务端固定，请求中必须省略。
+    {
+      id: 'kimi-k3',
+      name: 'Kimi K3',
+      icon: 'kimi',
+      enabled: true,
+      contextLength: 1_048_576,
+      maxOutputTokens: 131_072,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      inputPrice: 3,
+      outputPrice: 15,
+      cacheHitPrice: 0.3,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: {},
+        reasoningEffortLevels: ['max'],
+        defaultReasoningEffort: 'max'
+      },
+      requestOverrides: { omitBodyKeys: ['temperature'] }
+    },
     {
       id: 'kimi-k2.7-code',
       name: 'Kimi K2.7 Code',

@@ -70,7 +70,17 @@
     "keepAlive": "心跳间隔（秒）",
     "advanced": "高级选项",
     "save": "保存",
-    "cancel": "取消"
+    "cancel": "取消",
+    "sectionBasic": "基本信息",
+    "sectionAuth": "认证",
+    "sectionAdvanced": "高级选项",
+    "secretSet": "已保存",
+    "secretChange": "更换",
+    "secretClear": "清除",
+    "testConnection": "测试连接",
+    "testSuccess": "连接与认证正常",
+    "testFailed": "连接测试失败",
+    "saveAndConnect": "保存并连接"
   },
   "groupDialog": {
     "title": "分组名称",
@@ -300,7 +310,8 @@
         "done": "已完成",
         "error": "失败",
         "canceled": "已取消"
-      }
+      },
+      "retry": "重试"
     },
     "terminalTheme": {
       "title": "终端配色",
@@ -439,6 +450,7 @@
       "noConnections": "暂无连接历史。",
       "uploads": "上传活动",
       "noUploads": "尚无上传活动。"
-    }
+    },
+    "libraryTab": "主机库"
   }
 }

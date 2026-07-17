@@ -94,9 +94,9 @@ function CompactLifecycleGlyph({
   if (status === 'running' || status === 'streaming' || status === 'pending_approval') {
     return <Loader2 className="size-3 animate-spin" />
   }
-  if (status === 'error') return <X className="size-3" />
-  if (status === 'canceled') return <X className="size-3" />
-  if (status === 'completed') return <Check className="size-3" />
+  if (status === 'error') return <X className="size-3 animate-in zoom-in-75 duration-200" />
+  if (status === 'canceled') return <X className="size-3 animate-in zoom-in-75 duration-200" />
+  if (status === 'completed') return <Check className="size-3 animate-in zoom-in-75 duration-200" />
   return null
 }
 

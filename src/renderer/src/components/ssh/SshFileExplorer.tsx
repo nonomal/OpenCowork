@@ -23,6 +23,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
+import { SshVirtualList } from './SshVirtualList'
 import {
   type SftpConnectionState,
   type SftpPaneState,
@@ -255,14 +256,17 @@ function LegacySshFileExplorer({
             {error}
           </div>
         ) : (
-          <div>
-            {entries.map((entry) => {
+          <SshVirtualList
+            items={entries}
+            rowHeight={46}
+            rowKey={(entry) => entry.path}
+            className="h-full"
+            renderRow={(entry) => {
               const Icon = getEntryIcon(entry)
               return (
                 <button
-                  key={entry.path}
                   type="button"
-                  className="workspace-sftp-row workspace-sftp-row--interactive grid w-full grid-cols-[minmax(0,1fr)_120px_110px] items-center px-4 py-3 text-left transition-colors"
+                  className="workspace-sftp-row workspace-sftp-row--interactive grid h-full w-full grid-cols-[minmax(0,1fr)_120px_110px] items-center px-4 text-left transition-colors"
                   onClick={() => {
                     if (entry.type === 'directory') {
                       setCurrentPath(entry.path)
@@ -294,8 +298,8 @@ function LegacySshFileExplorer({
                   </div>
                 </button>
               )
-            })}
-          </div>
+            }}
+          />
         )}
       </div>
     </div>
@@ -592,16 +596,19 @@ function ModernSshFileExplorer({
               </div>
             </div>
           ) : (
-            <div>
-              {entries.map((entry) => {
+            <SshVirtualList
+              items={entries}
+              rowHeight={42}
+              rowKey={(entry) => entry.path}
+              className="h-full"
+              renderRow={(entry) => {
                 const Icon = getEntryIcon(entry)
                 const selected = Boolean(selectedEntries[entry.path])
 
                 return (
                   <div
-                    key={entry.path}
                     className={cn(
-                      'grid grid-cols-[40px_minmax(0,1fr)_100px_168px_88px] items-center px-4 py-2.5 text-[13px] text-foreground transition-colors',
+                      'grid h-full grid-cols-[40px_minmax(0,1fr)_100px_168px_88px] items-center px-4 text-[13px] text-foreground transition-colors',
                       selected ? 'bg-primary/10' : 'hover:bg-muted/40'
                     )}
                     onClick={() => {
@@ -668,21 +675,22 @@ function ModernSshFileExplorer({
                     </div>
                   </div>
                 )
-              })}
-
-              {hasMore ? (
-                <div className="px-4 py-4">
-                  <Button
-                    variant="outline"
-                    className="h-10 rounded-[14px] border-border bg-background px-4 text-[0.82rem] font-semibold text-muted-foreground shadow-none hover:bg-accent"
-                    onClick={onLoadMore}
-                  >
-                    {loading ? <Loader2 className="size-4 animate-spin" /> : null}
-                    {t('fileExplorer.loadMore')}
-                  </Button>
-                </div>
-              ) : null}
-            </div>
+              }}
+              footer={
+                hasMore ? (
+                  <div className="px-4 py-4">
+                    <Button
+                      variant="outline"
+                      className="h-10 rounded-[14px] border-border bg-background px-4 text-[0.82rem] font-semibold text-muted-foreground shadow-none hover:bg-accent"
+                      onClick={onLoadMore}
+                    >
+                      {loading ? <Loader2 className="size-4 animate-spin" /> : null}
+                      {t('fileExplorer.loadMore')}
+                    </Button>
+                  </div>
+                ) : null
+              }
+            />
           )}
         </div>
       </div>

@@ -15,7 +15,8 @@ import {
   Terminal,
   Trash2,
   UserCircle2,
-  Wrench
+  Wrench,
+  X
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ipcClient } from '@renderer/lib/ipc/ipc-client'
@@ -68,6 +69,10 @@ type FormState = {
 }
 
 type InspectorPanel = 'basic' | 'auth' | 'jump' | 'proxy' | 'other' | 'init'
+
+// Stored secrets are write-only: 'keep' leaves them untouched, 'set' replaces
+// with the field value, 'clear' removes them on save.
+type SecretAction = 'keep' | 'set' | 'clear'
 
 function joinFsPath(...parts: string[]): string {
   if (parts.length === 0) return ''
@@ -142,6 +147,60 @@ function Field({
   )
 }
 
+// A saved (write-only) secret rendered as a masked chip with change/clear
+// actions; the raw value is never read back from the main process.
+function InspectorSecretChip({
+  cleared,
+  storedLabel,
+  changeLabel,
+  clearLabel,
+  onChange,
+  onToggleClear
+}: {
+  cleared: boolean
+  storedLabel: string
+  changeLabel: string
+  clearLabel: string
+  onChange: () => void
+  onToggleClear: () => void
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-1 gap-2">
+      <div
+        className={
+          cleared
+            ? 'flex h-11 flex-1 items-center rounded-md border border-dashed border-red-400/60 bg-red-500/10 px-3 text-[13px] text-red-400 line-through'
+            : 'flex h-11 flex-1 items-center rounded-md border border-[#525252] bg-[#2d2d2d] px-3 text-[13px] text-[#b6b6b6]'
+        }
+      >
+        ●●●●●●&ensp;{storedLabel}
+      </div>
+      {!cleared ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-11 border-[#525252] bg-[#2d2d2d] text-[#f5f5f5] shadow-none hover:bg-[#353535]"
+          onClick={onChange}
+        >
+          {changeLabel}
+        </Button>
+      ) : null}
+      <Button
+        variant="outline"
+        size="sm"
+        className={
+          cleared
+            ? 'h-11 border-[#525252] bg-[#2d2d2d] text-[#f5f5f5] shadow-none hover:bg-[#353535]'
+            : 'h-11 border-[#525252] bg-[#2d2d2d] text-red-400 shadow-none hover:bg-[#353535] hover:text-red-300'
+        }
+        onClick={onToggleClear}
+      >
+        {cleared ? changeLabel : clearLabel}
+      </Button>
+    </div>
+  )
+}
+
 function PanelShell({
   title,
   description,
@@ -211,10 +270,18 @@ export function SshConnectionInspector({
   const [saving, setSaving] = useState(false)
   const [installingKey, setInstallingKey] = useState(false)
   const [activePanel, setActivePanel] = useState<InspectorPanel>('basic')
+  const [passwordAction, setPasswordAction] = useState<SecretAction>(
+    connection?.hasPassword ? 'keep' : 'set'
+  )
+  const [passphraseAction, setPassphraseAction] = useState<SecretAction>(
+    connection?.hasPassphrase ? 'keep' : 'set'
+  )
 
   useEffect(() => {
     setFormState(createInitialState(connection))
     setActivePanel('basic')
+    setPasswordAction(connection?.hasPassword ? 'keep' : 'set')
+    setPassphraseAction(connection?.hasPassphrase ? 'keep' : 'set')
   }, [connection, draftKey])
 
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]): void => {
@@ -257,8 +324,8 @@ export function SshConnectionInspector({
     [connection]
   )
 
-  const requirePassword =
-    formState.authType === 'password' && (!isEditing || connection?.authType !== 'password')
+  const keepStoredPassword = isEditing && !!connection?.hasPassword && passwordAction === 'keep'
+  const requirePassword = formState.authType === 'password' && !keepStoredPassword
   const requirePrivateKey =
     formState.authType === 'privateKey' &&
     (!isEditing || connection?.authType !== 'privateKey' || !connection?.privateKeyPath)
@@ -394,9 +461,17 @@ export function SshConnectionInspector({
           ...payload,
           groupId: formState.groupId === '__none__' ? null : formState.groupId
         }
-        if (formState.password) updateData.password = formState.password
+        if (passwordAction === 'set' && formState.password) {
+          updateData.password = formState.password
+        } else if (passwordAction === 'clear') {
+          updateData.password = null
+        }
         if (formState.privateKeyPath) updateData.privateKeyPath = formState.privateKeyPath
-        if (formState.passphrase) updateData.passphrase = formState.passphrase
+        if (passphraseAction === 'set' && formState.passphrase) {
+          updateData.passphrase = formState.passphrase
+        } else if (passphraseAction === 'clear') {
+          updateData.passphrase = null
+        }
 
         await useSshStore.getState().updateConnection(connection.id, updateData)
         onSaved(connection.id)
@@ -447,12 +522,36 @@ export function SshConnectionInspector({
   }
 
   const navItems: Array<{ key: InspectorPanel; label: string; icon: React.ReactNode }> = [
-    { key: 'basic', label: t('workspace.basicInfo', { defaultValue: '基本信息' }), icon: <Link2 className="size-4" /> },
-    { key: 'auth', label: t('workspace.connectionSettings', { defaultValue: '连接设置' }), icon: <Server className="size-4" /> },
-    { key: 'jump', label: t('workspace.jumpHost', { defaultValue: '跳板机' }), icon: <ArrowUpRight className="size-4" /> },
-    { key: 'proxy', label: t('workspace.proxySettings', { defaultValue: '代理设置' }), icon: <Network className="size-4" /> },
-    { key: 'other', label: t('workspace.otherSettings', { defaultValue: '其他设置' }), icon: <Settings2 className="size-4" /> },
-    { key: 'init', label: t('workspace.initialize', { defaultValue: '初始化' }), icon: <Wrench className="size-4" /> }
+    {
+      key: 'basic',
+      label: t('workspace.basicInfo', { defaultValue: '基本信息' }),
+      icon: <Link2 className="size-4" />
+    },
+    {
+      key: 'auth',
+      label: t('workspace.connectionSettings', { defaultValue: '连接设置' }),
+      icon: <Server className="size-4" />
+    },
+    {
+      key: 'jump',
+      label: t('workspace.jumpHost', { defaultValue: '跳板机' }),
+      icon: <ArrowUpRight className="size-4" />
+    },
+    {
+      key: 'proxy',
+      label: t('workspace.proxySettings', { defaultValue: '代理设置' }),
+      icon: <Network className="size-4" />
+    },
+    {
+      key: 'other',
+      label: t('workspace.otherSettings', { defaultValue: '其他设置' }),
+      icon: <Settings2 className="size-4" />
+    },
+    {
+      key: 'init',
+      label: t('workspace.initialize', { defaultValue: '初始化' }),
+      icon: <Wrench className="size-4" />
+    }
   ]
 
   const authSummary =
@@ -643,16 +742,42 @@ export function SshConnectionInspector({
                   {formState.authType === 'password' ? (
                     <Field label={t('form.password')}>
                       <div className="flex gap-2">
-                        <div className="relative flex-1">
-                          <LockKeyhole className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8b8b8b]" />
-                          <Input
-                            value={formState.password}
-                            onChange={(event) => setField('password', event.target.value)}
-                            placeholder={isEditing ? '••••••••' : t('form.passwordPlaceholder')}
-                            type="password"
-                            className="h-11 border-[#525252] bg-[#2d2d2d] pl-10 text-[#f5f5f5] shadow-none placeholder:text-[#71717a]"
+                        {isEditing && connection?.hasPassword && passwordAction !== 'set' ? (
+                          <InspectorSecretChip
+                            cleared={passwordAction === 'clear'}
+                            storedLabel={t('form.secretSet')}
+                            changeLabel={t('form.secretChange')}
+                            clearLabel={t('form.secretClear')}
+                            onChange={() => setPasswordAction('set')}
+                            onToggleClear={() =>
+                              setPasswordAction(passwordAction === 'clear' ? 'keep' : 'clear')
+                            }
                           />
-                        </div>
+                        ) : (
+                          <div className="relative flex-1">
+                            <LockKeyhole className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#8b8b8b]" />
+                            <Input
+                              value={formState.password}
+                              onChange={(event) => setField('password', event.target.value)}
+                              placeholder={t('form.passwordPlaceholder')}
+                              type="password"
+                              className="h-11 border-[#525252] bg-[#2d2d2d] pl-10 text-[#f5f5f5] shadow-none placeholder:text-[#71717a]"
+                            />
+                          </div>
+                        )}
+                        {isEditing && connection?.hasPassword && passwordAction === 'set' ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-11 border-[#525252] bg-[#2d2d2d] text-[#f5f5f5] shadow-none hover:bg-[#353535]"
+                            onClick={() => {
+                              setField('password', '')
+                              setPasswordAction('keep')
+                            }}
+                          >
+                            <X className="size-3.5" />
+                          </Button>
+                        ) : null}
                         <Button
                           variant="outline"
                           size="sm"
@@ -691,13 +816,26 @@ export function SshConnectionInspector({
 
                       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
                         <Field label={t('form.passphrase')}>
-                          <Input
-                            value={formState.passphrase}
-                            onChange={(event) => setField('passphrase', event.target.value)}
-                            placeholder={t('form.passphrasePlaceholder')}
-                            type="password"
-                            className="h-11 border-[#525252] bg-[#2d2d2d] text-[#f5f5f5] shadow-none placeholder:text-[#71717a]"
-                          />
+                          {isEditing && connection?.hasPassphrase && passphraseAction !== 'set' ? (
+                            <InspectorSecretChip
+                              cleared={passphraseAction === 'clear'}
+                              storedLabel={t('form.secretSet')}
+                              changeLabel={t('form.secretChange')}
+                              clearLabel={t('form.secretClear')}
+                              onChange={() => setPassphraseAction('set')}
+                              onToggleClear={() =>
+                                setPassphraseAction(passphraseAction === 'clear' ? 'keep' : 'clear')
+                              }
+                            />
+                          ) : (
+                            <Input
+                              value={formState.passphrase}
+                              onChange={(event) => setField('passphrase', event.target.value)}
+                              placeholder={t('form.passphrasePlaceholder')}
+                              type="password"
+                              className="h-11 border-[#525252] bg-[#2d2d2d] text-[#f5f5f5] shadow-none placeholder:text-[#71717a]"
+                            />
+                          )}
                         </Field>
                         <div className="flex items-end">
                           <Button
@@ -723,7 +861,9 @@ export function SshConnectionInspector({
                   ) : null}
 
                   <div className="rounded-[10px] border border-[#3d3d3d] bg-[#2b2b2b] px-3 py-3 text-[13px]">
-                    <div className="text-[#8b8b8b]">{t('workspace.authSummary', { defaultValue: '认证摘要' })}</div>
+                    <div className="text-[#8b8b8b]">
+                      {t('workspace.authSummary', { defaultValue: '认证摘要' })}
+                    </div>
                     <div className="mt-1 text-[#f5f5f5]">
                       {formState.username || 'root'} / {authSummary}
                     </div>
@@ -884,7 +1024,11 @@ export function SshConnectionInspector({
             onClick={() => void handlePrimaryAction()}
             disabled={!canSubmit || saving}
           >
-            {session?.status === 'connected' ? <Terminal className="size-4" /> : <ArrowUpRight className="size-4" />}
+            {session?.status === 'connected' ? (
+              <Terminal className="size-4" />
+            ) : (
+              <ArrowUpRight className="size-4" />
+            )}
             {session?.status === 'connected' ? t('openTerminal') : t('connect')}
           </Button>
         </div>

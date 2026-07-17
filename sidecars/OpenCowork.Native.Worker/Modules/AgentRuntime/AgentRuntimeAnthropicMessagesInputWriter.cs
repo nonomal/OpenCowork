@@ -23,9 +23,13 @@ internal static partial class AgentRuntimeAnthropicMessagesProvider
         var buffer = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(buffer, WriterOptions))
         {
+            var omitted = AgentRuntimeProviderSupport.GetOmittedBodyKeys(provider);
             writer.WriteStartObject();
             writer.WriteString("model", JsonHelpers.GetString(provider, "model") ?? string.Empty);
-            writer.WriteNumber("max_tokens", ResolveAnthropicMaxTokens(provider));
+            if (!omitted.Contains("max_tokens"))
+            {
+                writer.WriteNumber("max_tokens", ResolveAnthropicMaxTokens(provider));
+            }
             var promptCacheEnabled = JsonHelpers.GetBool(provider, "enablePromptCache", true);
             var systemPromptCacheEnabled = JsonHelpers.GetBool(provider, "enableSystemPromptCache", true);
             var cacheBudget = new AnthropicCacheControlBudget(
@@ -49,8 +53,9 @@ internal static partial class AgentRuntimeAnthropicMessagesProvider
             WriteMessages(writer, sanitizedConversation, promptCacheEnabled, cacheBudget, validationStats);
             WriteTools(writer, parameters, provider, promptCacheEnabled, cacheBudget);
             writer.WriteBoolean("stream", true);
-            var wroteThinkingTemperature = WriteAnthropicThinkingConfig(writer, provider);
+            var wroteThinkingTemperature = WriteAnthropicThinkingConfig(writer, provider, omitted);
             if (!wroteThinkingTemperature &&
+                !omitted.Contains("temperature") &&
                 JsonHelpers.GetDoubleNullable(provider, "temperature") is { } temperature)
             {
                 writer.WriteNumber("temperature", temperature);
@@ -760,7 +765,10 @@ internal static partial class AgentRuntimeAnthropicMessagesProvider
             : null;
     }
 
-    private static bool WriteAnthropicThinkingConfig(Utf8JsonWriter writer, JsonElement provider)
+    private static bool WriteAnthropicThinkingConfig(
+        Utf8JsonWriter writer,
+        JsonElement provider,
+        HashSet<string> omitted)
     {
         if (!provider.TryGetProperty("thinkingConfig", out var thinkingConfig) ||
             thinkingConfig.ValueKind != JsonValueKind.Object)
@@ -783,6 +791,10 @@ internal static partial class AgentRuntimeAnthropicMessagesProvider
             {
                 continue;
             }
+            if (omitted.Contains(property.Name))
+            {
+                continue;
+            }
             if (property.Name == "temperature")
             {
                 wroteTemperature = true;
@@ -791,7 +803,8 @@ internal static partial class AgentRuntimeAnthropicMessagesProvider
         }
 
         WriteNormalizedAnthropicThinking(writer, bodyParams);
-        if (JsonHelpers.GetDoubleNullable(thinkingConfig, "forceTemperature") is { } forceTemperature)
+        if (!omitted.Contains("temperature") &&
+            JsonHelpers.GetDoubleNullable(thinkingConfig, "forceTemperature") is { } forceTemperature)
         {
             writer.WriteNumber("temperature", forceTemperature);
             wroteTemperature = true;

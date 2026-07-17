@@ -24,7 +24,6 @@ internal static class WorkerModuleCatalog
         new UserContentModule(),
         new ShellModule(),
         new TerminalModule(),
-        new SshModule(),
         // CodeGraph (source-merged engine): codegraph/* methods. Handlers gate on
         // per-project state; registration never blocks boot (not in the required set).
         new CodeGraphModule()

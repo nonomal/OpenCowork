@@ -114,6 +114,8 @@ const HOUR_MS = 60 * MINUTE_MS
 const DAY_MS = 24 * HOUR_MS
 const WEEK_MS = 7 * DAY_MS
 const PROJECT_SORT_STORAGE_KEY = 'openCowork.workspaceSidebar.projectSortMode'
+const PROJECT_COLLAPSED_IDS_STORAGE_KEY = 'openCowork.workspaceSidebar.collapsedProjectIds'
+const PROJECT_EXPANDED_IDS_STORAGE_KEY = 'openCowork.workspaceSidebar.expandedProjectIds'
 const SIDEBAR_TREE_ROW_CLASS = 'workspace-sidebar-row min-h-8 rounded-md border border-transparent'
 const SIDEBAR_TREE_ACTIVE_CLASS = 'workspace-sidebar-row--active text-foreground'
 const SIDEBAR_TREE_HOVER_CLASS =
@@ -294,6 +296,42 @@ function writeProjectSortMode(mode: ProjectSortMode): void {
     window.localStorage.setItem(PROJECT_SORT_STORAGE_KEY, mode)
   } catch {
     // Sorting still works for the current session if persistence is unavailable.
+  }
+}
+
+function readCollapsedProjectIds(): Set<string> {
+  try {
+    const stored = window.localStorage.getItem(PROJECT_COLLAPSED_IDS_STORAGE_KEY)
+    if (stored) return new Set(JSON.parse(stored))
+  } catch {
+    // Fallback to empty set if persistence is unavailable.
+  }
+  return new Set()
+}
+
+function writeCollapsedProjectIds(ids: Set<string>): void {
+  try {
+    window.localStorage.setItem(PROJECT_COLLAPSED_IDS_STORAGE_KEY, JSON.stringify([...ids]))
+  } catch {
+    // Collapse state still works for the current session if persistence is unavailable.
+  }
+}
+
+function readExpandedProjectIds(): Set<string> {
+  try {
+    const stored = window.localStorage.getItem(PROJECT_EXPANDED_IDS_STORAGE_KEY)
+    if (stored) return new Set(JSON.parse(stored))
+  } catch {
+    // Fallback to empty set if persistence is unavailable.
+  }
+  return new Set()
+}
+
+function writeExpandedProjectIds(ids: Set<string>): void {
+  try {
+    window.localStorage.setItem(PROJECT_EXPANDED_IDS_STORAGE_KEY, JSON.stringify([...ids]))
+  } catch {
+    // Expansion state still works for the current session if persistence is unavailable.
   }
 }
 
@@ -521,9 +559,13 @@ export function WorkspaceSidebar(): React.JSX.Element {
   const [projectSortMode, setProjectSortMode] = useState<ProjectSortMode>(readProjectSortMode)
   const [isFolderDragOver, setIsFolderDragOver] = useState(false)
   const [chatsSectionCollapsed, setChatsSectionCollapsed] = useState(false)
-  const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(() => new Set())
+  const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(
+    readCollapsedProjectIds
+  )
   const collapseStateInitializedRef = useRef(false)
-  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set())
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
+    readExpandedProjectIds
+  )
   const featureMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runningSubAgentSessionIds = useMemo(
     () => new Set(runningSubAgentSessionIdsSig ? runningSubAgentSessionIdsSig.split('\u0000') : []),
@@ -1034,6 +1076,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
         } else {
           next.add(projectId)
         }
+        writeCollapsedProjectIds(next)
         return next
       })
     },
@@ -1048,6 +1091,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
       } else {
         next.add(projectId)
       }
+      writeExpandedProjectIds(next)
       return next
     })
   }, [])

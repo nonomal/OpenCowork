@@ -43,6 +43,7 @@ import { ImagePreview } from './ImagePreview'
 import { ImagePluginToolCard } from './ImagePluginToolCard'
 import { DesktopActionToolCard } from './DesktopActionToolCard'
 import { BrowserToolCard } from './BrowserToolCard'
+import { CodeGraphToolCard } from './CodeGraphToolCard'
 import { useChatStore } from '@renderer/stores/chat-store'
 import { useAgentStore } from '@renderer/stores/agent-store'
 import type { AgentRunChangeSet, AgentRunFileChange } from '@renderer/stores/agent-store'
@@ -84,7 +85,8 @@ import { readSidecarDebugBody } from '@renderer/lib/ipc/agent-bridge'
 import { MONO_FONT } from '@renderer/lib/constants'
 import {
   getLiveOutputComponentClass,
-  getLiveOutputCursorClass
+  getLiveOutputCursorClass,
+  getLiveOutputShimmerClass
 } from '@renderer/lib/live-output-animation'
 import type { RequestRetryState, ToolCallState, ToolCallStatus } from '@renderer/lib/agent/types'
 import {
@@ -967,20 +969,16 @@ function ModelThinkingIndicator({
   modelName,
   label
 }: ModelThinkingIndicatorProps): React.JSX.Element {
+  const liveOutputAnimationStyle = useSettingsStore((s) => s.liveOutputAnimationStyle)
   const statusLabel = modelName ? `${modelName} ${label}` : label
 
   return (
     <div className="pending-assistant-status" role="status" aria-label={statusLabel}>
-      <span className="pending-assistant-wave" aria-hidden="true">
-        {[0, 1, 2, 3].map((index) => (
-          <span
-            key={index}
-            className="pending-assistant-bar"
-            style={{ animationDelay: `${index * 130}ms` }}
-          />
-        ))}
+      <span
+        className={`pending-assistant-label ${getLiveOutputShimmerClass(liveOutputAnimationStyle)}`}
+      >
+        {label}
       </span>
-      <span className="pending-assistant-label">{label}</span>
     </div>
   )
 }
@@ -2426,6 +2424,28 @@ export function AssistantMessage({
               output={toolCallState.output}
               status={toolCallState.status}
               error={toolCallState.error}
+              forceOpen={executionItem?.forceExpanded}
+            />
+          </ScaleIn>
+        )
+      }
+      if (block.name.startsWith('codegraph_')) {
+        const toolCallState = buildToolCallRenderState(block, {
+          isStreaming,
+          toolResults,
+          liveToolCallMap: effectiveLiveToolCallMap,
+          executionItem
+        })
+        return (
+          <ScaleIn key={key} className={liveScaleInClassName}>
+            <CodeGraphToolCard
+              name={toolCallState.name}
+              input={toolCallState.input}
+              output={toolCallState.output}
+              status={toolCallState.status}
+              error={toolCallState.error}
+              startedAt={toolCallState.startedAt}
+              completedAt={toolCallState.completedAt}
               forceOpen={executionItem?.forceExpanded}
             />
           </ScaleIn>

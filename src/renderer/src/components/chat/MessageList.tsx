@@ -1209,11 +1209,13 @@ const MessageRow = React.memo(function MessageRow({
         requestRetryState={requestRetryState}
       />
       {showChangeSummary && message.role === 'assistant' && !isStreaming && sessionId ? (
-        <SessionChangeSummaryCard
-          sessionId={sessionId}
-          messageId={message.id}
-          toolUseIds={messageToolUseIds}
-        />
+        <div className="animate-in fade-in-0 slide-in-from-bottom-1 duration-300">
+          <SessionChangeSummaryCard
+            sessionId={sessionId}
+            messageId={message.id}
+            toolUseIds={messageToolUseIds}
+          />
+        </div>
       ) : null}
     </div>
   )
@@ -2457,7 +2459,7 @@ function MessageListInner(props: MessageListProps): React.JSX.Element {
               >
                 {isLoadOlderRow ? (
                   <div
-                    className={`${getMessageColumnClass(fullWidth)} flex justify-center pb-3 pt-3`}
+                    className={`${getMessageColumnClass(fullWidth)} flex justify-center pb-3 pt-3 animate-in fade-in-0 duration-200`}
                   >
                     <button
                       type="button"

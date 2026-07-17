@@ -141,6 +141,20 @@ export interface CgSubgraph {
   errorKind?: string
 }
 
+// Live index/sync progress relayed from the worker over IPC.CODEGRAPH_INDEX_PROGRESS.
+// Phase: scan | extract | resolve | synthesize | maintenance | sync | complete.
+export interface CgIndexProgress {
+  indexId: string
+  phase: string
+  filesDone: number
+  filesTotal: number
+  nodeCount: number
+  edgeCount: number
+  message?: string | null
+  done?: boolean
+  state?: string
+}
+
 interface CgAssetStatus {
   workerReady: boolean
   grammarsReady: boolean
@@ -165,6 +179,8 @@ interface CodeGraphStore {
   filesLoading: boolean
   // Single-flight guard: 'index:<root>' | 'sync:<root>' | 'remove:<hash>' | 'addFolder'.
   busyKey: string | null
+  // Live progress for the current UI-initiated index/sync (null when idle).
+  indexProgress: CgIndexProgress | null
 
   refreshProjects: () => Promise<void>
   selectProject: (root: string | null) => void
@@ -186,6 +202,9 @@ interface CodeGraphStore {
       limit?: number
     }
   ) => Promise<CgSubgraph>
+  // Pick a sensible starting node for an unseeded graph view: the top symbol of
+  // the largest indexed file (most nodes). Null when the project has no symbols.
+  pickDefaultSeed: (root: string) => Promise<CgNode | null>
 }
 
 const INDEX_TIMEOUT_MS = 15 * 60_000
@@ -203,6 +222,7 @@ export const useCodeGraphStore = create<CodeGraphStore>()((set, get) => ({
   files: null,
   filesLoading: false,
   busyKey: null,
+  indexProgress: null,
 
   refreshProjects: async () => {
     set({ projectsLoading: true })
@@ -295,17 +315,29 @@ export const useCodeGraphStore = create<CodeGraphStore>()((set, get) => ({
   indexProject: async (root) => {
     const key = `index:${root}`
     if (get().busyKey) return
-    set({ busyKey: key })
+    const indexId = crypto.randomUUID()
+    trackCodeGraphIndex(indexId)
+    set({
+      busyKey: key,
+      indexProgress: {
+        indexId,
+        phase: 'scan',
+        filesDone: 0,
+        filesTotal: 0,
+        nodeCount: 0,
+        edgeCount: 0
+      }
+    })
     toast.info(t('toast.indexStarted'))
-    // Poll the health snapshot so KPIs update live during a long index (there is no
-    // main→renderer progress event forwarding today — the request blocks meanwhile).
+    // Poll the health snapshot so KPIs update live during a long index; the
+    // codegraph/index-progress relay drives the progress bar in parallel.
     const poll = window.setInterval(() => {
       if (get().selectedRoot === root) void get().refreshSelected({ silent: true })
     }, 2_000)
     try {
       const res = await cg<{ success?: boolean; state?: string; error?: string }>(
         'codegraph/index',
-        { workingFolder: root, indexId: crypto.randomUUID() },
+        { workingFolder: root, indexId },
         INDEX_TIMEOUT_MS
       )
       if (res?.success === false) {
@@ -319,7 +351,8 @@ export const useCodeGraphStore = create<CodeGraphStore>()((set, get) => ({
       })
     } finally {
       window.clearInterval(poll)
-      set({ busyKey: null })
+      untrackCodeGraphIndex(indexId)
+      set({ busyKey: null, indexProgress: null })
       await get().refreshProjects()
       if (get().selectedRoot === root) {
         await get().refreshSelected()
@@ -331,11 +364,23 @@ export const useCodeGraphStore = create<CodeGraphStore>()((set, get) => ({
   syncProject: async (root) => {
     const key = `sync:${root}`
     if (get().busyKey) return
-    set({ busyKey: key })
+    const indexId = crypto.randomUUID()
+    trackCodeGraphIndex(indexId)
+    set({
+      busyKey: key,
+      indexProgress: {
+        indexId,
+        phase: 'sync',
+        filesDone: 0,
+        filesTotal: 0,
+        nodeCount: 0,
+        edgeCount: 0
+      }
+    })
     try {
       const res = await cg<{ success?: boolean; error?: string }>(
         'codegraph/sync',
-        { workingFolder: root },
+        { workingFolder: root, indexId },
         SYNC_TIMEOUT_MS
       )
       if (res?.success === false) {
@@ -348,7 +393,8 @@ export const useCodeGraphStore = create<CodeGraphStore>()((set, get) => ({
         description: error instanceof Error ? error.message : String(error)
       })
     } finally {
-      set({ busyKey: null })
+      untrackCodeGraphIndex(indexId)
+      set({ busyKey: null, indexProgress: null })
       await get().refreshProjects()
       if (get().selectedRoot === root) {
         await get().refreshSelected()
@@ -437,8 +483,66 @@ export const useCodeGraphStore = create<CodeGraphStore>()((set, get) => ({
       console.error('[CodeGraph] query-neighbors failed', error)
       return empty
     }
+  },
+
+  pickDefaultSeed: async (root) => {
+    try {
+      const res = await cg<{ success: boolean; files?: CgFileNode[] }>(
+        'codegraph/files-tree',
+        { workingFolder: root },
+        30_000
+      )
+      const files = res.success && res.files ? res.files : []
+      if (files.length === 0) return null
+      // Largest file by symbol count is a reliable "center of gravity" for a first look.
+      const top = files.reduce((a, b) => (b.nodeCount > a.nodeCount ? b : a))
+      const symbols = await get().fileSymbols(root, top.path)
+      if (symbols.length === 0) return null
+      return symbols.find((s) => s.isExported) ?? symbols[0]
+    } catch (error) {
+      console.error('[CodeGraph] pickDefaultSeed failed', error)
+      return null
+    }
   }
 }))
+
+// ---- Live index progress (IPC.CODEGRAPH_INDEX_PROGRESS relay) ----------------
+// Only events whose indexId was registered by a UI-initiated index/sync update
+// the store, so background auto-sync (which uses its own random indexId) is
+// ignored and never flashes a progress bar.
+const trackedIndexIds = new Set<string>()
+
+export function trackCodeGraphIndex(indexId: string): void {
+  trackedIndexIds.add(indexId)
+}
+
+export function untrackCodeGraphIndex(indexId: string): void {
+  trackedIndexIds.delete(indexId)
+}
+
+function handleIndexProgress(raw: unknown): void {
+  const p = raw as Partial<CgIndexProgress> | null
+  if (!p || typeof p.indexId !== 'string' || !trackedIndexIds.has(p.indexId)) return
+  useCodeGraphStore.setState({
+    indexProgress: {
+      indexId: p.indexId,
+      phase: typeof p.phase === 'string' ? p.phase : 'indexing',
+      filesDone: Number(p.filesDone ?? 0),
+      filesTotal: Number(p.filesTotal ?? 0),
+      nodeCount: Number(p.nodeCount ?? 0),
+      edgeCount: Number(p.edgeCount ?? 0),
+      message: p.message ?? null,
+      done: p.done === true,
+      state: p.state
+    }
+  })
+}
+
+if (typeof window !== 'undefined') {
+  window.electron?.ipcRenderer?.on?.(IPC.CODEGRAPH_INDEX_PROGRESS, (_event, payload) =>
+    handleIndexProgress(payload)
+  )
+}
 
 // Feature-gate helper (plugin enabled + grammar assets ready), used by the page.
 export async function getCodeGraphAssetStatus(): Promise<CgAssetStatus | null> {

@@ -1,7 +1,13 @@
 import { Client, type ClientChannel, type SFTPWrapper } from 'ssh2'
 import { safeSendMessagePackToAllWindows } from '../window-ipc'
 import { getConnectionWithSecrets, updateConnection } from './repository'
-import { connectWithProxyJump, formatLayeredError } from './auth'
+import {
+  connectWithProxyJump,
+  formatLayeredError,
+  type SshConnectLogger,
+  type SshConnectLogLevel,
+  type SshConnectStage
+} from './auth'
 
 // Connection runtime: one authenticated ssh2 Client per saved connection,
 // multiplexing N terminal shells over it. Handles keepalive-detected drops
@@ -73,6 +79,33 @@ function broadcastStatus(
     status,
     ...(error ? { error } : {})
   })
+}
+
+let connectLogSeq = 0
+
+// Protocol-level connection log, keyed by connectionId so the connecting-stage
+// UI can render it before a terminal session id exists. `reset` marks the
+// start of a fresh attempt so the renderer clears prior lines.
+function emitConnectLog(
+  connectionId: string,
+  level: SshConnectLogLevel,
+  stage: SshConnectStage,
+  message: string,
+  reset = false
+): void {
+  safeSendMessagePackToAllWindows('ssh:connect:log', {
+    connectionId,
+    level,
+    stage,
+    message,
+    reset,
+    seq: connectLogSeq++,
+    ts: Date.now()
+  })
+}
+
+function makeConnectLogger(connectionId: string): SshConnectLogger {
+  return (level, stage, message) => emitConnectLog(connectionId, level, stage, message)
 }
 
 function recordTerminalOutput(terminal: TerminalChannel, data: Buffer): void {
@@ -192,8 +225,12 @@ async function doConnect(handle: ConnectionHandle): Promise<void> {
     throw new Error('Connection not found')
   }
   const generation = ++handle.generation
+  const logger = makeConnectLogger(handle.connectionId)
+  if (handle.state === 'reconnecting') {
+    emitConnectLog(handle.connectionId, 'warn', 'reconnect', 'Connection lost — reconnecting…')
+  }
   try {
-    const connected = await connectWithProxyJump(connection)
+    const connected = await connectWithProxyJump(connection, logger)
     if (generation !== handle.generation || handle.state === 'closed') {
       try {
         connected.client.end()
@@ -224,6 +261,7 @@ async function openShell(handle: ConnectionHandle, terminal: TerminalChannel): P
   if (!client) throw new Error('Connection is not ready')
   const connection = getConnectionWithSecrets(handle.connectionId)
 
+  emitConnectLog(handle.connectionId, 'info', 'shell', 'Requesting interactive shell channel')
   const stream = await new Promise<ClientChannel>((resolve, reject) => {
     client.shell(
       { term: 'xterm-256color', cols: terminal.cols, rows: terminal.rows, modes: {} },
@@ -233,6 +271,7 @@ async function openShell(handle: ConnectionHandle, terminal: TerminalChannel): P
       }
     )
   })
+  emitConnectLog(handle.connectionId, 'info', 'shell', 'Shell channel ready')
 
   terminal.stream = stream
   terminal.status = 'ready'
@@ -391,6 +430,7 @@ export async function openSshTerminal(
   }
 
   const handle = acquireHandle(connectionId)
+  const reusing = handle.state === 'ready'
 
   const terminal: TerminalChannel = {
     id: `ssh-${nextTerminalId++}`,
@@ -405,6 +445,17 @@ export async function openSshTerminal(
   handle.terminals.set(terminal.id, terminal)
   terminalIndex.set(terminal.id, handle)
   broadcastStatus(terminal.id, connectionId, 'connecting')
+
+  const connection = getConnectionWithSecrets(connectionId)
+  emitConnectLog(
+    connectionId,
+    'info',
+    'dial',
+    reusing
+      ? 'Reusing existing authenticated connection'
+      : `Preparing connection to ${connection?.host ?? '?'}:${connection?.port ?? 22}`,
+    true
+  )
 
   try {
     await ensureConnected(handle)

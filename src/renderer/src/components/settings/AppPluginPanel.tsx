@@ -27,6 +27,12 @@ import {
 } from '@renderer/stores/provider-store'
 import { useChatStore } from '@renderer/stores/chat-store'
 import { resolvePluginsForProject, useAppPluginStore } from '@renderer/stores/app-plugin-store'
+import {
+  trackCodeGraphIndex,
+  untrackCodeGraphIndex,
+  useCodeGraphStore
+} from '@renderer/stores/codegraph-store'
+import { CodeGraphIndexProgressBar } from '@renderer/components/codegraph/CodeGraphIndexProgressBar'
 import { useSettingsStore } from '@renderer/stores/settings-store'
 import { toast } from 'sonner'
 import { ipcClient } from '@renderer/lib/ipc/ipc-client'
@@ -197,6 +203,7 @@ export function AppPluginPanel(): React.JSX.Element {
   const [cgProjects, setCgProjects] = useState<CodeGraphProjectInfo[]>([])
   const [cgProjectsLoading, setCgProjectsLoading] = useState(false)
   const [cgBusyKey, setCgBusyKey] = useState<string | null>(null)
+  const indexProgress = useCodeGraphStore((s) => s.indexProgress)
   const activeWorkingFolder = useChatStore(
     (state) => state.projects.find((p) => p.id === state.activeProjectId)?.workingFolder
   )
@@ -427,12 +434,31 @@ export function AppPluginPanel(): React.JSX.Element {
     busyKey: string,
     method: string,
     params: Record<string, unknown>,
-    timeoutMs: number
+    timeoutMs: number,
+    opts?: { indexId?: string; phase?: string }
   ): Promise<void> => {
     setCgBusyKey(busyKey)
+    // Seed + track live progress for index/sync so the row shows a real bar.
+    if (opts?.indexId) {
+      trackCodeGraphIndex(opts.indexId)
+      useCodeGraphStore.setState({
+        indexProgress: {
+          indexId: opts.indexId,
+          phase: opts.phase ?? 'scan',
+          filesDone: 0,
+          filesTotal: 0,
+          nodeCount: 0,
+          edgeCount: 0
+        }
+      })
+    }
     try {
       const { agentBridge } = await import('@renderer/lib/ipc/agent-bridge')
-      const result = (await agentBridge.request(method, params, timeoutMs)) as {
+      const result = (await agentBridge.request(
+        method,
+        opts?.indexId ? { ...params, indexId: opts.indexId } : params,
+        timeoutMs
+      )) as {
         success?: boolean
         error?: string
         message?: string
@@ -449,6 +475,10 @@ export function AppPluginPanel(): React.JSX.Element {
         description: error instanceof Error ? error.message : String(error)
       })
     } finally {
+      if (opts?.indexId) {
+        untrackCodeGraphIndex(opts.indexId)
+        useCodeGraphStore.setState({ indexProgress: null })
+      }
       setCgBusyKey(null)
       await refreshCgProjects()
       void refreshCodegraphAsset()
@@ -456,12 +486,18 @@ export function AppPluginPanel(): React.JSX.Element {
   }
 
   const handleCgIndex = (root: string): void => {
-    // Re-index is long-running on big repos; the row shows a busy state meanwhile.
-    void runCgAction(`index:${root}`, 'codegraph/index', { workingFolder: root }, 600_000)
+    // Re-index is long-running on big repos; the row shows a live progress bar.
+    void runCgAction(`index:${root}`, 'codegraph/index', { workingFolder: root }, 600_000, {
+      indexId: crypto.randomUUID(),
+      phase: 'scan'
+    })
   }
 
   const handleCgSync = (root: string): void => {
-    void runCgAction(`sync:${root}`, 'codegraph/sync', { workingFolder: root }, 300_000)
+    void runCgAction(`sync:${root}`, 'codegraph/sync', { workingFolder: root }, 300_000, {
+      indexId: crypto.randomUUID(),
+      phase: 'sync'
+    })
   }
 
   const handleCgRemoveProject = (row: CodeGraphProjectInfo): void => {
@@ -812,6 +848,16 @@ export function AppPluginPanel(): React.JSX.Element {
                   ) : null}
                 </div>
 
+                {/* Section-level bar for indexing a folder that isn't a listed row yet
+                    (e.g. the first index of the current project). */}
+                {indexProgress &&
+                cgBusyKey &&
+                !cgProjects.some(
+                  (p) => cgBusyKey === `index:${p.root}` || cgBusyKey === `sync:${p.root}`
+                ) ? (
+                  <CodeGraphIndexProgressBar progress={indexProgress} />
+                ) : null}
+
                 {!codegraphPluginEnabled ? (
                   <p className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
                     {t('plugin.codegraph.enableFirst')}
@@ -905,6 +951,12 @@ export function AppPluginPanel(): React.JSX.Element {
                                 : t('plugin.codegraph.deleteIndex')}
                             </Button>
                           </div>
+                          {(busyIndex || busySync) && indexProgress ? (
+                            <CodeGraphIndexProgressBar
+                              progress={indexProgress}
+                              className="mt-2.5"
+                            />
+                          ) : null}
                         </div>
                       )
                     })}

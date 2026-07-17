@@ -70,7 +70,17 @@
     "keepAlive": "Keep Alive Interval (seconds)",
     "advanced": "Advanced Options",
     "save": "Save",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "sectionBasic": "Basics",
+    "sectionAuth": "Authentication",
+    "sectionAdvanced": "Advanced",
+    "secretSet": "Saved",
+    "secretChange": "Change",
+    "secretClear": "Clear",
+    "testConnection": "Test connection",
+    "testSuccess": "Connection and authentication OK",
+    "testFailed": "Connection test failed",
+    "saveAndConnect": "Save & Connect"
   },
   "groupDialog": {
     "title": "Group Name",
@@ -300,7 +310,8 @@
         "done": "Completed",
         "error": "Failed",
         "canceled": "Canceled"
-      }
+      },
+      "retry": "Retry"
     },
     "terminalTheme": {
       "title": "Terminal palette",
@@ -439,6 +450,7 @@
       "noConnections": "No connection history.",
       "uploads": "Upload activity",
       "noUploads": "No upload activity yet."
-    }
+    },
+    "libraryTab": "Hosts"
   }
 }

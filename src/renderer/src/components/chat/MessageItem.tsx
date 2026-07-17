@@ -215,8 +215,11 @@ function MessageItemInner({
   if (!inner) return null
 
   if (disableAnimation) {
+    // Tail rows skip the motion SlideIn (spring transforms fight bottom-pinned
+    // auto-scroll); a one-shot CSS enter keeps arrival visible at zero per-render
+    // cost and is neutralized globally by data-animations='disabled'.
     return (
-      <div className="group/ts relative">
+      <div className="group/ts relative animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
         <span className="absolute -left-12 top-1 hidden group-hover/ts:block text-[10px] text-muted-foreground/40 whitespace-nowrap">
           {formatTime(message.createdAt)}
         </span>

@@ -2,7 +2,7 @@
 import type { StateCreator } from 'zustand'
 import { ipcClient } from '../../lib/ipc/ipc-client'
 import { IPC } from '../../lib/ipc/channels'
-import type { SftpConflictPolicy, SftpTransferTask, SshUploadTask } from './types'
+import type { SftpTransferRequest, SftpTransferTask, SshUploadTask } from './types'
 import { ensureSshEventsSubscribed } from './events'
 import type { SshStore } from './store'
 
@@ -18,31 +18,8 @@ export interface SshTransfersSlice {
   }) => Promise<string | null>
   cancelUpload: (taskId: string) => Promise<void>
   clearUploadTask: (taskId: string) => void
-  startTransfer: (
-    args:
-      | {
-          type: 'upload'
-          connectionId: string
-          remoteDir: string
-          localPaths: string[]
-          conflictPolicy?: SftpConflictPolicy
-        }
-      | {
-          type: 'download'
-          connectionId: string
-          remotePaths: string[]
-          localDir: string
-          conflictPolicy?: SftpConflictPolicy
-        }
-      | {
-          type: 'remote-copy'
-          sourceConnectionId: string
-          targetConnectionId: string
-          sourcePaths: string[]
-          targetDir: string
-          conflictPolicy?: SftpConflictPolicy
-        }
-  ) => Promise<string | null>
+  startTransfer: (args: SftpTransferRequest) => Promise<string | null>
+  retryTransfer: (taskId: string) => Promise<string | null>
   cancelTransfer: (taskId: string) => Promise<void>
   clearTransferTask: (taskId: string) => void
 }
@@ -112,12 +89,21 @@ export const createTransfersSlice: StateCreator<SshStore, [], [], SshTransfersSl
                 : null,
           conflictPolicy: args.conflictPolicy,
           message: 'Preparing transfer...',
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
+          request: args
         }
       }
     }))
 
     return taskId
+  },
+
+  retryTransfer: async (taskId) => {
+    const state = api.getState()
+    const task = state.transferTasks[taskId]
+    if (!task?.request) return null
+    state.clearTransferTask(taskId)
+    return state.startTransfer({ ...task.request, resume: true })
   },
 
   cancelTransfer: async (taskId) => {
