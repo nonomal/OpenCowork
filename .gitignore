@@ -9,4 +9,5 @@ bin/
 obj/
 resources/sidecar/
 resources/native-worker/
+resources/codegraph-worker/
 .claude\worktrees/
