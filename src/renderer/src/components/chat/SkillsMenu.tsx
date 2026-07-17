@@ -33,7 +33,7 @@ import {
 import { cn } from '@renderer/lib/utils'
 import { useSkillsStore } from '@renderer/stores/skills-store'
 import { useChannelStore } from '@renderer/stores/channel-store'
-import { resolveEffectiveActiveMcpIds, useMcpStore } from '@renderer/stores/mcp-store'
+import { resolveConfiguredActiveMcpIds, useMcpStore } from '@renderer/stores/mcp-store'
 import { useUIStore } from '@renderer/stores/ui-store'
 import { listCommands, type CommandCatalogItem } from '@renderer/lib/commands/command-loader'
 import { resolvePluginsForProject, useAppPluginStore } from '@renderer/stores/app-plugin-store'
@@ -160,17 +160,15 @@ function SkillsMenuContent({
   )
 
   const mcpServers = useMcpStore((s) => s.servers)
-  const mcpStatuses = useMcpStore((s) => s.serverStatuses)
   const activeMcpIdsByProject = useMcpStore((s) => s.activeMcpIdsByProject)
   const activeMcpIds = React.useMemo(
     () =>
-      resolveEffectiveActiveMcpIds({
+      resolveConfiguredActiveMcpIds({
         projectId,
         activeMcpIdsByProject,
-        servers: mcpServers,
-        serverStatuses: mcpStatuses
+        servers: mcpServers
       }),
-    [activeMcpIdsByProject, mcpServers, mcpStatuses, projectId]
+    [activeMcpIdsByProject, mcpServers, projectId]
   )
   const toggleActiveMcp = useMcpStore((s) => s.toggleActiveMcp)
   const loadMcpServers = useMcpStore((s) => s.loadServers)
@@ -214,15 +212,13 @@ function SkillsMenuContent({
     () => skills.filter((skill) => !pluginBackedSkillNames.has(skill.name as AppPluginId)),
     [pluginBackedSkillNames, skills]
   )
-  const connectedMcpServers = React.useMemo(
+  const availableMcpServers = React.useMemo(
     () =>
       mcpServers.filter(
         (item) =>
-          item.enabled &&
-          mcpStatuses[item.id] === 'connected' &&
-          (!projectId ? true : !item.projectId || item.projectId === projectId)
+          item.enabled && (!projectId ? true : !item.projectId || item.projectId === projectId)
       ),
-    [mcpServers, mcpStatuses, projectId]
+    [mcpServers, projectId]
   )
   const extensions = useExtensionStore((s) => s.extensions)
   const activeExtensionIdsByProject = useExtensionStore((s) => s.activeExtensionIdsByProject)
@@ -666,13 +662,13 @@ function SkillsMenuContent({
             <DropdownMenuSubContent className={cn('w-56 max-h-80 overflow-y-auto', menuClassName)}>
               <DropdownMenuLabel>{t('skills.availableMcps')}</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {connectedMcpServers.length === 0 ? (
+              {availableMcpServers.length === 0 ? (
                 <div className="px-2 py-4 text-center text-xs text-muted-foreground">
                   <p>{t('skills.noMcps')}</p>
                   <p className="mt-1 text-[10px] opacity-70">{t('skills.configureMcps')}</p>
                 </div>
               ) : (
-                connectedMcpServers.map((server) => {
+                availableMcpServers.map((server) => {
                   const isActive = activeMcpIds.includes(server.id)
                   const toolCount = mcpTools[server.id]?.length ?? 0
                   return (

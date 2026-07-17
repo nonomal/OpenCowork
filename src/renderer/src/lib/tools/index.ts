@@ -6,6 +6,15 @@ import {
   unregisterWebSearchTool,
   isWebSearchToolRegistered
 } from './web-search-tool'
+import {
+  registerCodeGraphExploreTool,
+  unregisterCodeGraphExploreTool,
+  isCodeGraphExploreToolRegistered,
+  registerCodeGraphFullSurface,
+  unregisterCodeGraphFullSurface,
+  isCodeGraphFullSurfaceRegistered
+} from './codegraph-tool'
+import { useSettingsStore } from '../../stores/settings-store'
 import { registerBashTools } from './bash-tool'
 import { registerTeamTools } from '../agent/teams/register'
 import { registerWidgetTools } from './widget-tool'
@@ -29,6 +38,8 @@ export async function registerAllTools(): Promise<void> {
   registerSearchTools()
   // Note: WebSearchTool is NOT registered here — it's registered/unregistered dynamically
   // based on the webSearchEnabled setting (see web-search-tool.ts)
+  // Note: codegraph_explore is NOT registered here — it's registered/unregistered
+  // dynamically based on the codegraphEnabled setting (see codegraph-tool.ts)
   registerBashTools()
   registerWidgetTools()
   registerAskUserTools()
@@ -59,6 +70,25 @@ export function updateWebSearchToolRegistration(enabled: boolean): void {
     registerWebSearchTool()
   } else if (!enabled && isRegistered) {
     unregisterWebSearchTool()
+  }
+}
+
+export function updateCodeGraphToolRegistration(enabled: boolean): void {
+  const isRegistered = isCodeGraphExploreToolRegistered()
+  if (enabled && !isRegistered) {
+    registerCodeGraphExploreTool()
+  } else if (!enabled && isRegistered) {
+    unregisterCodeGraphExploreTool()
+  }
+
+  // Full 8-tool surface (M7-W3): opt-in via settings.codegraphFullToolSurface;
+  // the worker's tools-list shapes what actually registers (tiny-repo gating,
+  // allowlist). Fire-and-forget — registration failure keeps explore-only.
+  const wantFull = enabled && useSettingsStore.getState().codegraphFullToolSurface
+  if (wantFull && !isCodeGraphFullSurfaceRegistered()) {
+    void registerCodeGraphFullSurface()
+  } else if (!wantFull && isCodeGraphFullSurfaceRegistered()) {
+    unregisterCodeGraphFullSurface()
   }
 }
 

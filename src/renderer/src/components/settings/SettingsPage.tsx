@@ -25,7 +25,8 @@ import {
   Terminal,
   UserRound,
   PawPrint,
-  Anchor
+  Anchor,
+  Waypoints
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { AnimatePresence, motion } from 'motion/react'
@@ -75,6 +76,7 @@ import {
 import { ModelManagementPanel, ProviderPanel } from './ProviderPanel'
 import { ChannelPanel } from './PluginPanel'
 import { AppPluginPanel } from './AppPluginPanel'
+import { CodeGraphPage } from '@renderer/components/codegraph/CodeGraphPage'
 import { ExtensionPanel } from './ExtensionPanel'
 import { McpPanel } from './McpPanel'
 import { HooksPanel } from './HooksPanel'
@@ -509,6 +511,12 @@ const menuGroupDefs: Array<{
         icon: <Puzzle className="size-4" />,
         labelKey: 'plugin.title',
         descKey: 'plugin.subtitle'
+      },
+      {
+        id: 'codegraph',
+        icon: <Waypoints className="size-4" />,
+        labelKey: 'codegraph.title',
+        descKey: 'codegraph.subtitle'
       },
       {
         id: 'extension',
@@ -3721,6 +3729,7 @@ const panelMap: Record<SettingsTab, () => React.JSX.Element> = {
   aiCodingClaudeCode: () => <AiCodingPanel kind="claude" />,
   aiCodingCodex: () => <AiCodingPanel kind="codex" />,
   plugin: AppPluginPanel,
+  codegraph: () => <CodeGraphPage embedded />,
   extension: ExtensionPanel,
   hooks: HooksPanel,
   channel: ChannelPanel,
@@ -3830,6 +3839,7 @@ export function SettingsPage(): React.JSX.Element {
             {effectiveSettingsTab === 'provider' ||
             effectiveSettingsTab === 'modelManagement' ||
             effectiveSettingsTab === 'plugin' ||
+            effectiveSettingsTab === 'codegraph' ||
             effectiveSettingsTab === 'extension' ||
             effectiveSettingsTab === 'mcp' ? (
               <div className="flex-1 min-h-0 min-w-0 overflow-hidden" key="full-panel">

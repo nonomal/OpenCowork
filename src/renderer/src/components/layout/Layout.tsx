@@ -60,6 +60,11 @@ const DrawPage = lazy(async () => {
   return { default: mod.DrawPage }
 })
 
+const CodeGraphPage = lazy(async () => {
+  const mod = await import('@renderer/components/codegraph/CodeGraphPage')
+  return { default: mod.CodeGraphPage }
+})
+
 const TasksPage = lazy(async () => {
   const mod = await import('../tasks/TasksPage')
   return { default: mod.TasksPage }
@@ -340,6 +345,7 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
   const syncPageOpen = useUIStore((s) => s.syncPageOpen)
   const resourcesPageOpen = useUIStore((s) => s.resourcesPageOpen)
   const drawPageOpen = useUIStore((s) => s.drawPageOpen)
+  const codeGraphPageOpen = useUIStore((s) => s.codeGraphPageOpen)
   const translatePageOpen = useUIStore((s) => s.translatePageOpen)
   const tasksPageOpen = useUIStore((s) => s.tasksPageOpen)
   const toggleLeftSidebar = useUIStore((s) => s.toggleLeftSidebar)
@@ -364,6 +370,9 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
     }
     if (drawPageOpen) {
       return { title: t('navRail.draw', { defaultValue: 'Drawing' }), subtitle: null }
+    }
+    if (codeGraphPageOpen) {
+      return { title: t('navRail.codegraph', { defaultValue: 'CodeGraph' }), subtitle: null }
     }
     if (translatePageOpen) {
       return { title: t('navRail.translate', { defaultValue: 'Translate' }), subtitle: null }
@@ -412,6 +421,7 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
     activeProjectName,
     activeProjectWorkingFolder,
     chatView,
+    codeGraphPageOpen,
     drawPageOpen,
     mode,
     resourcesPageOpen,
@@ -781,6 +791,15 @@ export function Layout({ updateInfo, onOpenUpdateDialog }: LayoutProps): React.J
               >
                 <Suspense fallback={<LazyPageFallback />}>
                   <DrawPage />
+                </Suspense>
+              </PageTransition>
+            ) : codeGraphPageOpen ? (
+              <PageTransition
+                key="codegraph-page"
+                className="flex-1 min-w-0 bg-background overflow-hidden"
+              >
+                <Suspense fallback={<LazyPageFallback />}>
+                  <CodeGraphPage />
                 </Suspense>
               </PageTransition>
             ) : translatePageOpen ? (

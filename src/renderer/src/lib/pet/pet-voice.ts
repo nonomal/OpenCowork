@@ -71,7 +71,7 @@ function applyMimoTag(params: PetVoiceParams, input: string): string {
 }
 
 interface SpeechClip {
-  base64: string
+  chunks: Uint8Array[]
   mediaType: string
 }
 
@@ -143,13 +143,73 @@ async function synthesizeClip(params: PetVoiceParams, text: string): Promise<Spe
       chatStyle: /mimo/i.test(params.modelId) ? 'assistant' : 'instruct'
     },
     SPEECH_TIMEOUT_MS
-  )) as { base64?: string; mediaType?: string; message?: string; error?: string } | null
+  )) as {
+    base64?: string
+    mediaType?: string
+    filePath?: string
+    bytes?: number
+    message?: string
+    error?: string
+  } | null
+  if (result?.filePath) {
+    return {
+      chunks: await readSpeechFileChunks(result.filePath, result.bytes),
+      mediaType: result.mediaType ?? 'audio/mpeg'
+    }
+  }
   if (!result?.base64) {
     // Surface the worker's own error text when present (e.g. an outdated
     // native worker without the speech route, or an upstream API error).
     throw new Error(result?.message || result?.error || 'speech synthesis returned no audio')
   }
-  return { base64: result.base64, mediaType: result.mediaType ?? 'audio/mpeg' }
+  return {
+    chunks: [decodeBase64Chunk(result.base64)],
+    mediaType: result.mediaType ?? 'audio/mpeg'
+  }
+}
+
+function decodeBase64Chunk(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
+}
+
+async function readSpeechFileChunks(filePath: string, expectedBytes?: number): Promise<Uint8Array[]> {
+  const chunks: Uint8Array[] = []
+  let offset = 0
+  let total = 0
+  for (let page = 0; page < 512; page += 1) {
+    const chunk = (await agentBridge.request(
+      'media/read-file-chunk',
+      { filePath, offset, length: 256 * 1024, deleteWhenDone: true },
+      SPEECH_TIMEOUT_MS
+    )) as { data?: string; nextOffset?: number; done?: boolean; bytes?: number } | null
+    if (!chunk?.data && chunk?.done !== true) {
+      throw new Error('speech audio chunk read returned no data')
+    }
+
+    const bytes = decodeBase64Chunk(chunk.data ?? '')
+    chunks.push(bytes)
+    total += bytes.byteLength
+    if (total > 64 * 1024 * 1024) {
+      throw new Error('speech audio exceeds the 64 MiB playback limit')
+    }
+    if (chunk.done === true) {
+      if (typeof expectedBytes === 'number' && expectedBytes >= 0 && total !== expectedBytes) {
+        throw new Error(`speech audio size mismatch: expected ${expectedBytes}, received ${total}`)
+      }
+      return chunks
+    }
+    if (typeof chunk.nextOffset !== 'number' || chunk.nextOffset <= offset) {
+      throw new Error('speech audio chunk cursor did not advance')
+    }
+    offset = chunk.nextOffset
+  }
+
+  throw new Error('speech audio exceeded the chunk page safety limit')
 }
 
 /** Play one clip; resolves when playback ends or is interrupted. */
@@ -157,10 +217,9 @@ async function playClip(clip: SpeechClip): Promise<void> {
   stopPetSpeech()
   // Blob URL instead of a data: URL — WAV clips are megabytes of base64,
   // and the CSP media-src allows blob: playback.
-  const binary = atob(clip.base64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  const url = URL.createObjectURL(new Blob([bytes], { type: clip.mediaType }))
+  const url = URL.createObjectURL(
+    new Blob(clip.chunks as BlobPart[], { type: clip.mediaType })
+  )
   const audio = new Audio(url)
   currentAudio = audio
   currentAudioUrl = url

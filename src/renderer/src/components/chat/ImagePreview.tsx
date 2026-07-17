@@ -65,15 +65,38 @@ function dataUrlBase64(value: string): string | null {
   return parts.length === 2 ? parts[1] : null
 }
 
+const IMAGE_SAVE_FILTERS = [
+  {
+    name: 'Images',
+    extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg']
+  }
+]
+
+// Save a local file by copying it inside the main process — works for files
+// beyond the fs:read-file-binary size limit. Returns null if the source file
+// is unavailable so callers can fall back to base64 paths.
+async function downloadLocalFileCopy(
+  sourcePath: string,
+  defaultName: string
+): Promise<{ canceled?: boolean } | null> {
+  try {
+    const result = (await ipcClient.invoke(IPC.FS_DOWNLOAD_FILE_COPY, {
+      sourcePath,
+      defaultName,
+      filters: IMAGE_SAVE_FILTERS
+    })) as { success?: boolean; canceled?: boolean; error?: string }
+    if (result.canceled) return { canceled: true }
+    if (result.success) return { canceled: false }
+    return null
+  } catch {
+    return null
+  }
+}
+
 async function saveImageBase64(data: string, defaultName: string): Promise<{ canceled?: boolean }> {
   const saveResult = (await ipcClient.invoke(IPC.FS_SELECT_SAVE_FILE, {
     defaultPath: defaultName,
-    filters: [
-      {
-        name: 'Images',
-        extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg']
-      }
-    ]
+    filters: IMAGE_SAVE_FILTERS
   })) as { path?: string; canceled?: boolean }
 
   if (saveResult.canceled || !saveResult.path) {
@@ -167,8 +190,11 @@ export function ImagePreview({
         ? getFileName(filePath)
         : `image-${Date.now()}${getDownloadExtension(src)}`
 
-      const persistedData = filePath ? await readFilePathBase64(filePath) : null
-      if (persistedData) {
+      const copyResult = filePath ? await downloadLocalFileCopy(filePath, defaultName) : null
+      const persistedData = filePath && !copyResult ? await readFilePathBase64(filePath) : null
+      if (copyResult) {
+        if (copyResult.canceled) return
+      } else if (persistedData) {
         const result = await saveImageBase64(persistedData, defaultName)
         if (result.canceled) return
       } else if (src.startsWith('data:')) {

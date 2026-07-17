@@ -29,6 +29,7 @@ export type NavItem =
   | 'draw'
   | 'translate'
   | 'tasks'
+  | 'codegraph'
 
 export type ChatView = 'home' | 'project' | 'archive' | 'channels' | 'git' | 'session'
 
@@ -223,6 +224,7 @@ export type SettingsTab =
   | 'aiCodingClaudeCode'
   | 'aiCodingCodex'
   | 'plugin'
+  | 'codegraph'
   | 'extension'
   | 'hooks'
   | 'channel'
@@ -350,7 +352,12 @@ interface UIStore {
     initialChangeId?: string | null
   ) => void
   openReviewTab: (initialChangeId?: string | null) => void
-  ensureBrowserTab: (url?: string, sessionId?: string | null, projectId?: string | null) => void
+  ensureBrowserTab: (
+    url?: string,
+    sessionId?: string | null,
+    projectId?: string | null,
+    options?: { background?: boolean }
+  ) => void
   ensureSubAgentTab: (
     toolUseId?: string | null,
     inlineText?: string | null,
@@ -406,6 +413,9 @@ interface UIStore {
   tasksPageOpen: boolean
   openTasksPage: () => void
   closeTasksPage: () => void
+  codeGraphPageOpen: boolean
+  openCodeGraphPage: () => void
+  closeCodeGraphPage: () => void
   shortcutsOpen: boolean
   setShortcutsOpen: (open: boolean) => void
   changelogDialogOpen: boolean
@@ -488,7 +498,12 @@ interface UIStore {
   ) => void
   browserUrl: string
   setBrowserUrl: (url: string, sessionId?: string | null, projectId?: string | null) => void
-  openBrowserTab: (url?: string, sessionId?: string | null, projectId?: string | null) => void
+  openBrowserTab: (
+    url?: string,
+    sessionId?: string | null,
+    projectId?: string | null,
+    options?: { background?: boolean }
+  ) => void
   browserLoading: boolean
   setBrowserLoading: (
     loading: boolean,
@@ -692,6 +707,7 @@ const CHAT_SURFACE_NAV_RESET = {
   translatePageOpen: false,
   drawPageOpen: false,
   tasksPageOpen: false,
+  codeGraphPageOpen: false,
   pendingInsertText: null
 } as const
 
@@ -1134,7 +1150,7 @@ export const useUIStore = create<UIStore>()(
             rightPanelOpen: true
           }
         }),
-      ensureBrowserTab: (url, sessionId, projectId) =>
+      ensureBrowserTab: (url, sessionId, projectId, options) =>
         set((state) => {
           const existing = state.rightPanelTabs.find((tab) => tab.kind === 'browser')
           const tab: RightPanelTabInstance = existing ?? {
@@ -1147,20 +1163,31 @@ export const useUIStore = create<UIStore>()(
           const rightPanelTabs = existing
             ? ensureRightPanelTabs(state.rightPanelTabs)
             : ensureRightPanelTabs([...state.rightPanelTabs, tab])
+          const browserStatePatch = updateBrowserStateForSession(
+            state,
+            sessionId,
+            {
+              errorInfo: null,
+              ...(url !== undefined ? { url } : {})
+            },
+            projectId
+          )
+          // Background mode (agent-driven navigation): keep the browser tab and its
+          // webview alive so the tools work, but do not force the right panel open or
+          // steal the active tab from the user. The webview stays mounted regardless
+          // of panel visibility (see RightPanel), so it remains usable while hidden.
+          if (options?.background) {
+            return {
+              rightPanelTabs,
+              ...browserStatePatch
+            }
+          }
           return {
             rightPanelTabs,
             rightPanelActiveTabId: tab.id,
             rightPanelTab: 'browser',
             rightPanelOpen: true,
-            ...updateBrowserStateForSession(
-              state,
-              sessionId,
-              {
-                errorInfo: null,
-                ...(url !== undefined ? { url } : {})
-              },
-              projectId
-            )
+            ...browserStatePatch
           }
         }),
       ensureSubAgentTab: (toolUseId, inlineText, _title, requestedSessionId) =>
@@ -1378,6 +1405,7 @@ export const useUIStore = create<UIStore>()(
           translatePageOpen: false,
           drawPageOpen: false,
           tasksPageOpen: false,
+          codeGraphPageOpen: false,
           ...closeRightSidePanels()
         })
         replaceSettingsRoute(nextTab)
@@ -1406,6 +1434,7 @@ export const useUIStore = create<UIStore>()(
           translatePageOpen: false,
           drawPageOpen: false,
           tasksPageOpen: false,
+          codeGraphPageOpen: false,
           ...closeRightSidePanels()
         }),
       closeSkillsPage: () => set({ skillsPageOpen: false }),
@@ -1421,6 +1450,7 @@ export const useUIStore = create<UIStore>()(
           translatePageOpen: false,
           drawPageOpen: false,
           tasksPageOpen: false,
+          codeGraphPageOpen: false,
           ...closeRightSidePanels()
         }),
       closeSoulsPage: () => set({ soulsPageOpen: false }),
@@ -1436,6 +1466,7 @@ export const useUIStore = create<UIStore>()(
           translatePageOpen: false,
           drawPageOpen: false,
           tasksPageOpen: false,
+          codeGraphPageOpen: false,
           ...closeRightSidePanels()
         }),
       closeSyncPage: () => set({ syncPageOpen: false }),
@@ -1451,6 +1482,7 @@ export const useUIStore = create<UIStore>()(
           translatePageOpen: false,
           drawPageOpen: false,
           tasksPageOpen: false,
+          codeGraphPageOpen: false,
           ...closeRightSidePanels()
         }),
       closeResourcesPage: () => set({ resourcesPageOpen: false }),
@@ -1466,6 +1498,7 @@ export const useUIStore = create<UIStore>()(
           resourcesPageOpen: false,
           drawPageOpen: false,
           tasksPageOpen: false,
+          codeGraphPageOpen: false,
           ...closeRightSidePanels()
         }),
       closeTranslatePage: () => set({ translatePageOpen: false }),
@@ -1481,6 +1514,7 @@ export const useUIStore = create<UIStore>()(
           resourcesPageOpen: false,
           translatePageOpen: false,
           tasksPageOpen: false,
+          codeGraphPageOpen: false,
           ...closeRightSidePanels()
         }),
       closeDrawPage: () => set({ drawPageOpen: false }),
@@ -1496,9 +1530,26 @@ export const useUIStore = create<UIStore>()(
           resourcesPageOpen: false,
           translatePageOpen: false,
           drawPageOpen: false,
+          codeGraphPageOpen: false,
           ...closeRightSidePanels()
         }),
       closeTasksPage: () => set({ tasksPageOpen: false }),
+      codeGraphPageOpen: false,
+      openCodeGraphPage: () =>
+        set({
+          activeNavItem: 'codegraph',
+          codeGraphPageOpen: true,
+          settingsPageOpen: false,
+          skillsPageOpen: false,
+          soulsPageOpen: false,
+          syncPageOpen: false,
+          resourcesPageOpen: false,
+          translatePageOpen: false,
+          drawPageOpen: false,
+          tasksPageOpen: false,
+          ...closeRightSidePanels()
+        }),
+      closeCodeGraphPage: () => set({ codeGraphPageOpen: false }),
       shortcutsOpen: false,
       setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
       changelogDialogOpen: false,
@@ -1903,8 +1954,8 @@ export const useUIStore = create<UIStore>()(
       browserUrl: '',
       setBrowserUrl: (url, sessionId, projectId) =>
         set((state) => updateBrowserStateForSession(state, sessionId, { url }, projectId)),
-      openBrowserTab: (url, sessionId, projectId) =>
-        get().ensureBrowserTab(url, sessionId, projectId),
+      openBrowserTab: (url, sessionId, projectId, options) =>
+        get().ensureBrowserTab(url, sessionId, projectId, options),
       browserLoading: false,
       setBrowserLoading: (loading, sessionId, projectId) =>
         set((state) => updateBrowserStateForSession(state, sessionId, { loading }, projectId)),
@@ -2057,6 +2108,7 @@ export const useUIStore = create<UIStore>()(
             translatePageOpen: false,
             drawPageOpen: false,
             tasksPageOpen: false,
+            codeGraphPageOpen: false,
             ...closeRightSidePanels()
           })
           if (window.location.hash !== settingsRoute.canonicalHash) {

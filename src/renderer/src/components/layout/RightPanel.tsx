@@ -269,8 +269,11 @@ export function RightPanel({ compact = false, sessionId }: RightPanelProps): Rea
     tabs.find((tab) => tab.id === activeTabId) ??
     tabs.find((tab) => tab.kind === 'review') ??
     tabs[0]
-  const hasBrowserTab =
-    rightPanelOpen && tabs.some((tab) => tab.kind === 'browser') && browserPluginEnabled
+  // The browser webview stays mounted whenever a browser tab exists and the plugin
+  // is enabled — independent of whether the panel is open. This lets agent-driven
+  // browser tools keep working in the background even while the panel is collapsed
+  // (the webview's guest page keeps running; we only toggle its visibility).
+  const browserTabAlive = tabs.some((tab) => tab.kind === 'browser') && browserPluginEnabled
   const browserSessionId = panelSessionId
   const browserPanelKey = browserSessionId
     ? `session:${browserSessionId}`
@@ -282,6 +285,7 @@ export function RightPanel({ compact = false, sessionId }: RightPanelProps): Rea
       ? (tabs.find((tab) => tab.kind === 'review') ?? selectedTab)
       : selectedTab
     : undefined
+  const browserVisible = rightPanelOpen && activeTab?.kind === 'browser'
 
   const draggingRef = useRef(false)
   const startXRef = useRef(0)
@@ -449,16 +453,6 @@ export function RightPanel({ compact = false, sessionId }: RightPanelProps): Rea
                   </motion.div>
                 ) : null}
               </AnimatePresence>
-
-              {hasBrowserTab ? (
-                <div className={cn('absolute inset-0', activeTab?.kind !== 'browser' && 'hidden')}>
-                  <BrowserPanel
-                    key={browserPanelKey}
-                    sessionId={browserSessionId}
-                    projectId={activeProjectId}
-                  />
-                </div>
-              ) : null}
             </div>
 
             <div
@@ -466,6 +460,25 @@ export function RightPanel({ compact = false, sessionId }: RightPanelProps): Rea
               onMouseDown={startResize}
             />
           </>
+        ) : null}
+
+        {/* Persistent browser layer: mounted whenever a browser tab exists so the
+            webview keeps running even when the panel is closed or another tab is
+            active. `top-10` clears the tab header when visible. When hidden it stays
+            in the DOM (webview connected) but non-interactive and transparent. */}
+        {browserTabAlive ? (
+          <div
+            className={cn(
+              'absolute inset-x-0 bottom-0 top-10',
+              browserVisible ? 'z-10 opacity-100' : 'pointer-events-none -z-10 opacity-0'
+            )}
+          >
+            <BrowserPanel
+              key={browserPanelKey}
+              sessionId={browserSessionId}
+              projectId={activeProjectId}
+            />
+          </div>
         ) : null}
       </aside>
 

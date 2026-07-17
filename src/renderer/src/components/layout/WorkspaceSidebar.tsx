@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import packageJson from '../../../../../package.json'
 import { useTranslation } from 'react-i18next'
@@ -98,6 +98,8 @@ import { openDetachedSessionWindow, openSessionOrFocusDetached } from '@renderer
 import { cn } from '@renderer/lib/utils'
 import { ipcClient } from '@renderer/lib/ipc/ipc-client'
 import { IPC } from '@renderer/lib/ipc/channels'
+import { DB_SESSIONS_CLEAR_PROJECT_MSGPACK_CHANNEL } from '../../../../shared/messagepack/binary-ipc'
+import { invokeMessagePackBinary } from '@renderer/lib/ipc/messagepack-ipc-client'
 import { getDroppedLocalPaths, filterDirectories } from '@renderer/lib/drag-folder'
 import { generateSessionTitle } from '@renderer/lib/api/generate-title'
 import { resolveIntlLocale } from '@renderer/lib/i18n-language'
@@ -173,6 +175,7 @@ function mapProject(project: ReturnType<typeof useChatStore.getState>['projects'
   sshConnectionId?: string
   pluginId?: string
   pinned?: boolean
+  sessionCount?: number
 } {
   return {
     id: project.id,
@@ -182,7 +185,8 @@ function mapProject(project: ReturnType<typeof useChatStore.getState>['projects'
     workingFolder: project.workingFolder,
     sshConnectionId: project.sshConnectionId,
     pluginId: project.pluginId,
-    pinned: project.pinned
+    pinned: project.pinned,
+    sessionCount: project.sessionCount
   }
 }
 
@@ -461,6 +465,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
   const togglePinSession = useChatStore((state) => state.togglePinSession)
   const importSession = useChatStore((state) => state.importSession)
   const importProjectArchive = useChatStore((state) => state.importProjectArchive)
+  const loadProjectSessions = useChatStore((state) => state.loadProjectSessions)
   const runningSessions = useAgentStore((state) => state.runningSessions)
   const runningSubAgentSessionIdsSig = useAgentStore((state) => state.runningSubAgentSessionIdsSig)
   const runningBackgroundSessionIdsSig = useAgentStore((state) =>
@@ -517,6 +522,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
   const [isFolderDragOver, setIsFolderDragOver] = useState(false)
   const [chatsSectionCollapsed, setChatsSectionCollapsed] = useState(false)
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(() => new Set())
+  const collapseStateInitializedRef = useRef(false)
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set())
   const featureMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runningSubAgentSessionIds = useMemo(
@@ -630,17 +636,6 @@ export function WorkspaceSidebar(): React.JSX.Element {
     streamingSessionIds,
     visibleProjects
   ])
-
-  useEffect(() => {
-    const projectId = activeSessionProjectId ?? activeProjectId
-    if (!projectId) return
-    setCollapsedProjectIds((current) => {
-      if (!current.has(projectId)) return current
-      const next = new Set(current)
-      next.delete(projectId)
-      return next
-    })
-  }, [activeProjectId, activeSessionProjectId])
 
   const currentSidebarWidth = clampLeftSidebarWidth(
     leftSidebarWidth || persistedLeftSidebarWidth || LEFT_SIDEBAR_DEFAULT_WIDTH
@@ -887,27 +882,32 @@ export function WorkspaceSidebar(): React.JSX.Element {
     ]
   )
 
-  const confirmClearProjectSessions = useCallback(() => {
+  const confirmClearProjectSessions = useCallback(async () => {
     if (!clearProjectSessionsTarget) return
-    const projectSessions = useChatStore
-      .getState()
-      .sessions.filter((session) => session.projectId === clearProjectSessionsTarget.id)
-    const clearableSessions = projectSessions.filter((session) => !isSessionRunning(session.id))
-    for (const session of clearableSessions) {
-      clearPendingSessionMessages(session.id)
-      deleteSession(session.id)
+    const state = useChatStore.getState()
+    const runningIds = state.sessions
+      .filter((session) => session.projectId === clearProjectSessionsTarget.id)
+      .filter((session) => isSessionRunning(session.id))
+      .map((session) => session.id)
+    const result = await invokeMessagePackBinary<{
+      sessionIds: string[]
+      deletedSessions: number
+    }>(DB_SESSIONS_CLEAR_PROJECT_MSGPACK_CHANNEL, {
+      projectId: clearProjectSessionsTarget.id,
+      excludeSessionIds: runningIds
+    })
+    for (const sessionId of result.sessionIds) {
+      clearPendingSessionMessages(sessionId)
+      useChatStore.getState().removeSessionFromSync(sessionId)
     }
     setClearProjectSessionsTarget(null)
-    if (clearableSessions.length === 0) {
+    if (result.deletedSessions === 0) {
       toast.info(t('sidebar_toast.noProjectSessionsCleared'))
       return
     }
-    toast.success(
-      t('sidebar_toast.projectSessionsCleared', {
-        count: clearableSessions.length
-      })
-    )
-  }, [clearProjectSessionsTarget, deleteSession, isSessionRunning, t])
+    toast.success(t('sidebar_toast.projectSessionsCleared', { count: result.deletedSessions }))
+    void useChatStore.getState().loadFromDb()
+  }, [clearProjectSessionsTarget, isSessionRunning, t])
 
   const confirmRename = useCallback(() => {
     if (!renameDialog) return
@@ -1015,17 +1015,30 @@ export function WorkspaceSidebar(): React.JSX.Element {
     setRenameValue(dialog.currentName)
   }, [])
 
-  const toggleProjectCollapsed = useCallback((projectId: string) => {
-    setCollapsedProjectIds((current) => {
-      const next = new Set(current)
-      if (next.has(projectId)) {
-        next.delete(projectId)
-      } else {
-        next.add(projectId)
+  useEffect(() => {
+    if (collapseStateInitializedRef.current || projectGroups.length === 0) return
+    collapseStateInitializedRef.current = true
+    setCollapsedProjectIds(new Set(projectGroups.map((group) => group.project.id)))
+  }, [projectGroups])
+
+  const toggleProjectCollapsed = useCallback(
+    (projectId: string) => {
+      const isCollapsed = collapsedProjectIds.has(projectId)
+      if (isCollapsed) {
+        void loadProjectSessions(projectId)
       }
-      return next
-    })
-  }, [])
+      setCollapsedProjectIds((current) => {
+        const next = new Set(current)
+        if (next.has(projectId)) {
+          next.delete(projectId)
+        } else {
+          next.add(projectId)
+        }
+        return next
+      })
+    },
+    [collapsedProjectIds, loadProjectSessions]
+  )
 
   const toggleProjectExpansion = useCallback((projectId: string) => {
     setExpandedProjectIds((current) => {
@@ -1595,8 +1608,10 @@ export function WorkspaceSidebar(): React.JSX.Element {
                       const runningProjectSessionCount = group.sessions.filter((session) =>
                         isSessionRunning(session.id)
                       ).length
-                      const clearableProjectSessionCount =
-                        group.sessions.length - runningProjectSessionCount
+                      const clearableProjectSessionCount = Math.max(
+                        0,
+                        (project.sessionCount ?? 0) - runningProjectSessionCount
+                      )
                       const projectToggleTitle = isCollapsed
                         ? t('rightPanel.expand')
                         : t('rightPanel.collapse')
@@ -1676,7 +1691,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
                                         ? t('sidebar.sshLabel')
                                         : t('sidebar.localLabel')}
                                     </span>
-                                    <span>{group.sessions.length}</span>
+                                    <span>{project.sessionCount ?? 0}</span>
                                     <ChevronRight
                                       className={cn(
                                         'size-3.5 transition-transform duration-200 ease-out',
@@ -1834,7 +1849,7 @@ export function WorkspaceSidebar(): React.JSX.Element {
                                                 type: 'project',
                                                 id: project.id,
                                                 name: project.name,
-                                                sessionCount: group.sessions.length
+                                                sessionCount: project.sessionCount ?? 0
                                               })
                                             )
                                           }

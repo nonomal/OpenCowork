@@ -12,6 +12,7 @@ export const IPC = {
   // File System
   FS_SELECT_FILE: 'fs:select-file',
   FS_SELECT_SAVE_FILE: 'fs:select-save-file',
+  FS_DOWNLOAD_FILE_COPY: 'fs:download-file-copy',
   FS_READ_DOCUMENT: 'fs:read-document',
   FS_READ_FILE: 'fs:read-file',
   FS_READ_TEXT_FILE_LINES: 'fs:read-text-file-lines',
@@ -337,6 +338,11 @@ export const IPC = {
 
   // Built-in Browser
   BROWSER_CLEAR_COOKIES: 'browser:clear-cookies',
+  // CodeGraph plugin grammar assets (download-on-enable + dev bypass)
+  CODEGRAPH_ASSET_STATUS: 'codegraph:asset-status',
+  CODEGRAPH_DOWNLOAD_ASSETS: 'codegraph:download-assets',
+  CODEGRAPH_REMOVE_ASSETS: 'codegraph:remove-assets',
+  CODEGRAPH_DOWNLOAD_PROGRESS: 'codegraph:download-progress',
   BROWSER_EMULATION_STATUS: 'browser:emulation-status',
   BROWSER_IMPORT_COOKIES: 'browser:import-cookies',
 

@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { DownloadCloud, Globe, Image, MonitorSmartphone, Puzzle, Trash2 } from 'lucide-react'
+import {
+  DownloadCloud,
+  Globe,
+  Image,
+  MonitorSmartphone,
+  Puzzle,
+  Trash2,
+  Waypoints
+} from 'lucide-react'
 import { Switch } from '@renderer/components/ui/switch'
 import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/textarea'
@@ -26,6 +34,8 @@ import { IPC } from '@renderer/lib/ipc/channels'
 import { parseBrowserDomainList } from '@renderer/lib/app-plugin/browser-access'
 import {
   APP_PLUGIN_DESCRIPTORS,
+  CODEGRAPH_EXPLORE_TOOL_NAME,
+  CODEGRAPH_PLUGIN_ID,
   BROWSER_CLICK_TOOL_NAME,
   BROWSER_GET_CONTENT_TOOL_NAME,
   BROWSER_NAVIGATE_TOOL_NAME,
@@ -65,7 +75,36 @@ interface BrowserEmulationStatus {
   browserSessionStoragePath: string | null
 }
 
+interface CodeGraphAssetStatus {
+  isDev: boolean
+  workerReady: boolean
+  workerRunning: boolean
+  grammarsReady: boolean
+  ready: boolean
+  grammarsDir: string | null
+  grammarCount: number
+  needsDownload: boolean
+}
+
+interface CodeGraphProjectInfo {
+  root: string
+  hash: string
+  state: string
+  files: number
+  nodes: number
+  edges: number
+  dbSizeBytes: number
+  lastIndexedAt?: number | null
+}
+
+function formatDbSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${bytes} B`
+}
+
 const TOOL_ARG_LABELS: Record<AppPluginToolName, string[]> = {
+  [CODEGRAPH_EXPLORE_TOOL_NAME]: ['query', 'projectPath'],
   [IMAGE_GENERATE_TOOL_NAME]: ['prompt', 'count', 'reference_images', 'size', 'quality'],
   [BROWSER_NAVIGATE_TOOL_NAME]: ['url', 'action'],
   [BROWSER_GET_CONTENT_TOOL_NAME]: ['selector', 'type'],
@@ -111,6 +150,9 @@ function getPluginIcon(id: AppPluginId): React.JSX.Element {
   if (id === DESKTOP_CONTROL_PLUGIN_ID) {
     return <DesktopControlPluginIcon />
   }
+  if (id === CODEGRAPH_PLUGIN_ID) {
+    return <Waypoints className="size-4" />
+  }
   return <Puzzle className="size-4" />
 }
 
@@ -128,16 +170,19 @@ function getPluginState(options: {
   descriptor: AppPluginDescriptor
   pluginEnabled: boolean
   isResolvedImageModelReady: boolean
+  isCodeGraphReady: boolean
 }): 'disabled' | 'not_ready' | 'ready' {
-  const { descriptor, pluginEnabled, isResolvedImageModelReady } = options
+  const { descriptor, pluginEnabled, isResolvedImageModelReady, isCodeGraphReady } = options
   if (!pluginEnabled) return 'disabled'
   if (descriptor.requiresModelConfig && !isResolvedImageModelReady) return 'not_ready'
+  if (descriptor.requiresDownload && !isCodeGraphReady) return 'not_ready'
   return 'ready'
 }
 
 function getToolStatusDescriptionKey(descriptor: AppPluginDescriptor): string {
   if (descriptor.requiresModelConfig) return 'plugin.toolStatusDesc'
   if (descriptor.id === BROWSER_PLUGIN_ID) return 'plugin.toolStatusDescBrowser'
+  if (descriptor.id === CODEGRAPH_PLUGIN_ID) return 'plugin.toolStatusDescCodeGraph'
   return 'plugin.toolStatusDescDesktop'
 }
 
@@ -146,6 +191,15 @@ export function AppPluginPanel(): React.JSX.Element {
   const [selectedPluginId, setSelectedPluginId] = useState<AppPluginId>(IMAGE_PLUGIN_ID)
   const [clearingCookies, setClearingCookies] = useState(false)
   const [importingCookies, setImportingCookies] = useState(false)
+  const [codegraphAsset, setCodegraphAsset] = useState<CodeGraphAssetStatus | null>(null)
+  const [codegraphDownloading, setCodegraphDownloading] = useState(false)
+  const [codegraphProgress, setCodegraphProgress] = useState<number | null>(null)
+  const [cgProjects, setCgProjects] = useState<CodeGraphProjectInfo[]>([])
+  const [cgProjectsLoading, setCgProjectsLoading] = useState(false)
+  const [cgBusyKey, setCgBusyKey] = useState<string | null>(null)
+  const activeWorkingFolder = useChatStore(
+    (state) => state.projects.find((p) => p.id === state.activeProjectId)?.workingFolder
+  )
   const [browserEmulationStatus, setBrowserEmulationStatus] =
     useState<BrowserEmulationStatus | null>(null)
   const activeProjectId = useChatStore((state) => state.activeProjectId)
@@ -210,7 +264,8 @@ export function AppPluginPanel(): React.JSX.Element {
       visibleDescriptors.find((descriptor) => descriptor.id === IMAGE_PLUGIN_ID) ??
       visibleDescriptors[0],
     pluginEnabled: Boolean(selectedPlugin?.enabled),
-    isResolvedImageModelReady
+    isResolvedImageModelReady,
+    isCodeGraphReady: Boolean(codegraphAsset?.ready)
   })
   const browserAllowedDomainText = (selectedPlugin.browserAllowedDomains ?? []).join('\n')
   const browserBlockedDomainText = (selectedPlugin.browserBlockedDomains ?? []).join('\n')
@@ -284,6 +339,138 @@ export function AppPluginPanel(): React.JSX.Element {
     } finally {
       setImportingCookies(false)
     }
+  }
+
+  const refreshCodegraphAsset = async (): Promise<void> => {
+    try {
+      const status = (await ipcClient.invoke(IPC.CODEGRAPH_ASSET_STATUS)) as CodeGraphAssetStatus
+      setCodegraphAsset(status)
+    } catch {
+      setCodegraphAsset(null)
+    }
+  }
+
+  useEffect(() => {
+    if (selectedPluginId !== CODEGRAPH_PLUGIN_ID) return
+    void refreshCodegraphAsset()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPluginId])
+
+  const handleDownloadCodegraph = async (): Promise<void> => {
+    setCodegraphDownloading(true)
+    setCodegraphProgress(0)
+    const onProgress = (_event: unknown, payload: { received?: number; total?: number }): void => {
+      if (payload.total && payload.total > 0 && typeof payload.received === 'number') {
+        setCodegraphProgress(Math.round((payload.received / payload.total) * 100))
+      }
+    }
+    const off = window.electron?.ipcRenderer?.on?.(IPC.CODEGRAPH_DOWNLOAD_PROGRESS, onProgress)
+    try {
+      const result = (await ipcClient.invoke(IPC.CODEGRAPH_DOWNLOAD_ASSETS)) as {
+        success: boolean
+        error?: string
+      }
+      if (result.success) {
+        toast.success(t('plugin.codegraph.downloaded'))
+        await refreshCodegraphAsset()
+      } else {
+        toast.error(t('plugin.codegraph.downloadFailed'), { description: result.error })
+      }
+    } catch (error) {
+      toast.error(t('plugin.codegraph.downloadFailed'), {
+        description: error instanceof Error ? error.message : String(error)
+      })
+    } finally {
+      setCodegraphDownloading(false)
+      setCodegraphProgress(null)
+      if (typeof off === 'function') off()
+    }
+  }
+
+  const handleRemoveCodegraph = async (): Promise<void> => {
+    try {
+      await ipcClient.invoke(IPC.CODEGRAPH_REMOVE_ASSETS)
+      await refreshCodegraphAsset()
+      toast.success(t('plugin.codegraph.removed'))
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const codegraphPluginEnabled = Boolean(
+    projectPlugins.find((p) => p.id === CODEGRAPH_PLUGIN_ID)?.enabled
+  )
+
+  const refreshCgProjects = async (): Promise<void> => {
+    setCgProjectsLoading(true)
+    try {
+      const { agentBridge } = await import('@renderer/lib/ipc/agent-bridge')
+      const result = (await agentBridge.request('codegraph/list-projects', {}, 30_000)) as {
+        success?: boolean
+        projects?: CodeGraphProjectInfo[]
+      }
+      setCgProjects(result?.success && Array.isArray(result.projects) ? result.projects : [])
+    } catch {
+      setCgProjects([])
+    } finally {
+      setCgProjectsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (selectedPluginId !== CODEGRAPH_PLUGIN_ID || !codegraphPluginEnabled) return
+    void refreshCgProjects()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPluginId, codegraphPluginEnabled])
+
+  const runCgAction = async (
+    busyKey: string,
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs: number
+  ): Promise<void> => {
+    setCgBusyKey(busyKey)
+    try {
+      const { agentBridge } = await import('@renderer/lib/ipc/agent-bridge')
+      const result = (await agentBridge.request(method, params, timeoutMs)) as {
+        success?: boolean
+        error?: string
+        message?: string
+      }
+      if (result?.success === false) {
+        toast.error(t('plugin.codegraph.actionFailed'), {
+          description: result.error ?? result.message
+        })
+      } else {
+        toast.success(t('plugin.codegraph.actionDone'))
+      }
+    } catch (error) {
+      toast.error(t('plugin.codegraph.actionFailed'), {
+        description: error instanceof Error ? error.message : String(error)
+      })
+    } finally {
+      setCgBusyKey(null)
+      await refreshCgProjects()
+      void refreshCodegraphAsset()
+    }
+  }
+
+  const handleCgIndex = (root: string): void => {
+    // Re-index is long-running on big repos; the row shows a busy state meanwhile.
+    void runCgAction(`index:${root}`, 'codegraph/index', { workingFolder: root }, 600_000)
+  }
+
+  const handleCgSync = (root: string): void => {
+    void runCgAction(`sync:${root}`, 'codegraph/sync', { workingFolder: root }, 300_000)
+  }
+
+  const handleCgRemoveProject = (row: CodeGraphProjectInfo): void => {
+    void runCgAction(
+      `remove:${row.hash}`,
+      'codegraph/remove-project',
+      row.root ? { workingFolder: row.root } : { hash: row.hash },
+      30_000
+    )
   }
 
   const handlePluginEnabledChange = (checked: boolean): void => {
@@ -511,6 +698,216 @@ export function AppPluginPanel(): React.JSX.Element {
                         </SelectContent>
                       </Select>
                     </div>
+                  </div>
+                )}
+              </section>
+            ) : null}
+
+            {selectedDescriptor.requiresDownload ? (
+              <section className="space-y-3 rounded-xl border p-4">
+                <div>
+                  <p className="text-sm font-medium">{t('plugin.codegraph.assetsTitle')}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t('plugin.codegraph.assetsDesc')}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 text-[11px]">
+                  <span
+                    className={`rounded-full px-2 py-0.5 ${
+                      codegraphAsset?.workerRunning
+                        ? 'bg-emerald-500/10 text-emerald-600'
+                        : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    {codegraphAsset?.workerRunning
+                      ? t('plugin.codegraph.workerRunning')
+                      : t('plugin.codegraph.workerStopped')}
+                  </span>
+                  {codegraphAsset?.grammarsDir ? (
+                    <span className="max-w-full truncate rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                      {codegraphAsset.grammarsDir}
+                    </span>
+                  ) : null}
+                </div>
+                {codegraphAsset?.isDev && codegraphAsset.grammarsReady ? (
+                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs text-emerald-600">
+                    {t('plugin.codegraph.devMode', { count: codegraphAsset.grammarCount })}
+                  </div>
+                ) : codegraphAsset?.ready ? (
+                  <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 p-3 text-xs">
+                    <span className="text-foreground">
+                      {t('plugin.codegraph.ready', { count: codegraphAsset.grammarCount })}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => void handleRemoveCodegraph()}
+                    >
+                      <Trash2 className="size-3.5" />
+                      {t('plugin.codegraph.remove')}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+                    <p className="text-xs text-muted-foreground">
+                      {codegraphAsset && !codegraphAsset.workerReady
+                        ? t('plugin.codegraph.workerMissing')
+                        : t('plugin.codegraph.needsDownload')}
+                    </p>
+                    {codegraphDownloading && codegraphProgress !== null ? (
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full bg-primary transition-all"
+                          style={{ width: `${codegraphProgress}%` }}
+                        />
+                      </div>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      className="gap-2"
+                      disabled={codegraphDownloading}
+                      onClick={() => void handleDownloadCodegraph()}
+                    >
+                      <DownloadCloud className="size-3.5" />
+                      {codegraphDownloading
+                        ? t('plugin.codegraph.downloading')
+                        : t('plugin.codegraph.download')}
+                    </Button>
+                  </div>
+                )}
+              </section>
+            ) : null}
+
+            {selectedPluginId === CODEGRAPH_PLUGIN_ID ? (
+              <section className="space-y-3 rounded-xl border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">{t('plugin.codegraph.projectsTitle')}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {t('plugin.codegraph.projectsDesc')}
+                    </p>
+                  </div>
+                  {codegraphPluginEnabled ? (
+                    <div className="flex shrink-0 items-center gap-2">
+                      {activeWorkingFolder ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={cgBusyKey !== null}
+                          onClick={() => handleCgIndex(activeWorkingFolder)}
+                        >
+                          {t('plugin.codegraph.indexCurrent')}
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={cgProjectsLoading}
+                        onClick={() => void refreshCgProjects()}
+                      >
+                        {t('plugin.codegraph.refresh')}
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+
+                {!codegraphPluginEnabled ? (
+                  <p className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    {t('plugin.codegraph.enableFirst')}
+                  </p>
+                ) : cgProjectsLoading && cgProjects.length === 0 ? (
+                  <p className="p-2 text-xs text-muted-foreground">
+                    {t('plugin.codegraph.projectsLoading')}
+                  </p>
+                ) : cgProjects.length === 0 ? (
+                  <p className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    {t('plugin.codegraph.projectsEmpty')}
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {cgProjects.map((row) => {
+                      const busyIndex = cgBusyKey === `index:${row.root}`
+                      const busySync = cgBusyKey === `sync:${row.root}`
+                      const busyRemove = cgBusyKey === `remove:${row.hash}`
+                      const anyBusy = cgBusyKey !== null
+                      return (
+                        <div key={row.hash} className="rounded-lg border bg-muted/10 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p
+                              className="min-w-0 flex-1 truncate font-mono text-xs"
+                              title={row.root || row.hash}
+                            >
+                              {row.root || t('plugin.codegraph.unknownRoot', { hash: row.hash })}
+                            </p>
+                            <span
+                              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
+                                row.state === 'complete'
+                                  ? 'bg-emerald-500/10 text-emerald-600'
+                                  : row.state === 'indexing'
+                                    ? 'bg-amber-500/10 text-amber-600'
+                                    : 'bg-muted text-muted-foreground'
+                              }`}
+                            >
+                              {row.state}
+                            </span>
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                            <span>
+                              {t('plugin.codegraph.projectStats', {
+                                files: row.files,
+                                nodes: row.nodes,
+                                edges: row.edges
+                              })}
+                            </span>
+                            <span>{formatDbSize(row.dbSizeBytes)}</span>
+                            {row.lastIndexedAt ? (
+                              <span>{new Date(row.lastIndexedAt).toLocaleString()}</span>
+                            ) : null}
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            {row.root ? (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  disabled={anyBusy}
+                                  onClick={() => handleCgIndex(row.root)}
+                                >
+                                  {busyIndex
+                                    ? t('plugin.codegraph.reindexing')
+                                    : t('plugin.codegraph.reindex')}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  disabled={anyBusy}
+                                  onClick={() => handleCgSync(row.root)}
+                                >
+                                  {busySync
+                                    ? t('plugin.codegraph.syncing')
+                                    : t('plugin.codegraph.sync')}
+                                </Button>
+                              </>
+                            ) : null}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 gap-1 text-xs text-destructive"
+                              disabled={anyBusy}
+                              onClick={() => handleCgRemoveProject(row)}
+                            >
+                              <Trash2 className="size-3" />
+                              {busyRemove
+                                ? t('plugin.codegraph.removing')
+                                : t('plugin.codegraph.deleteIndex')}
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </section>

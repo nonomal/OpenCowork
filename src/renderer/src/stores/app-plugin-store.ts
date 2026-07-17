@@ -7,6 +7,7 @@ import { useChatStore } from './chat-store'
 import {
   APP_PLUGIN_DESCRIPTORS,
   BROWSER_PLUGIN_ID,
+  CODEGRAPH_PLUGIN_ID,
   DESKTOP_CONTROL_PLUGIN_ID,
   IMAGE_PLUGIN_ID,
   isAppPluginEnabledByDefault,
@@ -184,6 +185,7 @@ interface AppPluginStore {
   getResolvedImagePluginConfig: (projectId?: string | null) => ProviderConfig | null
   isImageToolAvailable: (projectId?: string | null) => boolean
   isBrowserToolAvailable: (projectId?: string | null) => boolean
+  isCodeGraphToolAvailable: (projectId?: string | null) => boolean
   isDesktopControlToolAvailable: () => boolean
 }
 
@@ -250,6 +252,13 @@ export const useAppPluginStore = create<AppPluginStore>()(
 
       isBrowserToolAvailable: (projectId) => {
         const plugin = get().getPlugin(BROWSER_PLUGIN_ID, projectId)
+        return Boolean(plugin?.enabled)
+      },
+
+      // Enabled-only (mirrors browser). Grammar-asset readiness is checked separately
+      // via the codegraph:asset-status IPC in the panel / on tool registration.
+      isCodeGraphToolAvailable: (projectId) => {
+        const plugin = get().getPlugin(CODEGRAPH_PLUGIN_ID, projectId)
         return Boolean(plugin?.enabled)
       },
 

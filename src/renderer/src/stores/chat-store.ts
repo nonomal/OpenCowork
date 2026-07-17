@@ -1,4 +1,4 @@
-import { create } from 'zustand'
+﻿import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import { nanoid } from 'nanoid'
 import type {
@@ -28,11 +28,13 @@ import {
   DB_PROJECTS_CREATE_MSGPACK_CHANNEL,
   DB_PROJECTS_DELETE_MSGPACK_CHANNEL,
   DB_PROJECTS_ENSURE_DEFAULT_MSGPACK_CHANNEL,
+  DB_PROJECTS_GET_MSGPACK_CHANNEL,
   DB_PROJECTS_LIST_MSGPACK_CHANNEL,
   DB_PROJECTS_UPDATE_MSGPACK_CHANNEL,
   DB_SESSIONS_CLEAR_ALL_MSGPACK_CHANNEL,
   DB_SESSIONS_CREATE_MSGPACK_CHANNEL,
   DB_SESSIONS_DELETE_MSGPACK_CHANNEL,
+  DB_SESSIONS_GET_MSGPACK_CHANNEL,
   DB_SESSIONS_LIST_MSGPACK_CHANNEL,
   DB_SESSIONS_UPDATE_MSGPACK_CHANNEL
 } from '../../../shared/messagepack/binary-ipc'
@@ -91,6 +93,7 @@ export interface Project {
   pinned?: boolean
   providerId?: string
   modelId?: string
+  sessionCount?: number
 }
 
 export interface Session {
@@ -1148,6 +1151,7 @@ function scheduleActiveSessionHydration(
     if (token !== _activeSessionHydrationToken) return
     if (getState().activeSessionId !== sessionId) return
 
+    void useAgentStore.getState().loadSubAgentHistoryForSession(sessionId)
     void useTaskStore.getState().loadTasksForSession(sessionId)
     void getState()
       .loadRecentSessionMessages(sessionId)
@@ -1298,9 +1302,11 @@ interface ChatStore {
   activeProjectId: string | null
   activeSessionId: string | null
   _loaded: boolean
+  projectSessionLoadState: Record<string, 'idle' | 'loading' | 'loaded' | 'error'>
 
   // Initialization
   loadFromDb: () => Promise<void>
+  loadProjectSessions: (projectId: string) => Promise<void>
   loadRecentSessionMessages: (sessionId: string, force?: boolean, limit?: number) => Promise<void>
   loadOlderSessionMessages: (
     sessionId: string,
@@ -1383,7 +1389,7 @@ interface ChatStore {
     row: SyncedSessionRow,
     options?: { preserveLoadedMessages?: boolean }
   ) => void
-  removeSessionFromSync: (sessionId: string) => void
+  removeSessionFromSync: (sessionId: string, projectId?: string | null) => void
   removeLastAssistantMessage: (sessionId: string) => boolean
   removeLastUserMessage: (sessionId: string) => void
   truncateMessagesFrom: (sessionId: string, fromIndex: number) => void
@@ -1465,6 +1471,7 @@ interface ProjectRow {
   ssh_connection_id: string | null
   plugin_id?: string | null
   pinned: number
+  session_count?: number
 }
 
 interface SessionRow {
@@ -1556,7 +1563,8 @@ function rowToProject(row: ProjectRow): Project {
     workingFolder: row.working_folder ?? undefined,
     sshConnectionId: row.ssh_connection_id ?? undefined,
     pluginId: row.plugin_id ?? undefined,
-    pinned: row.pinned === 1
+    pinned: row.pinned === 1,
+    sessionCount: row.session_count
   }
 }
 
@@ -2554,6 +2562,7 @@ export const useChatStore = create<ChatStore>()(
     imageGenerationTimings: {},
     generatingImagePreviews: {},
     _loaded: false,
+    projectSessionLoadState: {},
 
     ensureDefaultProject: async () => {
       try {
@@ -2599,7 +2608,8 @@ export const useChatStore = create<ChatStore>()(
           .filter((s) => s.projectId === id)
           .sort((a, b) => b.updatedAt - a.updatedAt)
         nextSessionId = sessionsInProject[0]?.id ?? null
-        state.activeSessionId = nextSessionId
+        // A project may be unloaded; do not infer that it has no sessions.
+        if (nextSessionId) state.activeSessionId = nextSessionId
       })
       if (prevSessionId !== nextSessionId) {
         invalidateVisibleSessionCache()
@@ -3396,6 +3406,39 @@ export const useChatStore = create<ChatStore>()(
       return loadRequestContextMessages(session, null)
     },
 
+    loadProjectSessions: async (projectId) => {
+      const currentState = get().projectSessionLoadState[projectId] ?? 'idle'
+      if (currentState === 'loading' || currentState === 'loaded') return
+      set((state) => {
+        state.projectSessionLoadState[projectId] = 'loading'
+      })
+      try {
+        const rows = await invokeMessagePackBinary<SessionRow[]>(DB_SESSIONS_LIST_MSGPACK_CHANNEL, {
+          projectId
+        })
+        const project = get().projects.find((item) => item.id === projectId)
+        set((state) => {
+          for (const row of rows) {
+            const session = rowToSession(row, [])
+            if (project) {
+              session.workingFolder = project.workingFolder
+              session.sshConnectionId = project.sshConnectionId
+            }
+            const existing = dedupeSessionsById(state, session.id)
+            if (existing) mergeSessionSummary(existing, session)
+            else state.sessions.push(session)
+          }
+          syncSessionsById(state)
+          state.projectSessionLoadState[projectId] = 'loaded'
+        })
+      } catch (error) {
+        console.error('[ChatStore] Failed to load project sessions:', error)
+        set((state) => {
+          state.projectSessionLoadState[projectId] = 'error'
+        })
+      }
+    },
+
     loadFromDb: async () => {
       try {
         const isInitialLoad = !get()._loaded
@@ -3403,11 +3446,32 @@ export const useChatStore = create<ChatStore>()(
           isInitialLoad && typeof window !== 'undefined'
             ? parseChatRoute(window.location.hash)
             : null
+        const directSessionId =
+          initialRoute?.sessionId ??
+          (typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search).get('sessionId')
+            : null)
         const [projectRows, sessionRows] = await Promise.all([
           invokeMessagePackBinary<ProjectRow[]>(DB_PROJECTS_LIST_MSGPACK_CHANNEL, {}),
-          invokeMessagePackBinary<SessionRow[]>(DB_SESSIONS_LIST_MSGPACK_CHANNEL, {})
+          invokeMessagePackBinary<SessionRow[]>(DB_SESSIONS_LIST_MSGPACK_CHANNEL, { projectId: null })
         ])
         let projects = projectRows.map(rowToProject)
+        let directSessionRow: SessionRow | null = null
+        if (directSessionId && !sessionRows.some((row) => row.id === directSessionId)) {
+          const result = await invokeMessagePackBinary<{
+            session?: SessionRow | null
+          } | null>(DB_SESSIONS_GET_MSGPACK_CHANNEL, directSessionId)
+          directSessionRow = result?.session ?? null
+          if (directSessionRow?.project_id) {
+            const project = await invokeMessagePackBinary<ProjectRow | null>(
+              DB_PROJECTS_GET_MSGPACK_CHANNEL,
+              directSessionRow.project_id
+            )
+            if (project && !projects.some((item) => item.id === project.id)) {
+              projects.push(rowToProject(project))
+            }
+          }
+        }
 
         if (projects.length === 0) {
           const ensured = await get().ensureDefaultProject()
@@ -3416,7 +3480,7 @@ export const useChatStore = create<ChatStore>()(
 
         const projectMap = new Map(projects.map((project) => [project.id, project]))
 
-        const sessions: Session[] = sessionRows.map((row) => {
+        const sessions: Session[] = [...sessionRows, ...(directSessionRow ? [directSessionRow] : [])].map((row) => {
           const session = rowToSession(row, [])
           if (session.projectId) {
             const project = projectMap.get(session.projectId)
@@ -4133,6 +4197,16 @@ export const useChatStore = create<ChatStore>()(
 
       set((state) => {
         const existing = dedupeSessionsById(state, row.id)
+        const projectLoaded = row.project_id
+          ? state.projectSessionLoadState[row.project_id] === 'loaded'
+          : true
+        if (!existing && row.project_id && !projectLoaded) {
+          if (state.activeSessionId === row.id) {
+            state.sessions.push(syncedSession)
+            syncSessionsById(state)
+          }
+          return
+        }
         if (existing) {
           mergeSessionSummary(existing, syncedSession, options)
         } else {
@@ -4151,9 +4225,12 @@ export const useChatStore = create<ChatStore>()(
       scheduleDeferredSessionMaintenance(get)
     },
 
-    removeSessionFromSync: (sessionId) => {
+    removeSessionFromSync: (sessionId, projectId) => {
       const deletedSession = get().sessions.find((session) => session.id === sessionId)
-      if (!deletedSession) return
+      if (!deletedSession && !projectId) return
+      if (!deletedSession) {
+        return
+      }
 
       const wasActiveSession = get().activeSessionId === sessionId
       const deletedProjectId = deletedSession.projectId ?? null

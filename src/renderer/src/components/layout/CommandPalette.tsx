@@ -75,7 +75,8 @@ const MODEL_PRESETS: Record<ProviderType, string[]> = {
     'gpt-5.5'
   ],
   'openai-images': ['dall-e-3', 'dall-e-2', 'gpt-image-1'],
-  'seedance-video': []
+  'seedance-video': [],
+  'xai-video': []
 }
 
 export function CommandPalette(): React.JSX.Element {

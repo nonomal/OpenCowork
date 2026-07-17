@@ -551,6 +551,9 @@ function AddProviderDialog({
                 <SelectItem value="seedance-video">
                   {t('provider.seedanceVideo', { defaultValue: 'Seedance Video (Volcengine)' })}
                 </SelectItem>
+                <SelectItem value="xai-video">
+                  {t('provider.xaiVideo', { defaultValue: 'xAI Video' })}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -984,6 +987,15 @@ function ModelFormDialog({
                 </SelectItem>
                 <SelectItem value="gemini" className="text-xs">
                   Gemini
+                </SelectItem>
+                <SelectItem value="openai-images" className="text-xs">
+                  OpenAI Images
+                </SelectItem>
+                <SelectItem value="seedance-video" className="text-xs">
+                  {t('provider.seedanceVideo', { defaultValue: 'Seedance Video (Volcengine)' })}
+                </SelectItem>
+                <SelectItem value="xai-video" className="text-xs">
+                  {t('provider.xaiVideo', { defaultValue: 'xAI Video' })}
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -3242,6 +3254,15 @@ function ProviderConfigPanel({ provider }: { provider: AIProvider }): React.JSX.
                 </SelectItem>
                 <SelectItem value="gemini" className="text-xs">
                   Gemini
+                </SelectItem>
+                <SelectItem value="openai-images" className="text-xs">
+                  OpenAI Images
+                </SelectItem>
+                <SelectItem value="seedance-video" className="text-xs">
+                  {t('provider.seedanceVideo', { defaultValue: 'Seedance Video (Volcengine)' })}
+                </SelectItem>
+                <SelectItem value="xai-video" className="text-xs">
+                  {t('provider.xaiVideo', { defaultValue: 'xAI Video' })}
                 </SelectItem>
               </SelectContent>
             </Select>

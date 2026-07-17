@@ -4,6 +4,8 @@ import { useTaskStore } from '../../stores/task-store'
 import { usePlanStore } from '../../stores/plan-store'
 import { useGoalStore } from '../../stores/goal-store'
 import { useSettingsStore } from '../../stores/settings-store'
+import { useAppPluginStore } from '../../stores/app-plugin-store'
+import { CODEGRAPH_SYSTEM_GUIDANCE } from '../tools/codegraph-tool'
 import { ipcClient } from '../ipc/ipc-client'
 import { estimateTokens } from '../format-tokens'
 import type { AIModelConfig } from '../api/types'
@@ -21,8 +23,10 @@ const FILE_CONTEXT_FALLBACK_TOKENS = 12_000
 export async function buildRuntimeReminder(options: {
   sessionId: string
   modelConfig?: AIModelConfig | null
+  /** The outgoing user prompt text — feeds the CodeGraph front-load hook. */
+  userPrompt?: string
 }): Promise<string> {
-  const { sessionId, modelConfig } = options
+  const { sessionId, modelConfig, userPrompt } = options
 
   const parts: string[] = []
   const sessionStateContext = buildSessionStateContext(sessionId)
@@ -34,6 +38,36 @@ export async function buildRuntimeReminder(options: {
   const session = useChatStore.getState().sessions.find((s) => s.id === sessionId)
   const workingFolder = session?.workingFolder
   const sshConnectionId = session?.sshConnectionId
+
+  // CodeGraph enabled + a local working folder -> steer the agent toward
+  // codegraph_explore for code-navigation questions (the SERVER_INSTRUCTIONS playbook).
+  if (
+    workingFolder &&
+    !sshConnectionId &&
+    useAppPluginStore.getState().isCodeGraphToolAvailable()
+  ) {
+    parts.push(CODEGRAPH_SYSTEM_GUIDANCE)
+
+    // Front-load hook (M7-W3 decision A, ≙ upstream `codegraph prompt-hook`): for a
+    // structural/flow/impact prompt against an indexed project, inject graph-derived
+    // context up front so the agent's reflex grep/read has nothing left to find.
+    // Additive only — bounded timeout, any failure or non-fire injects nothing.
+    if (userPrompt) {
+      try {
+        const { agentBridge } = await import('../ipc/agent-bridge')
+        const hook = (await agentBridge.request(
+          'codegraph/prompt-context',
+          { prompt: userPrompt, workingFolder },
+          15_000
+        )) as { fired?: boolean; text?: string } | null
+        if (hook?.fired && typeof hook.text === 'string' && hook.text.trim()) {
+          parts.push(hook.text)
+        }
+      } catch {
+        // the hook must never break the user's prompt
+      }
+    }
+  }
 
   if (selectedFiles.length > 0) {
     const selectedFileContext = await buildSelectedFileContext(
@@ -52,6 +86,31 @@ export async function buildRuntimeReminder(options: {
   }
 
   return `<system-reminder>\n${parts.join('\n')}\n</system-reminder>`
+}
+
+// The newest user message's plain text (string content, or joined text parts) —
+// what the CodeGraph front-load hook gates on. Undefined when the last user turn
+// has no extractable text (pure image turns etc.).
+export function extractLatestUserPromptText(messages: unknown[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i] as { role?: string; content?: unknown } | null
+    if (message?.role !== 'user') continue
+    if (typeof message.content === 'string') {
+      return message.content.trim() ? message.content : undefined
+    }
+    if (Array.isArray(message.content)) {
+      const texts = message.content
+        .map((part) =>
+          part && typeof part === 'object' && (part as { type?: string }).type === 'text'
+            ? (part as { text?: unknown }).text
+            : undefined
+        )
+        .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+      if (texts.length > 0) return texts.join('\n')
+    }
+    return undefined
+  }
+  return undefined
 }
 
 export function buildMemoryContext(

@@ -196,6 +196,33 @@ const browserScrollHandler: ToolHandler = {
   execute: async () => nativeOnlyBrowserResult('BrowserScroll')
 }
 
+const browserEvaluateHandler: ToolHandler = {
+  definition: {
+    name: 'BrowserEvaluate',
+    description:
+      'Execute arbitrary JavaScript in the context of the current page and return the result.\n\n' +
+      'Usage:\n' +
+      '- Provide a JavaScript snippet in "code". Use a `return` statement to return a value (e.g. `return document.title`).\n' +
+      '- The code runs inside an async function, so you may use `await` directly.\n' +
+      '- The return value is JSON-serialized. Non-serializable values (DOM nodes, functions, circular objects) come back as their string form; return plain objects/arrays/strings/numbers for structured results.\n' +
+      '- Runs in the page origin, so it can read/modify the DOM, call page APIs, and access page globals — this bypasses the higher-level browser actions, so use it deliberately.\n' +
+      '- Prefer BrowserSnapshot, BrowserClick, BrowserType, or BrowserGetContent for common actions; use this only for logic those tools cannot express.\n' +
+      '- A page must already be loaded via BrowserNavigate before calling this tool.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description:
+            'JavaScript to execute in the page. Use `return <expr>` to return a value; `await` is supported.'
+        }
+      },
+      required: ['code']
+    }
+  },
+  execute: async () => nativeOnlyBrowserResult('BrowserEvaluate')
+}
+
 const ALL_HANDLERS: ToolHandler[] = [
   browserNavigateHandler,
   browserGetContentHandler,
@@ -203,7 +230,8 @@ const ALL_HANDLERS: ToolHandler[] = [
   browserSnapshotHandler,
   browserClickHandler,
   browserTypeHandler,
-  browserScrollHandler
+  browserScrollHandler,
+  browserEvaluateHandler
 ]
 
 let _browserToolRegistered = false

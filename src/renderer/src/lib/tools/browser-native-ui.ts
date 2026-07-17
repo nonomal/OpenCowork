@@ -108,6 +108,36 @@ async function waitForWebview(
   return null
 }
 
+// Returns the attached browser webview, self-healing when none is present.
+// The webview stays mounted in the background once a page has been opened (see
+// RightPanel), so this normally hits the fast path. If it is missing — e.g. the
+// browser tab was never created for this session — we launch it in the background
+// (without stealing the UI) using the last known URL so the tool can still run.
+async function ensureAttachedWebview(ctx: ToolContext): Promise<Electron.WebviewTag> {
+  const existing = getWebview(ctx)
+  if (existing) return existing
+
+  // Nothing is attached. Without a previously opened page there is genuinely
+  // nothing to read or interact with, so keep the original "navigate first" hint
+  // rather than spawning an empty browser tab.
+  const storedUrl = useUIStore.getState().getBrowserState(ctx.sessionId).url
+  if (!storedUrl) {
+    throw new Error('No attached browser view is available. Use BrowserNavigate first.')
+  }
+
+  // A page was opened before but its webview is no longer mounted (e.g. the tab was
+  // dropped). Relaunch it in the background — without stealing the UI — and wait for
+  // the freshly mounted webview to reload the stored URL before proceeding.
+  useUIStore.getState().openBrowserTab(storedUrl, ctx.sessionId, undefined, { background: true })
+
+  const webview = await waitForWebview(ctx)
+  if (!webview) {
+    throw new Error('No attached browser view is available. Use BrowserNavigate first.')
+  }
+  await waitForLoad(webview)
+  return webview
+}
+
 function getBrowserAccessError(url: string): ToolResultContent | null {
   const decision = getBrowserAccessDecision(url)
   return decision.allowed ? null : encodeToolError(decision.reason ?? 'Browser navigation blocked.')
@@ -152,7 +182,9 @@ async function executeBrowserNavigate(
     }
     const accessError = getBrowserAccessError(url)
     if (accessError) return accessError
-    useUIStore.getState().openBrowserTab(url, ctx.sessionId)
+    // Open in the background: attach the webview and start loading without forcing
+    // the right panel open, so the agent can drive the browser while it stays hidden.
+    useUIStore.getState().openBrowserTab(url, ctx.sessionId, undefined, { background: true })
     const webview = await waitForWebview(ctx)
     if (!webview) {
       return encodeToolError('Browser view did not attach. Reopen the browser tab and try again.')
@@ -292,7 +324,7 @@ async function executeBrowserGetContent(
 ): Promise<ToolResultContent> {
   const accessError = getCurrentBrowserAccessError(ctx)
   if (accessError) return accessError
-  const webview = requireWebview(ctx)
+  const webview = await ensureAttachedWebview(ctx)
   const selector = (input.selector as string) || ''
   const outputType = (input.type as string) || 'markdown'
 
@@ -339,7 +371,7 @@ async function executeBrowserScreenshot(
 ): Promise<ToolResultContent> {
   const accessError = getCurrentBrowserAccessError(ctx)
   if (accessError) return accessError
-  const webview = requireWebview(ctx)
+  const webview = await ensureAttachedWebview(ctx)
   const nativeImage = await runWebviewCommand(webview, 'capture screenshot', (target) =>
     target.capturePage()
   )
@@ -437,7 +469,7 @@ async function executeBrowserSnapshot(
 ): Promise<ToolResultContent> {
   const accessError = getCurrentBrowserAccessError(ctx)
   if (accessError) return accessError
-  const webview = requireWebview(ctx)
+  const webview = await ensureAttachedWebview(ctx)
   const raw = await runWebviewCommand(webview, 'read interactive elements', (target) =>
     target.executeJavaScript(SNAPSHOT_SCRIPT)
   )
@@ -491,7 +523,7 @@ async function executeBrowserClick(
 ): Promise<ToolResultContent> {
   const accessError = getCurrentBrowserAccessError(ctx)
   if (accessError) return accessError
-  const webview = requireWebview(ctx)
+  const webview = await ensureAttachedWebview(ctx)
   const selector = input.selector as string
   if (!selector) return encodeToolError('"selector" is required')
   const raw = await runWebviewCommand(webview, 'click page element', (target) =>
@@ -543,7 +575,7 @@ async function executeBrowserType(
 ): Promise<ToolResultContent> {
   const accessError = getCurrentBrowserAccessError(ctx)
   if (accessError) return accessError
-  const webview = requireWebview(ctx)
+  const webview = await ensureAttachedWebview(ctx)
   const selector = input.selector as string
   const text = input.text as string
   const clear = input.clear !== false
@@ -570,7 +602,7 @@ async function executeBrowserScroll(
 ): Promise<ToolResultContent> {
   const accessError = getCurrentBrowserAccessError(ctx)
   if (accessError) return accessError
-  const webview = requireWebview(ctx)
+  const webview = await ensureAttachedWebview(ctx)
   const direction = (input.direction as string) || 'down'
   const amount = typeof input.amount === 'number' ? input.amount : 0
   const raw = await runWebviewCommand(webview, 'scroll page', (target) =>
@@ -599,6 +631,61 @@ async function executeBrowserScroll(
   })
 }
 
+async function executeBrowserEvaluate(
+  input: Record<string, unknown>,
+  ctx: ToolContext
+): Promise<ToolResultContent> {
+  const accessError = getCurrentBrowserAccessError(ctx)
+  if (accessError) return accessError
+  const webview = await ensureAttachedWebview(ctx)
+  const code = input.code
+  if (typeof code !== 'string' || !code.trim()) {
+    return encodeToolError('"code" is required and must be a non-empty string')
+  }
+
+  // User code is inserted verbatim so it runs as real JavaScript in the page.
+  // It is wrapped in an async IIFE (so `await` and top-level `return` both work)
+  // and the resolved value is JSON-serialized with a string fallback for
+  // non-serializable results (DOM nodes, functions, circular refs).
+  const script = `
+    (function() {
+      function __serialize(v) {
+        if (v === undefined) return { type: 'undefined', value: null }
+        try { return { type: typeof v, value: JSON.parse(JSON.stringify(v)) } }
+        catch (e) { return { type: typeof v, value: String(v) } }
+      }
+      return Promise.resolve()
+        .then(function() { return (async function() {\n${code}\n})() })
+        .then(function(r) { return JSON.stringify({ success: true, result: __serialize(r) }) })
+        .catch(function(e) {
+          return JSON.stringify({
+            error: (e && e.message) ? String(e.message) : String(e),
+            stack: (e && e.stack) ? String(e.stack) : ''
+          })
+        })
+    })()
+  `
+
+  const raw = await runWebviewCommand(webview, 'evaluate JavaScript', (target) =>
+    target.executeJavaScript(script)
+  )
+  const parsed = parseWebviewJson<{
+    success?: boolean
+    result?: { type?: string; value?: unknown }
+    error?: string
+    stack?: string
+  }>(raw)
+  if (parsed.error) {
+    return encodeToolError(parsed.stack ? `${parsed.error}\n${parsed.stack}` : parsed.error)
+  }
+  return encodeStructuredToolResult({
+    success: true,
+    url: useUIStore.getState().getBrowserState(ctx.sessionId).url,
+    resultType: parsed.result?.type,
+    result: parsed.result?.value
+  })
+}
+
 async function runBrowserTool(
   toolName: string,
   input: Record<string, unknown>,
@@ -619,6 +706,8 @@ async function runBrowserTool(
       return await executeBrowserType(input, ctx)
     case 'BrowserScroll':
       return await executeBrowserScroll(input, ctx)
+    case 'BrowserEvaluate':
+      return await executeBrowserEvaluate(input, ctx)
     default:
       return encodeToolError(`Unsupported browser tool: ${toolName}`)
   }

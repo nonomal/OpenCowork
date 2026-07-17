@@ -2,8 +2,8 @@ import type { BuiltinProviderPreset } from './types'
 
 export const routinAiPreset: BuiltinProviderPreset = {
   builtinId: 'routin-ai',
-  // v2: gpt-5.4+ models support the Responses WebSocket transport (supportsWebsocket)
-  version: 2,
+  // v3: add Grok Imagine image/video models and the dedicated xAI Videos protocol.
+  version: 3,
   name: 'Routin AI',
   type: 'openai-chat',
   defaultBaseUrl: 'https://api.routin.ai/v1',
@@ -869,6 +869,46 @@ export const routinAiPreset: BuiltinProviderPreset = {
       enabled: true,
       category: 'image',
       type: 'openai-images',
+      supportsVision: true,
+      supportsFunctionCall: false
+    },
+    {
+      id: 'grok-imagine-image-quality',
+      name: 'Grok Imagine Image Quality',
+      icon: 'grok',
+      enabled: true,
+      category: 'image',
+      type: 'openai-images',
+      supportsVision: true,
+      supportsFunctionCall: false
+    },
+    {
+      id: 'grok-imagine-image',
+      name: 'Grok Imagine Image',
+      icon: 'grok',
+      enabled: true,
+      category: 'image',
+      type: 'openai-images',
+      supportsVision: true,
+      supportsFunctionCall: false
+    },
+    {
+      id: 'grok-imagine-video',
+      name: 'Grok Imagine Video',
+      icon: 'grok',
+      enabled: true,
+      category: 'video',
+      type: 'xai-video',
+      supportsVision: true,
+      supportsFunctionCall: false
+    },
+    {
+      id: 'grok-imagine-video-1.5-preview',
+      name: 'Grok Imagine Video 1.5 Preview',
+      icon: 'grok',
+      enabled: true,
+      category: 'video',
+      type: 'xai-video',
       supportsVision: true,
       supportsFunctionCall: false
     },

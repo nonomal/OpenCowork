@@ -4562,13 +4562,12 @@ export function useChatActions(): {
           sessionGoalSnapshot.status !== 'paused' &&
           sessionGoalSnapshot.status !== 'complete'
         let mcpStore = useMcpStore.getState()
-        if (mcpStore.servers.length === 0) {
-          await mcpStore.loadServers()
+        if (mode === 'chat') {
+          // MCP processes stay cold during app startup. The first chat request
+          // connects only the servers selected for this project, then exposes
+          // their discovered capabilities before building the model tool list.
+          await mcpStore.ensureConversationReady(session?.projectId ?? null)
           mcpStore = useMcpStore.getState()
-        }
-        if (mcpStore.servers.some((server) => server.enabled)) {
-          // Keep the renderer cache in sync with main-process auto-connects before resolving MCP tools.
-          await mcpStore.refreshAllServers()
         }
         const chatMcpContext =
           mode === 'chat' ? resolveActiveMcpContext(session?.projectId ?? null) : null
@@ -5090,10 +5089,12 @@ export function useChatActions(): {
               sessionMode === 'acp'
 
             if (source !== 'continue' && shouldInjectContext && messagesToSend.length > 0) {
-              const { buildRuntimeReminder } = await import('@renderer/lib/agent/dynamic-context')
+              const { buildRuntimeReminder, extractLatestUserPromptText } =
+                await import('@renderer/lib/agent/dynamic-context')
               const runtimeReminder = await buildRuntimeReminder({
                 sessionId,
-                modelConfig: resolvedModelConfig
+                modelConfig: resolvedModelConfig,
+                userPrompt: extractLatestUserPromptText(messagesToSend)
               })
 
               if (runtimeReminder) {

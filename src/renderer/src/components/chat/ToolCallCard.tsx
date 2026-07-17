@@ -1,6 +1,12 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
+import Markdown from 'react-markdown'
 import {
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS
+} from '@renderer/lib/preview/viewers/markdown-components'
+import {
+  Waypoints,
   ChevronDown,
   CheckCircle2,
   XCircle,
@@ -717,6 +723,45 @@ export function WidgetOutputBlock({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// Markdown-rendered tool output (codegraph_explore & friends return agent-facing
+// markdown: per-file source sections, call paths, impact). Collapsed = clamped
+// height (no string slicing — cutting markdown mid-fence breaks rendering);
+// the copy button still copies the raw text.
+function MarkdownOutputBlock({ output }: { output: string }): React.JSX.Element {
+  const { t } = useTranslation('chat')
+  const [expanded, setExpanded] = React.useState(false)
+  const isLong = output.length > 800 || output.split('\n').length > 16
+  return (
+    <div>
+      <div className="mb-1 flex items-center">
+        <p className="text-xs font-medium text-muted-foreground">{t('toolCall.output')}</p>
+        <CopyBtn text={output} />
+      </div>
+      <div
+        className={`overflow-auto rounded-md border border-border/50 bg-muted/10 px-3 py-2 ${
+          isLong && !expanded ? 'max-h-48' : 'max-h-[480px]'
+        }`}
+      >
+        <div className="prose prose-sm dark:prose-invert max-w-none text-xs prose-headings:mb-1.5 prose-headings:mt-3 prose-headings:text-sm prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5 prose-pre:bg-muted prose-pre:px-2.5 prose-pre:py-2 prose-code:before:content-none prose-code:after:content-none">
+          <Markdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} rehypePlugins={MARKDOWN_REHYPE_PLUGINS}>
+            {output}
+          </Markdown>
+        </div>
+      </div>
+      {isLong && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="mt-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {expanded
+            ? t('action.showLess', { ns: 'common' })
+            : t('toolCall.showAll', { chars: output.length, lines: output.split('\n').length })}
+        </button>
+      )}
     </div>
   )
 }
@@ -2726,6 +2771,26 @@ function buildCompactToolHeaderModel({
     }
   }
 
+  if (name.startsWith('codegraph_')) {
+    // The QUERY is the informative bit (the project path is ambient context).
+    const query = compactWhitespace(getStringInput(input, ['query', 'symbol', 'file']))
+    const projectPath = getStringInput(input, ['projectPath', 'workingFolder'])
+    const badges: CompactToolHeaderBadge[] = []
+    if (outputText) {
+      badges.push({
+        label: t('toolCall.outputLineCount', { count: outputText.split('\n').length }),
+        tone: 'blue'
+      })
+    }
+    return {
+      icon: <Waypoints className="size-3.5" />,
+      primary: query || summary || t('toolCall.receivingArgs'),
+      secondary: projectPath ? pathFileName(projectPath) || projectPath : undefined,
+      badges,
+      title: [query, projectPath].filter(Boolean).join('\n') || displayName
+    }
+  }
+
   if (name === 'Read') {
     const filePath = getStringInput(input, ['file_path', 'path'])
     const lines = getReadOutputLineCount(outputText)
@@ -3420,9 +3485,15 @@ function ToolCallCardInner({
             {shouldRenderOutputPanels && output && extensionToolResult && (
               <ExtensionToolResultCard output={output} />
             )}
+            {/* CodeGraph tools return agent-facing markdown — render it as such. */}
+            {shouldRenderOutputPanels &&
+              output &&
+              name.startsWith('codegraph_') &&
+              outputText && <MarkdownOutputBlock output={outputText} />}
             {shouldRenderOutputPanels &&
               output &&
               !extensionToolResult &&
+              !name.startsWith('codegraph_') &&
               ![
                 'Read',
                 'Bash',

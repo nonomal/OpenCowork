@@ -11,6 +11,12 @@ import type {
   MessageRequestModelMeta
 } from '../lib/api/types'
 import { ipcStorage } from '../lib/ipc/ipc-storage'
+import {
+  applyAgentHistory,
+  readAgentHistory,
+  readAgentHistoryIndex,
+  replaceAgentHistory
+} from '../lib/ipc/agent-history-storage'
 import { ipcClient } from '../lib/ipc/ipc-client'
 import { invokeMessagePackBinary } from '../lib/ipc/messagepack-ipc-client'
 import { IPC } from '../lib/ipc/channels'
@@ -42,7 +48,7 @@ const MAX_BACKGROUND_PROCESS_ENTRIES = 60
 const MAX_RUN_CHANGESETS = 40
 const BACKGROUND_PROCESS_OUTPUT_FLUSH_MS = 80
 const AGENT_STORE_STORAGE_KEY = 'opencowork-agent'
-const AGENT_HISTORY_STORAGE_KEY = 'opencowork-agent-history'
+const LEGACY_AGENT_HISTORY_STORAGE_KEY = 'opencowork-agent-history'
 const AGENT_HISTORY_PERSIST_DEBOUNCE_MS = 500
 const SHELL_TOOL_NAMES = new Set(['Bash', 'Shell', 'PowerShell'])
 
@@ -642,6 +648,15 @@ let agentHistoryPersistenceHydrated = false
 let agentHistoryPersistencePending = false
 let agentHistoryPersistenceInFlight = false
 let agentHistoryPersistenceTimer: ReturnType<typeof setTimeout> | null = null
+const pendingAgentHistoryUpsertIds = new Set<string>()
+const pendingAgentHistoryRemoveIds = new Set<string>()
+const pendingAgentHistoryRemoveSessionIds = new Set<string>()
+const inFlightAgentHistoryUpsertIds = new Set<string>()
+const loadedAgentHistorySessionIds = new Set<string>()
+const agentHistorySessionLoadPromises = new Map<string, Promise<void>>()
+const agentHistorySessionVersions = new Map<string, number>()
+let agentHistoryLoadEpoch = 0
+let agentHistoryHydrationPromise: Promise<void> | null = null
 
 function ensureSessionSubAgentLiveState(
   state: { sessionSubAgentLiveCache: Record<string, SessionSubAgentLiveState> },
@@ -747,7 +762,12 @@ async function readPersistedAgentHistory(): Promise<{
   snapshot: PersistedAgentHistoryState | null
   migratedFromLegacy: boolean
 }> {
-  const primaryRaw = await ipcStorage.getItem(AGENT_HISTORY_STORAGE_KEY)
+  const databaseIndex = await readAgentHistoryIndex()
+  if (databaseIndex.total > 0) {
+    return { snapshot: null, migratedFromLegacy: false }
+  }
+
+  const primaryRaw = await ipcStorage.getItem(LEGACY_AGENT_HISTORY_STORAGE_KEY)
   const primaryRecord = normalizePersistedAgentRecord(primaryRaw)
   if (primaryRaw !== null) {
     return {
@@ -757,7 +777,7 @@ async function readPersistedAgentHistory(): Promise<{
           primaryRecord?.sessionSubAgentSummaries
         )
       },
-      migratedFromLegacy: false
+      migratedFromLegacy: true
     }
   }
 
@@ -779,14 +799,116 @@ async function readPersistedAgentHistory(): Promise<{
   }
 }
 
-function buildAgentHistoryPersistenceSnapshot(): PersistedAgentHistoryState {
-  const state = useAgentStore.getState()
-  return {
-    subAgentHistory: compactSubAgentListForPersistence(state.subAgentHistory),
-    sessionSubAgentSummaries: compactSessionSubAgentSummariesForPersistence(
-      state.sessionSubAgentSummaries
-    )
+async function removeLegacyAgentHistorySettings(): Promise<void> {
+  await ipcClient.invoke('settings:set', {
+    key: LEGACY_AGENT_HISTORY_STORAGE_KEY,
+    value: undefined
+  })
+
+  const legacyAgentStoreRaw = await ipcStorage.getItem(AGENT_STORE_STORAGE_KEY)
+  if (!legacyAgentStoreRaw) return
+  try {
+    const persisted = JSON.parse(legacyAgentStoreRaw) as Record<string, unknown>
+    const state =
+      persisted.state && typeof persisted.state === 'object' && !Array.isArray(persisted.state)
+        ? (persisted.state as Record<string, unknown>)
+        : persisted
+    const hadHistory = 'subAgentHistory' in state || 'sessionSubAgentSummaries' in state
+    if (!hadHistory) return
+    delete state.subAgentHistory
+    delete state.sessionSubAgentSummaries
+    await ipcClient.invoke('settings:set', {
+      key: AGENT_STORE_STORAGE_KEY,
+      value: persisted
+    })
+  } catch {
+    // Native startup migration handles malformed or older string-wrapped stores on the next run.
   }
+}
+
+function invalidateAgentHistorySession(sessionId: string): void {
+  loadedAgentHistorySessionIds.delete(sessionId)
+  agentHistorySessionVersions.set(sessionId, (agentHistorySessionVersions.get(sessionId) ?? 0) + 1)
+}
+
+async function loadAgentHistorySession(sessionId: string): Promise<void> {
+  const key = sessionId.trim()
+  if (!key) return
+  if (agentHistoryHydrationPromise) {
+    await agentHistoryHydrationPromise
+  }
+  if (loadedAgentHistorySessionIds.has(key)) return
+
+  const existingPromise = agentHistorySessionLoadPromises.get(key)
+  if (existingPromise) {
+    await existingPromise
+    return
+  }
+
+  const epoch = agentHistoryLoadEpoch
+  const version = agentHistorySessionVersions.get(key) ?? 0
+  const loadPromise = readAgentHistory<SubAgentState>(key)
+    .then((value) => {
+      if (
+        epoch !== agentHistoryLoadEpoch ||
+        version !== (agentHistorySessionVersions.get(key) ?? 0) ||
+        pendingAgentHistoryRemoveSessionIds.has(key)
+      ) {
+        return
+      }
+
+      const state = useAgentStore.getState()
+      const mergedById = new Map<string, SubAgentState>()
+      for (const agent of normalizePersistedSubAgentList(value)) {
+        if (!pendingAgentHistoryRemoveIds.has(agent.toolUseId)) {
+          mergedById.set(agent.toolUseId, agent)
+        }
+      }
+      for (const agent of state.subAgentHistory) {
+        if (agent.sessionId === key) mergedById.set(agent.toolUseId, agent)
+      }
+      for (const agent of state.sessionSubAgentSummaries[key] ?? []) {
+        mergedById.set(agent.toolUseId, agent)
+      }
+
+      const merged = [...mergedById.values()].sort(
+        (left, right) =>
+          (right.completedAt ?? right.startedAt) - (left.completedAt ?? left.startedAt)
+      )
+      useAgentStore.setState({
+        subAgentHistory: [
+          ...state.subAgentHistory.filter((agent) => agent.sessionId !== key),
+          ...merged
+        ],
+        sessionSubAgentSummaries: {
+          ...state.sessionSubAgentSummaries,
+          [key]: merged
+        }
+      })
+      loadedAgentHistorySessionIds.add(key)
+    })
+    .catch((error) => {
+      console.warn(`[AgentStore] Failed to load sub-agent history for session ${key}:`, error)
+    })
+    .finally(() => {
+      agentHistorySessionLoadPromises.delete(key)
+    })
+
+  agentHistorySessionLoadPromises.set(key, loadPromise)
+  await loadPromise
+}
+
+function findAgentHistoryEntryForPersistence(
+  state: AgentStore,
+  toolUseId: string
+): SubAgentState | null {
+  const historyEntry = state.subAgentHistory.find((agent) => agent.toolUseId === toolUseId)
+  if (historyEntry) return historyEntry
+  for (const summaries of Object.values(state.sessionSubAgentSummaries)) {
+    const summary = summaries.find((agent) => agent.toolUseId === toolUseId)
+    if (summary) return summary
+  }
+  return null
 }
 
 async function flushAgentHistoryPersistence(): Promise<void> {
@@ -798,12 +920,44 @@ async function flushAgentHistoryPersistence(): Promise<void> {
 
   agentHistoryPersistenceInFlight = true
   agentHistoryPersistencePending = false
+  const upsertIds = [...pendingAgentHistoryUpsertIds]
+  const explicitRemoveIds = [...pendingAgentHistoryRemoveIds]
+  const removeSessionIds = [...pendingAgentHistoryRemoveSessionIds]
+  for (const id of upsertIds) inFlightAgentHistoryUpsertIds.add(id)
+  pendingAgentHistoryUpsertIds.clear()
+  pendingAgentHistoryRemoveIds.clear()
+  pendingAgentHistoryRemoveSessionIds.clear()
   try {
-    await ipcStorage.setItem(
-      AGENT_HISTORY_STORAGE_KEY,
-      JSON.stringify(buildAgentHistoryPersistenceSnapshot())
-    )
+    const state = useAgentStore.getState()
+    const upserts: SubAgentState[] = []
+    const removeIds = new Set(explicitRemoveIds)
+    for (const id of upsertIds) {
+      const entry = findAgentHistoryEntryForPersistence(state, id)
+      if (entry) {
+        upserts.push(buildPersistedSubAgentSnapshot(entry))
+        removeIds.delete(id)
+      } else {
+        removeIds.add(id)
+      }
+    }
+
+    if (upserts.length > 0 || removeIds.size > 0 || removeSessionIds.length > 0) {
+      await applyAgentHistory({
+        upserts,
+        removeIds: [...removeIds],
+        removeSessionIds
+      })
+    }
+  } catch (error) {
+    for (const id of upsertIds) pendingAgentHistoryUpsertIds.add(id)
+    for (const id of explicitRemoveIds) pendingAgentHistoryRemoveIds.add(id)
+    for (const sessionId of removeSessionIds) {
+      pendingAgentHistoryRemoveSessionIds.add(sessionId)
+    }
+    agentHistoryPersistencePending = true
+    console.warn('[AgentStore] Failed to persist sub-agent history:', error)
   } finally {
+    for (const id of upsertIds) inFlightAgentHistoryUpsertIds.delete(id)
     agentHistoryPersistenceInFlight = false
     if (agentHistoryPersistencePending) {
       queueAgentHistoryPersistence()
@@ -811,7 +965,22 @@ async function flushAgentHistoryPersistence(): Promise<void> {
   }
 }
 
-function queueAgentHistoryPersistence(): void {
+function queueAgentHistoryPersistence(change?: {
+  upsertIds?: string[]
+  removeIds?: string[]
+  removeSessionIds?: string[]
+}): void {
+  for (const id of change?.upsertIds ?? []) {
+    pendingAgentHistoryUpsertIds.add(id)
+    pendingAgentHistoryRemoveIds.delete(id)
+  }
+  for (const id of change?.removeIds ?? []) {
+    pendingAgentHistoryRemoveIds.add(id)
+    pendingAgentHistoryUpsertIds.delete(id)
+  }
+  for (const sessionId of change?.removeSessionIds ?? []) {
+    pendingAgentHistoryRemoveSessionIds.add(sessionId)
+  }
   agentHistoryPersistencePending = true
   if (!agentHistoryPersistenceHydrated) return
   if (agentHistoryPersistenceTimer) return
@@ -830,9 +999,16 @@ async function hydrateAgentHistoryPersistence(): Promise<void> {
         subAgentHistory: snapshot.subAgentHistory,
         sessionSubAgentSummaries: snapshot.sessionSubAgentSummaries
       })
+      for (const sessionId of Object.keys(snapshot.sessionSubAgentSummaries)) {
+        loadedAgentHistorySessionIds.add(sessionId)
+      }
+    }
+    if (migratedFromLegacy && snapshot) {
+      await replaceAgentHistory(snapshot)
+      await removeLegacyAgentHistorySettings()
     }
     agentHistoryPersistenceHydrated = true
-    if (migratedFromLegacy || agentHistoryPersistencePending) {
+    if (agentHistoryPersistencePending) {
       queueAgentHistoryPersistence()
     }
   } catch (error) {
@@ -1305,6 +1481,7 @@ interface AgentStore {
   isSessionActive: (sessionId: string | null | undefined) => boolean
   /** Switch active tool-call context: save current tool calls for prevSession, restore for nextSession */
   switchToolCallSession: (prevSessionId: string | null, nextSessionId: string | null) => void
+  loadSubAgentHistoryForSession: (sessionId: string) => Promise<void>
   resetLiveSessionExecution: (sessionId: string) => void
   addToolCall: (tc: ToolCallState, sessionId?: string | null) => void
   updateToolCall: (id: string, patch: Partial<ToolCallState>, sessionId?: string | null) => void
@@ -1485,13 +1662,17 @@ export const useAgentStore = create<AgentStore>()(
             }
           }
         })
+        if (nextSessionId) {
+          void loadAgentHistorySession(nextSessionId)
+        }
       },
+
+      loadSubAgentHistoryForSession: loadAgentHistorySession,
 
       resetLiveSessionExecution: (sessionId) => {
         set((state) => {
           delete state.sessionToolCallsCache[sessionId]
           delete state.sessionSubAgentLiveCache[sessionId]
-          delete state.sessionSubAgentSummaries[sessionId]
 
           if (state.liveSessionId !== sessionId) return
           state.pendingToolCalls = []
@@ -1500,7 +1681,6 @@ export const useAgentStore = create<AgentStore>()(
           state.completedSubAgents = {}
           rebuildRunningSubAgentDerived(state)
         })
-        queueAgentHistoryPersistence()
       },
 
       addToolCall: (tc, sessionId) => {
@@ -1827,7 +2007,8 @@ export const useAgentStore = create<AgentStore>()(
           state.sessionSubAgentSummaries = {}
           state.sessionBackgroundProcessSummaries = {}
         })
-        queueAgentHistoryPersistence()
+        agentHistoryLoadEpoch += 1
+        loadedAgentHistorySessionIds.clear()
       },
 
       refreshRunChanges: async (runId, query) => {
@@ -2263,7 +2444,7 @@ export const useAgentStore = create<AgentStore>()(
           }
         })
         if (shouldPersistSubAgentHistory) {
-          queueAgentHistoryPersistence()
+          queueAgentHistoryPersistence({ upsertIds: [event.toolUseId] })
         }
         if (!isAgentRuntimeSyncSuppressed()) {
           emitAgentRuntimeSync({ kind: 'subagent_event', event, sessionId })
@@ -2345,7 +2526,8 @@ export const useAgentStore = create<AgentStore>()(
           }
           delete state.sessionBackgroundProcessSummaries[sessionId]
         })
-        queueAgentHistoryPersistence()
+        invalidateAgentHistorySession(sessionId)
+        queueAgentHistoryPersistence({ removeSessionIds: [sessionId] })
         for (const id of processIdsToKill) {
           ipcClient.invoke(IPC.PROCESS_KILL, { id }).catch(() => {})
         }
@@ -2356,24 +2538,47 @@ export const useAgentStore = create<AgentStore>()(
 
       releaseDormantSessionData: (residentSessionIds) => {
         const residentSet = new Set(residentSessionIds)
+        const evictedSessionIds: string[] = []
         set((state) => {
           const targetSessionIds = new Set<string>([
             ...Object.keys(state.sessionToolCallsCache),
             ...Object.keys(state.sessionSubAgentLiveCache),
             ...Object.keys(state.sessionSubAgentSummaries),
-            ...Object.keys(state.sessionBackgroundProcessSummaries)
+            ...Object.keys(state.sessionBackgroundProcessSummaries),
+            ...state.subAgentHistory
+              .map((agent) => agent.sessionId)
+              .filter((sessionId): sessionId is string => Boolean(sessionId))
           ])
 
           for (const sessionId of targetSessionIds) {
             if (residentSet.has(sessionId)) continue
 
+            const subAgents = state.sessionSubAgentSummaries[sessionId] ?? []
+            const hasPendingHistoryWrite =
+              subAgents.some(
+                (agent) =>
+                  pendingAgentHistoryUpsertIds.has(agent.toolUseId) ||
+                  inFlightAgentHistoryUpsertIds.has(agent.toolUseId)
+              ) ||
+              state.subAgentHistory.some(
+                (agent) =>
+                  agent.sessionId === sessionId &&
+                  (pendingAgentHistoryUpsertIds.has(agent.toolUseId) ||
+                    inFlightAgentHistoryUpsertIds.has(agent.toolUseId))
+              )
+            if (
+              hasPendingHistoryWrite ||
+              state.liveSessionId === sessionId ||
+              state.runningSessions[sessionId] === 'running' ||
+              state.runningSessions[sessionId] === 'retrying'
+            ) {
+              continue
+            }
+
             delete state.sessionToolCallsCache[sessionId]
             delete state.sessionSubAgentLiveCache[sessionId]
-
-            const subAgents = state.sessionSubAgentSummaries[sessionId]
-            if (subAgents && subAgents.length > 0) {
-              state.sessionSubAgentSummaries[sessionId] = subAgents.map(buildSubAgentSummary)
-            }
+            delete state.sessionSubAgentSummaries[sessionId]
+            evictedSessionIds.push(sessionId)
 
             const processes = state.sessionBackgroundProcessSummaries[sessionId]
             if (processes && processes.length > 0) {
@@ -2382,8 +2587,17 @@ export const useAgentStore = create<AgentStore>()(
               )
             }
           }
+
+          if (evictedSessionIds.length > 0) {
+            const evictedSet = new Set(evictedSessionIds)
+            state.subAgentHistory = state.subAgentHistory.filter(
+              (agent) => !agent.sessionId || !evictedSet.has(agent.sessionId)
+            )
+          }
         })
-        queueAgentHistoryPersistence()
+        for (const sessionId of evictedSessionIds) {
+          invalidateAgentHistorySession(sessionId)
+        }
       },
 
       compactMemoryFootprint: () => {
@@ -2427,7 +2641,6 @@ export const useAgentStore = create<AgentStore>()(
           )
           rebuildRunningSubAgentDerived(state)
         })
-        queueAgentHistoryPersistence()
       },
 
       clearPendingApprovals: () => {
@@ -2533,4 +2746,4 @@ export const useAgentStore = create<AgentStore>()(
   )
 )
 
-void hydrateAgentHistoryPersistence()
+agentHistoryHydrationPromise = hydrateAgentHistoryPersistence()

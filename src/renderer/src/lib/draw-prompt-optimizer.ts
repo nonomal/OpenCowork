@@ -36,6 +36,7 @@ Mode-specific rules:
 
 User intent priority:
 - Preserve the user's original subject, scene, mood, action, style, and explicit constraints.
+- If a target aspect ratio is provided, choose an orientation, composition, and negative-space plan that fit that frame; do not fight the format.
 - Treat the optional "user core suggestion" as the highest-priority creative direction and weave it into the final prompt naturally.
 - Treat selected style directions as optional stylistic constraints. Blend compatible styles into a coherent visual language; do not mechanically list style labels. If selected styles conflict, choose the most coherent interpretation that best preserves the original prompt and user core suggestion.
 - If reference images are provided, use them for visible fidelity, but keep the user's text intent as primary.
@@ -44,13 +45,24 @@ Writing style:
 - Use concrete visual language over generic tags like "masterpiece", "8k", "best quality", or "ultra detailed" unless the user explicitly asked for them.
 - Prefer positive instructions. Add negative constraints only when they prevent likely failure.
 - The final prompt may use short labeled lines such as "Scene:", "Subject:", "Camera & composition:", "Lighting:", "Details:", and "Constraints:" when that improves clarity.
-- Keep the output dense but usable. Usually 90-180 words; allow longer only for UI, typography, multi-object, or edit-preservation prompts.
+- Keep the output dense but usable. Usually 90-180 English words (roughly 150-300 characters for Chinese); allow longer only for UI, typography, multi-object, or edit-preservation prompts.
+
+Example (structure reference only — never reuse its content):
+Input: a cat on a rainy street at night
+Output:
+Scene: a narrow neon-lit alley on a rainy night, wet asphalt reflecting pink and cyan shop signs
+Subject: a short-haired tabby cat sitting under the awning of a closed noodle shop, fur slightly damp
+Camera & composition: low-angle medium shot at the cat's eye level, 35mm feel, shallow depth of field, subject off-center left with breathing room on the right
+Lighting: cool ambient night light with warm spill from the shop sign, soft rim light tracing wet fur
+Details: falling rain streaks, bokeh droplets on the lens, faint steam rising from a vent
+Constraints: one cat only, no people, no text or watermark
 
 Hard rules:
 - Do not invent a different concept, unrelated characters, extra products, unsupported brand/logotype details, or unsafe/sexualized changes.
 - Do not mention model names, APIs, parameters, token costs, or your reasoning process.
 - Return exactly one final optimized prompt and nothing else.
 - Do not include explanations, alternatives, markdown bullets, prefaces, or surrounding commentary.
+- Do not wrap the output in quotation marks, backticks, or code fences.
 - Keep the output language aligned with the user's original prompt language unless the user core suggestion explicitly asks otherwise.
 `
 
@@ -61,6 +73,8 @@ export interface DrawPromptOptimizationResult {
 export interface DrawPromptOptimizationOptions {
   userCoreSuggestion?: string
   selectedStyleDirections?: string[]
+  /** Target aspect ratio of the downstream generation (e.g. '9:16'). */
+  aspect?: string
 }
 
 function buildTextRequest(prompt: string, options: DrawPromptOptimizationOptions = {}): string {
@@ -75,6 +89,9 @@ function buildTextRequest(prompt: string, options: DrawPromptOptimizationOptions
       : null,
     selectedStyleDirections.length > 0
       ? `Selected style directions to blend:\n${selectedStyleDirections.join('\n')}`
+      : null,
+    options.aspect?.trim()
+      ? `Target aspect ratio: ${options.aspect.trim()}. Compose for this frame.`
       : null,
     `Original prompt:\n${prompt}`
   ].filter(Boolean)
@@ -106,6 +123,25 @@ function buildUserContent(
   ]
 }
 
+/** Strip wrappers models add despite instructions: code fences and surrounding quotes. */
+function cleanOptimizedOutput(raw: string): string {
+  let text = raw.trim()
+  const fence = /^```[a-zA-Z0-9_-]*\r?\n([\s\S]*?)\r?\n?```$/.exec(text)
+  if (fence) text = fence[1].trim()
+  const quotePairs: Array<[string, string]> = [
+    ['"', '"'],
+    ['“', '”'],
+    ['「', '」']
+  ]
+  for (const [open, close] of quotePairs) {
+    if (text.length > 1 && text.startsWith(open) && text.endsWith(close)) {
+      text = text.slice(open.length, -close.length).trim()
+      break
+    }
+  }
+  return text
+}
+
 export async function optimizeDrawPrompt(
   prompt: string,
   providerConfig: ProviderConfig,
@@ -133,7 +169,7 @@ export async function optimizeDrawPrompt(
     signal
   })
 
-  const optimized = output.trim()
+  const optimized = cleanOptimizedOutput(output)
   if (!optimized) {
     throw new Error('Prompt optimization returned empty content')
   }

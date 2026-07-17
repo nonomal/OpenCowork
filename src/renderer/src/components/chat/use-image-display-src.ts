@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { IPC } from '@renderer/lib/ipc/channels'
-import { ipcClient } from '@renderer/lib/ipc/ipc-client'
+import { filePathToMediaUrl } from '@renderer/lib/local-media-url'
 
 export interface ImageDimensions {
   width: number
@@ -19,18 +18,6 @@ function isDataUrl(value: string): boolean {
 
 function isFileUrl(value: string): boolean {
   return /^file:\/\//i.test(value)
-}
-
-function guessMimeTypeFromPath(value: string): string {
-  const pathWithoutQuery = value.split(/[?#]/, 1)[0].toLowerCase()
-  if (pathWithoutQuery.endsWith('.jpg') || pathWithoutQuery.endsWith('.jpeg')) {
-    return 'image/jpeg'
-  }
-  if (pathWithoutQuery.endsWith('.webp')) return 'image/webp'
-  if (pathWithoutQuery.endsWith('.gif')) return 'image/gif'
-  if (pathWithoutQuery.endsWith('.bmp')) return 'image/bmp'
-  if (pathWithoutQuery.endsWith('.svg')) return 'image/svg+xml'
-  return 'image/png'
 }
 
 function fileUrlToFilePath(fileUrl: string): string {
@@ -113,9 +100,11 @@ export function useImageDisplaySrc(src?: string, filePath?: string): string {
   const sourceKey = buildImageDimensionCacheKey(rawSrc, filePath)
   const directSrc = (() => {
     if (rawSrc.startsWith('blob:') || isDataUrl(rawSrc)) return rawSrc
-    if (!rawSrc || isHttpUrl(rawSrc)) return ''
-    if (isFileUrl(rawSrc)) return ''
-    if (!isDataUrl(rawSrc) && !isHttpUrl(rawSrc)) return rawSrc
+    // Local files are streamed via the oc-media protocol — no size limit,
+    // unlike the old fs:read-file-binary base64 path.
+    const localPath = filePath?.trim() || (isFileUrl(rawSrc) ? fileUrlToFilePath(rawSrc) : '')
+    if (localPath) return filePathToMediaUrl(localPath)
+    if (rawSrc && !isHttpUrl(rawSrc)) return rawSrc
     return ''
   })()
   const fallbackSrc = isHttpUrl(rawSrc) ? rawSrc : ''
@@ -126,41 +115,11 @@ export function useImageDisplaySrc(src?: string, filePath?: string): string {
   const displaySrc = displayState.key === sourceKey ? displayState.src : ''
 
   useEffect(() => {
+    if (directSrc || !rawSrc || !isHttpUrl(rawSrc)) {
+      return undefined
+    }
+
     let cancelled = false
-
-    const cleanup = (): void => {
-      cancelled = true
-    }
-
-    if (rawSrc.startsWith('blob:') || isDataUrl(rawSrc)) {
-      return cleanup
-    }
-
-    const localPath = filePath?.trim() || (isFileUrl(rawSrc) ? fileUrlToFilePath(rawSrc) : '')
-    if (localPath) {
-      void ipcClient
-        .invoke(IPC.FS_READ_FILE_BINARY, { path: localPath })
-        .then((result) => {
-          if (cancelled) return
-          const readResult = result as { data?: string; error?: string }
-          if (!readResult.data) return
-          setDisplayState({
-            key: sourceKey,
-            src: `data:${guessMimeTypeFromPath(localPath)};base64,${readResult.data}`
-          })
-        })
-        .catch(() => undefined)
-
-      return cleanup
-    }
-
-    if (!rawSrc) {
-      return cleanup
-    }
-
-    if (!isHttpUrl(rawSrc)) {
-      return cleanup
-    }
 
     void window.api
       .fetchImageBase64({ url: rawSrc })
@@ -175,8 +134,10 @@ export function useImageDisplaySrc(src?: string, filePath?: string): string {
       })
       .catch(() => undefined)
 
-    return cleanup
-  }, [filePath, rawSrc, sourceKey])
+    return () => {
+      cancelled = true
+    }
+  }, [directSrc, rawSrc, sourceKey])
 
   return directSrc || displaySrc || fallbackSrc
 }

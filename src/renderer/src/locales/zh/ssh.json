@@ -80,6 +80,7 @@
   },
   "terminal": {
     "reconnect": "重新连接",
+    "reconnecting": "连接已断开，正在自动重连…",
     "newTab": "新终端",
     "closeTab": "关闭",
     "search": "搜索",

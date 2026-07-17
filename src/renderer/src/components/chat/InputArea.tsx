@@ -127,7 +127,7 @@ import { ModelIcon } from '@renderer/components/settings/provider-icons'
 import { FileAwareEditor, type FileAwareEditorHandle } from './FileAwareEditor'
 import { TokenCounter } from './TokenCounter'
 import { listCommands, type CommandCatalogItem } from '@renderer/lib/commands/command-loader'
-import { resolveEffectiveActiveMcpIds, useMcpStore } from '@renderer/stores/mcp-store'
+import { resolveConfiguredActiveMcpIds, useMcpStore } from '@renderer/stores/mcp-store'
 import {
   resolveEffectiveActiveExtensionIds,
   useExtensionStore
@@ -368,17 +368,15 @@ function ActiveMcpsBadge({ projectId }: { projectId?: string | null }): React.JS
   const { t } = useTranslation('chat')
   const activeMcpIdsByProject = useMcpStore((s) => s.activeMcpIdsByProject)
   const servers = useMcpStore((s) => s.servers)
-  const serverStatuses = useMcpStore((s) => s.serverStatuses)
   const serverTools = useMcpStore((s) => s.serverTools)
   const activeMcpIds = React.useMemo(
     () =>
-      resolveEffectiveActiveMcpIds({
+      resolveConfiguredActiveMcpIds({
         projectId,
         activeMcpIdsByProject,
-        servers,
-        serverStatuses
+        servers
       }),
-    [activeMcpIdsByProject, projectId, serverStatuses, servers]
+    [activeMcpIdsByProject, projectId, servers]
   )
   if (activeMcpIds.length === 0) return null
   const activeServers = servers.filter((s) => activeMcpIds.includes(s.id))

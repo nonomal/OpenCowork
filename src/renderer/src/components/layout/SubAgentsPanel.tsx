@@ -1,8 +1,9 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowLeft, Bot, Loader2 } from 'lucide-react'
+import { ArrowLeft, Bot, Loader2, Square } from 'lucide-react'
 import { FadeIn, spring } from '@renderer/components/animate-ui/transitions'
+import { agentBridge } from '@renderer/lib/ipc/agent-bridge'
 import { useAgentStore, type SubAgentState } from '@renderer/stores/agent-store'
 import { useChatStore } from '@renderer/stores/chat-store'
 import { useSettingsStore } from '@renderer/stores/settings-store'
@@ -79,79 +80,103 @@ function getStatusLabel(
 function SubAgentListItem({
   agent,
   now,
-  onOpen
+  onOpen,
+  onStop
 }: {
   agent: SubAgentState
   now: number
   onOpen: () => void
+  onStop: (agent: SubAgentState) => void
 }): React.JSX.Element {
   const { t } = useTranslation('layout')
   const displayName = agent.displayName ?? agent.name
   const summary = getAgentSummary(agent)
   const isFailed = agent.success === false || Boolean(agent.errorMessage)
   const statusLabel = getStatusLabel(agent, t)
+  const isActive = isActiveAgent(agent)
+  const stopLabel = t('subAgentsPanel.stop', { defaultValue: 'Stop this SubAgent' })
 
   return (
-    <button
-      type="button"
-      data-subagent-card={agent.toolUseId}
-      onClick={onOpen}
-      className="group flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-    >
-      <span
-        className={cn(
-          'mt-0.5 flex size-5 shrink-0 items-center justify-center',
-          getAgentIconTone(displayName),
-          isFailed && 'text-destructive'
-        )}
+    <div className="group/item relative">
+      <button
+        type="button"
+        data-subagent-card={agent.toolUseId}
+        onClick={onOpen}
+        className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
-        {getAgentIcon(displayName)}
-      </span>
-
-      <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground/90">
-            {displayName}
-          </span>
-          <span
-            className={cn(
-              'inline-flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-muted-foreground/65',
-              isFailed && 'text-destructive/80'
-            )}
-          >
-            {agent.isRunning ? <Loader2 className="size-3 animate-spin" /> : null}
-            {isActiveAgent(agent)
-              ? statusLabel
-              : formatElapsed((agent.completedAt ?? now) - agent.startedAt, t)}
-          </span>
-        </span>
-
         <span
           className={cn(
-            'mt-0.5 block max-h-9 overflow-hidden break-words text-xs leading-[18px] text-muted-foreground/72',
-            isFailed && 'text-destructive/70'
+            'mt-0.5 flex size-5 shrink-0 items-center justify-center',
+            getAgentIconTone(displayName),
+            isFailed && 'text-destructive'
           )}
-          style={{
-            display: '-webkit-box',
-            WebkitBoxOrient: 'vertical',
-            WebkitLineClamp: 2
-          }}
         >
-          {summary || statusLabel}
+          {getAgentIcon(displayName)}
         </span>
-      </span>
-    </button>
+
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground/90">
+              {displayName}
+            </span>
+            <span
+              className={cn(
+                'inline-flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-muted-foreground/65',
+                isFailed && 'text-destructive/80',
+                isActive && 'transition-opacity group-hover/item:opacity-0'
+              )}
+            >
+              {agent.isRunning ? <Loader2 className="size-3 animate-spin" /> : null}
+              {isActive
+                ? statusLabel
+                : formatElapsed((agent.completedAt ?? now) - agent.startedAt, t)}
+            </span>
+          </span>
+
+          <span
+            className={cn(
+              'mt-0.5 block max-h-9 overflow-hidden break-words text-xs leading-[18px] text-muted-foreground/72',
+              isFailed && 'text-destructive/70'
+            )}
+            style={{
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: 2
+            }}
+          >
+            {summary || statusLabel}
+          </span>
+        </span>
+      </button>
+
+      {isActive ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            onStop(agent)
+          }}
+          className="absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/item:opacity-100"
+          title={stopLabel}
+          aria-label={stopLabel}
+        >
+          <Square className="size-3 fill-current" />
+        </button>
+      ) : null}
+    </div>
   )
 }
 
 function SubAgentList({
   agents,
   now,
-  onOpen
+  onOpen,
+  onStop
 }: {
   agents: SubAgentState[]
   now: number
   onOpen: (agent: SubAgentState) => void
+  onStop: (agent: SubAgentState) => void
 }): React.JSX.Element {
   const animationsEnabled = useSettingsStore((s) => s.animationsEnabled)
 
@@ -164,6 +189,7 @@ function SubAgentList({
             agent={agent}
             now={now}
             onOpen={() => onOpen(agent)}
+            onStop={onStop}
           />
         ))}
       </div>
@@ -183,7 +209,12 @@ function SubAgentList({
             exit={{ opacity: 0 }}
             transition={{ ...spring.stiff, opacity: { duration: 0.15 } }}
           >
-            <SubAgentListItem agent={agent} now={now} onOpen={() => onOpen(agent)} />
+            <SubAgentListItem
+              agent={agent}
+              now={now}
+              onOpen={() => onOpen(agent)}
+              onStop={onStop}
+            />
           </motion.div>
         ))}
       </AnimatePresence>
@@ -194,16 +225,19 @@ function SubAgentList({
 function SubAgentDetailHeader({
   agent,
   now,
-  onBack
+  onBack,
+  onStop
 }: {
   agent: SubAgentState
   now: number
   onBack: () => void
+  onStop: (agent: SubAgentState) => void
 }): React.JSX.Element {
   const { t } = useTranslation('layout')
   const displayName = agent.displayName ?? agent.name
   const statusLabel = getStatusLabel(agent, t)
   const isFailed = agent.success === false || Boolean(agent.errorMessage)
+  const stopLabel = t('subAgentsPanel.stop', { defaultValue: 'Stop this SubAgent' })
 
   return (
     <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
@@ -239,6 +273,17 @@ function SubAgentDetailHeader({
           ? statusLabel
           : formatElapsed((agent.completedAt ?? now) - agent.startedAt, t)}
       </span>
+      {isActiveAgent(agent) ? (
+        <button
+          type="button"
+          onClick={() => onStop(agent)}
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          title={stopLabel}
+          aria-label={stopLabel}
+        >
+          <Square className="size-3.5 fill-current" />
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -312,6 +357,16 @@ export function SubAgentsPanel({
     [activeSessionId, openSubAgentExecutionDetail]
   )
 
+  const stopAgent = React.useCallback(
+    (agent: SubAgentState) => {
+      const sessionId = agent.sessionId ?? activeSessionId ?? undefined
+      void agentBridge.cancelSubAgent(agent.toolUseId, sessionId).catch((error) => {
+        console.warn('[SubAgentsPanel] cancel sub-agent failed:', error)
+      })
+    },
+    [activeSessionId]
+  )
+
   let contentKey: string
   let content: React.JSX.Element
 
@@ -327,6 +382,7 @@ export function SubAgentsPanel({
           agent={selectedAgent}
           now={now}
           onBack={() => openSubAgentsPanel(null, activeSessionId)}
+          onStop={stopAgent}
         />
         <div className="min-h-0 flex-1">
           <SubAgentExecutionDetail
@@ -370,7 +426,7 @@ export function SubAgentsPanel({
             {t('subAgentsPanel.started', { defaultValue: 'Started' })}
           </div>
           {activeAgents.length > 0 ? (
-            <SubAgentList agents={activeAgents} now={now} onOpen={openAgent} />
+            <SubAgentList agents={activeAgents} now={now} onOpen={openAgent} onStop={stopAgent} />
           ) : (
             <p className="px-1 pb-1 text-xs leading-5 text-muted-foreground/55">
               {t('subAgentsPanel.noStarted', { defaultValue: 'No SubAgents have been started' })}
@@ -384,7 +440,12 @@ export function SubAgentsPanel({
               {t('subAgentsPanel.completedGroup', { defaultValue: 'Completed' })} ·{' '}
               {completedAgents.length}
             </div>
-            <SubAgentList agents={completedAgents} now={now} onOpen={openAgent} />
+            <SubAgentList
+              agents={completedAgents}
+              now={now}
+              onOpen={openAgent}
+              onStop={stopAgent}
+            />
           </section>
         ) : null}
       </FadeIn>

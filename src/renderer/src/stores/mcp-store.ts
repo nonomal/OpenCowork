@@ -14,6 +14,7 @@ import { IPC } from '@renderer/lib/ipc/channels'
 
 interface McpStore {
   servers: McpServerConfig[]
+  serversLoaded: boolean
   serverStatuses: Record<string, McpServerStatus>
   serverTools: Record<string, McpTool[]>
   serverResources: Record<string, McpResource[]>
@@ -25,6 +26,7 @@ interface McpStore {
 
   // Init
   loadServers: () => Promise<void>
+  ensureConversationReady: (projectId?: string | null) => Promise<void>
 
   // CRUD
   addServer: (config: Omit<McpServerConfig, 'id' | 'createdAt'>) => Promise<string>
@@ -58,27 +60,40 @@ function matchesProject(server: McpServerConfig, projectId?: string | null): boo
   return !projectId || !server.projectId || server.projectId === projectId
 }
 
+export function resolveConfiguredActiveMcpIds(params: {
+  projectId?: string | null
+  activeMcpIdsByProject: Record<string, string[]>
+  servers: McpServerConfig[]
+}): string[] {
+  const projectKey = resolveProjectMcpKey(params.projectId)
+  const availableServerIds = new Set(
+    params.servers
+      .filter((server) => server.enabled && matchesProject(server, params.projectId))
+      .map((server) => server.id)
+  )
+  const configuredIds = Object.prototype.hasOwnProperty.call(
+    params.activeMcpIdsByProject,
+    projectKey
+  )
+    ? (params.activeMcpIdsByProject[projectKey] ?? [])
+    : [...availableServerIds]
+
+  return configuredIds.filter((id) => availableServerIds.has(id))
+}
+
 function resolveStoredOrDefaultMcpIds(params: {
   projectId?: string | null
   activeMcpIdsByProject: Record<string, string[]>
   servers: McpServerConfig[]
   serverStatuses: Record<string, McpServerStatus>
 }): string[] {
-  const projectKey = resolveProjectMcpKey(params.projectId)
-  if (Object.prototype.hasOwnProperty.call(params.activeMcpIdsByProject, projectKey)) {
-    return params.activeMcpIdsByProject[projectKey] ?? []
-  }
-
-  // Treat connected servers as active by default until the user makes an explicit selection.
-  return params.servers
-    .filter(
-      (server) =>
-        server.enabled &&
-        params.serverStatuses[server.id] === 'connected' &&
-        matchesProject(server, params.projectId)
-    )
-    .map((server) => server.id)
+  return resolveConfiguredActiveMcpIds(params).filter(
+    (id) => params.serverStatuses[id] === 'connected'
+  )
 }
+
+const conversationInitializationPromises = new Map<string, Promise<void>>()
+const serverConnectionPromises = new Map<string, Promise<string | undefined>>()
 
 export function resolveEffectiveActiveMcpIds(params: {
   projectId?: string | null
@@ -102,6 +117,7 @@ export function resolveEffectiveActiveMcpIds(params: {
 
 export const useMcpStore = create<McpStore>((set, get) => ({
   servers: [],
+  serversLoaded: false,
   serverStatuses: {},
   serverTools: {},
   serverResources: {},
@@ -113,9 +129,53 @@ export const useMcpStore = create<McpStore>((set, get) => ({
   loadServers: async () => {
     try {
       const servers = (await ipcClient.invoke(IPC.MCP_LIST)) as McpServerConfig[]
-      set({ servers: Array.isArray(servers) ? servers : [] })
+      set({ servers: Array.isArray(servers) ? servers : [], serversLoaded: true })
     } catch {
-      set({ servers: [] })
+      set({ servers: [], serversLoaded: true })
+    }
+  },
+
+  ensureConversationReady: async (projectId) => {
+    const projectKey = resolveProjectMcpKey(projectId)
+    const existing = conversationInitializationPromises.get(projectKey)
+    if (existing) {
+      await existing
+      return
+    }
+
+    const initialization = (async (): Promise<void> => {
+      let state = get()
+      if (!state.serversLoaded) {
+        await state.loadServers()
+        state = get()
+      }
+
+      const serverIds = resolveConfiguredActiveMcpIds({
+        projectId,
+        activeMcpIdsByProject: state.activeMcpIdsByProject,
+        servers: state.servers
+      })
+      if (serverIds.length === 0) return
+
+      // Runtime status may have changed outside the renderer (for example an
+      // extension config refresh disconnects a stale client). Refreshing here
+      // is metadata-only and does not start an MCP process.
+      await get().refreshAllServers()
+      await Promise.all(
+        serverIds.map(async (id) => {
+          if (get().serverStatuses[id] === 'connected') return
+          await get().connectServer(id)
+        })
+      )
+    })()
+
+    conversationInitializationPromises.set(projectKey, initialization)
+    try {
+      await initialization
+    } finally {
+      if (conversationInitializationPromises.get(projectKey) === initialization) {
+        conversationInitializationPromises.delete(projectKey)
+      }
     }
   },
 
@@ -153,35 +213,49 @@ export const useMcpStore = create<McpStore>((set, get) => ({
   },
 
   connectServer: async (id) => {
-    set((s) => ({
-      serverStatuses: { ...s.serverStatuses, [id]: 'connecting' },
-      serverErrors: { ...s.serverErrors, [id]: undefined }
-    }))
-    try {
-      const res = (await ipcClient.invoke(IPC.MCP_CONNECT, id)) as {
-        success: boolean
-        error?: string
-      }
-      if (!res.success) {
+    const existing = serverConnectionPromises.get(id)
+    if (existing) return await existing
+
+    const connection = (async (): Promise<string | undefined> => {
+      set((s) => ({
+        serverStatuses: { ...s.serverStatuses, [id]: 'connecting' },
+        serverErrors: { ...s.serverErrors, [id]: undefined }
+      }))
+      try {
+        const res = (await ipcClient.invoke(IPC.MCP_CONNECT, id)) as {
+          success: boolean
+          error?: string
+        }
+        if (!res.success) {
+          set((s) => ({
+            serverStatuses: { ...s.serverStatuses, [id]: 'error' },
+            serverErrors: { ...s.serverErrors, [id]: res.error }
+          }))
+          return res.error ?? 'Unknown error'
+        }
+        // Refresh info after connect
+        await get().refreshServerInfo(id)
+        set((s) => ({
+          serverStatuses: { ...s.serverStatuses, [id]: 'connected' }
+        }))
+        return undefined
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
         set((s) => ({
           serverStatuses: { ...s.serverStatuses, [id]: 'error' },
-          serverErrors: { ...s.serverErrors, [id]: res.error }
+          serverErrors: { ...s.serverErrors, [id]: msg }
         }))
-        return res.error ?? 'Unknown error'
+        return msg
       }
-      // Refresh info after connect
-      await get().refreshServerInfo(id)
-      set((s) => ({
-        serverStatuses: { ...s.serverStatuses, [id]: 'connected' }
-      }))
-      return undefined
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      set((s) => ({
-        serverStatuses: { ...s.serverStatuses, [id]: 'error' },
-        serverErrors: { ...s.serverErrors, [id]: msg }
-      }))
-      return msg
+    })()
+
+    serverConnectionPromises.set(id, connection)
+    try {
+      return await connection
+    } finally {
+      if (serverConnectionPromises.get(id) === connection) {
+        serverConnectionPromises.delete(id)
+      }
     }
   },
 

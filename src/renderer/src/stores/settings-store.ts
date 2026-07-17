@@ -429,6 +429,12 @@ interface SettingsStore {
   webSearchMaxResults: number
   webSearchTimeout: number
 
+  // CodeGraph Settings (opt-in standalone sidecar; default off)
+  codegraphEnabled: boolean
+  // Register the full 8-tool CodeGraph surface for agents (default: explore only,
+  // matching upstream's DEFAULT_MCP_TOOLS)
+  codegraphFullToolSurface: boolean
+
   // Network Settings
   systemProxyUrl: string
 
@@ -539,6 +545,10 @@ export const useSettingsStore = create<SettingsStore>()(
       webSearchMaxResults: 5,
       webSearchTimeout: 30000,
 
+      // CodeGraph Settings (opt-in standalone sidecar; default off)
+      codegraphEnabled: false,
+      codegraphFullToolSurface: false,
+
       // Network Settings
       systemProxyUrl: '',
 
@@ -633,6 +643,13 @@ export const useSettingsStore = create<SettingsStore>()(
         }
         if (state.systemProxyUrl === undefined) {
           state.systemProxyUrl = ''
+        }
+        // Add CodeGraph opt-in flag if missing (default off)
+        if (state.codegraphEnabled === undefined) {
+          state.codegraphEnabled = false
+        }
+        if (state.codegraphFullToolSurface === undefined) {
+          state.codegraphFullToolSurface = false
         }
         // Add skills market settings if missing
         if (state.skillsMarketProvider === undefined || state.skillsMarketProvider !== 'skillsmp') {
@@ -931,6 +948,9 @@ export const useSettingsStore = create<SettingsStore>()(
         webSearchEngine: state.webSearchEngine,
         webSearchMaxResults: state.webSearchMaxResults,
         webSearchTimeout: state.webSearchTimeout,
+        // CodeGraph Settings
+        codegraphEnabled: state.codegraphEnabled,
+        codegraphFullToolSurface: state.codegraphFullToolSurface,
         // Network Settings
         systemProxyUrl: state.systemProxyUrl,
         // Skills Market Settings

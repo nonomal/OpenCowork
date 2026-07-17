@@ -24,7 +24,7 @@ export interface NativeImageEditRequest {
 }
 
 interface GeneratedImage {
-  sourceType: 'base64' | 'url'
+  sourceType: 'base64' | 'url' | 'file'
   data: string
   mediaType: string
 }
@@ -50,7 +50,8 @@ function normalizeNativeImagesResult(result: unknown): GeneratedImage[] {
   return images
     .map((image): GeneratedImage | null => {
       if (!image || typeof image.data !== 'string' || !image.data.trim()) return null
-      const sourceType = image.sourceType === 'url' ? 'url' : 'base64'
+      const sourceType =
+        image.sourceType === 'url' ? 'url' : image.sourceType === 'file' ? 'file' : 'base64'
       return {
         sourceType,
         data: image.data,
@@ -100,14 +101,18 @@ async function persistGeneratedImage(image: GeneratedImage): Promise<ImageBlock>
     source:
       image.sourceType === 'base64'
         ? { type: 'base64', mediaType: image.mediaType, data: image.data }
-        : { type: 'url', url: image.data }
+        : image.sourceType === 'url'
+          ? { type: 'url', url: image.data }
+          : { type: 'base64', mediaType: image.mediaType, filePath: image.data }
   }
 
   try {
     const result = (await ipcClient.invoke(IPC.IMAGE_PERSIST_GENERATED, {
       ...(image.sourceType === 'base64'
         ? { data: image.data, mediaType: image.mediaType }
-        : { url: image.data })
+        : image.sourceType === 'url'
+          ? { url: image.data }
+          : { filePath: image.data, mediaType: image.mediaType })
     })) as {
       filePath?: string
       mediaType?: string

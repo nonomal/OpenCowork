@@ -7,7 +7,8 @@ import {
   Monitor,
   Settings,
   Sparkles,
-  Wand2
+  Wand2,
+  Waypoints
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
@@ -25,6 +26,7 @@ const navItems: { value: NavItem | 'ssh'; icon: React.ReactNode; labelKey: strin
   { value: 'souls', icon: <Sparkles className="size-5" />, labelKey: 'navRail.souls' },
   { value: 'sync', icon: <CloudSync className="size-5" />, labelKey: 'navRail.sync' },
   { value: 'draw', icon: <Image className="size-5" />, labelKey: 'navRail.draw' },
+  { value: 'codegraph', icon: <Waypoints className="size-5" />, labelKey: 'navRail.codegraph' },
   { value: 'ssh', icon: <Monitor className="size-5" />, labelKey: 'navRail.ssh' }
 ]
 
@@ -40,6 +42,7 @@ export function NavRail(): React.JSX.Element {
   const drawPageOpen = useUIStore((s) => s.drawPageOpen)
   const translatePageOpen = useUIStore((s) => s.translatePageOpen)
   const tasksPageOpen = useUIStore((s) => s.tasksPageOpen)
+  const codeGraphPageOpen = useUIStore((s) => s.codeGraphPageOpen)
 
   const handleNavClick = (item: NavItem | 'ssh'): void => {
     if (item === 'tasks') {
@@ -66,6 +69,10 @@ export function NavRail(): React.JSX.Element {
       useUIStore.getState().openDrawPage()
       return
     }
+    if (item === 'codegraph') {
+      useUIStore.getState().openCodeGraphPage()
+      return
+    }
     if (item === 'translate') {
       useUIStore.getState().openTranslatePage()
       return
@@ -84,6 +91,7 @@ export function NavRail(): React.JSX.Element {
     if (ui.drawPageOpen) ui.closeDrawPage()
     if (ui.translatePageOpen) ui.closeTranslatePage()
     if (ui.tasksPageOpen) ui.closeTasksPage()
+    if (ui.codeGraphPageOpen) ui.closeCodeGraphPage()
     if (activeNavItem === item && leftSidebarOpen) {
       ui.toggleLeftSidebar()
     } else {
@@ -112,6 +120,7 @@ export function NavRail(): React.JSX.Element {
                     (item.value === 'souls' && soulsPageOpen) ||
                     (item.value === 'sync' && syncPageOpen) ||
                     (item.value === 'draw' && drawPageOpen) ||
+                    (item.value === 'codegraph' && codeGraphPageOpen) ||
                     (item.value === 'translate' && translatePageOpen) ||
                     (![
                       'tasks',
@@ -120,6 +129,7 @@ export function NavRail(): React.JSX.Element {
                       'souls',
                       'sync',
                       'draw',
+                      'codegraph',
                       'translate',
                       'ssh'
                     ].includes(item.value) &&

@@ -408,6 +408,7 @@ export type ProviderType =
   | 'openai-responses'
   | 'openai-images'
   | 'seedance-video'
+  | 'xai-video'
   | 'gemini'
   | 'vertex-ai'
 export type ResponseSummary = 'auto' | 'concise' | 'detailed'
@@ -552,7 +553,7 @@ export interface AIModelConfig {
   enabled: boolean
   /** Optional protocol override for this model; falls back to provider.type when omitted */
   type?: ProviderType
-  /** How this model should be used (chat, speech, embedding, image) */
+  /** How this model should be used (chat, speech, embedding, image, video) */
   category?: ModelCategory
   /** Icon key for model-level icon (e.g. 'openai', 'claude', 'gemini', 'deepseek') */
   icon?: string

@@ -80,6 +80,7 @@
   },
   "terminal": {
     "reconnect": "Reconnect",
+    "reconnecting": "Connection lost, reconnecting…",
     "newTab": "New Terminal",
     "closeTab": "Close",
     "search": "Search",

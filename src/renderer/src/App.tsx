@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+﻿import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from './components/ui/sonner'
@@ -17,6 +17,7 @@ import { ErrorBoundary } from './components/error-boundary'
 import { useSettingsStore } from './stores/settings-store'
 import { initProviderStore, useProviderStore } from './stores/provider-store'
 import { initAppPluginStore, useAppPluginStore } from './stores/app-plugin-store'
+import { CODEGRAPH_PLUGIN_ID } from './lib/app-plugin/types'
 import { initExtensionStore } from './stores/extension-store'
 import { useAgentStore } from './stores/agent-store'
 import { useChatStore } from './stores/chat-store'
@@ -122,6 +123,12 @@ function syncWebSearchToolRegistration(enabled: boolean): void {
   void import('./lib/tools')
     .then(({ updateWebSearchToolRegistration }) => updateWebSearchToolRegistration(enabled))
     .catch((error) => console.error('[App] Failed to update web search tool:', error))
+}
+
+function syncCodeGraphToolRegistration(enabled: boolean): void {
+  void import('./lib/tools')
+    .then(({ updateCodeGraphToolRegistration }) => updateCodeGraphToolRegistration(enabled))
+    .catch((error) => console.error('[App] Failed to update codegraph tool:', error))
 }
 
 function syncAppPluginToolRegistration(): void {
@@ -428,6 +435,7 @@ function App(): React.JSX.Element {
     const offSessionUpdated = ipcClient.on(IPC.CHAT_SESSION_UPDATED, (data: unknown) => {
       const payload = data as {
         reason?: string
+        projectId?: string | null
         session?: {
           id: string
           title: string
@@ -491,9 +499,9 @@ function App(): React.JSX.Element {
     })
 
     const offSessionDeleted = ipcClient.on(IPC.CHAT_SESSION_DELETED, (data: unknown) => {
-      const payload = data as { sessionId?: string }
+      const payload = data as { sessionId?: string; projectId?: string | null }
       if (!payload?.sessionId) return
-      useChatStore.getState().removeSessionFromSync(payload.sessionId)
+      useChatStore.getState().removeSessionFromSync(payload.sessionId, payload.projectId)
     })
 
     return () => {
@@ -890,6 +898,20 @@ function App(): React.JSX.Element {
   useEffect(() => {
     syncWebSearchToolRegistration(webSearchEnabled)
   }, [webSearchEnabled])
+
+  // CodeGraph is an opt-in app plugin (default off). Drive its tool registration from
+  // the plugin's enabled state, and mirror it into settings.codegraphEnabled so the
+  // main process (readCodeGraphEnabled) + the codegraph/* worker routing stay in sync.
+  const codegraphPluginEnabled = useAppPluginStore((s) =>
+    Boolean(s.getPlugin(CODEGRAPH_PLUGIN_ID)?.enabled)
+  )
+  const codegraphFullToolSurface = useSettingsStore((s) => s.codegraphFullToolSurface)
+  useEffect(() => {
+    syncCodeGraphToolRegistration(codegraphPluginEnabled)
+    if (useSettingsStore.getState().codegraphEnabled !== codegraphPluginEnabled) {
+      useSettingsStore.getState().updateSettings({ codegraphEnabled: codegraphPluginEnabled })
+    }
+  }, [codegraphPluginEnabled, codegraphFullToolSurface])
 
   useEffect(() => {
     syncAppPluginToolRegistration()

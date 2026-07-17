@@ -1,7 +1,9 @@
 export const IMAGE_PLUGIN_ID = 'image' as const
 export const BROWSER_PLUGIN_ID = 'browser' as const
 export const DESKTOP_CONTROL_PLUGIN_ID = 'desktop-control' as const
+export const CODEGRAPH_PLUGIN_ID = 'codegraph' as const
 
+export const CODEGRAPH_EXPLORE_TOOL_NAME = 'codegraph_explore' as const
 export const IMAGE_GENERATE_TOOL_NAME = 'ImageGenerate' as const
 export const BROWSER_NAVIGATE_TOOL_NAME = 'BrowserNavigate' as const
 export const BROWSER_GET_CONTENT_TOOL_NAME = 'BrowserGetContent' as const
@@ -20,7 +22,9 @@ export type AppPluginId =
   | typeof IMAGE_PLUGIN_ID
   | typeof BROWSER_PLUGIN_ID
   | typeof DESKTOP_CONTROL_PLUGIN_ID
+  | typeof CODEGRAPH_PLUGIN_ID
 export type AppPluginToolName =
+  | typeof CODEGRAPH_EXPLORE_TOOL_NAME
   | typeof IMAGE_GENERATE_TOOL_NAME
   | typeof BROWSER_NAVIGATE_TOOL_NAME
   | typeof BROWSER_GET_CONTENT_TOOL_NAME
@@ -44,6 +48,9 @@ export interface AppPluginDescriptor {
   builtin: true
   toolNames: AppPluginToolName[]
   requiresModelConfig: boolean
+  // CodeGraph ships without its tree-sitter grammars; enabling it must download them
+  // first (or, in a dev build, use the locally-built worker + grammars — no download).
+  requiresDownload?: boolean
   hidden?: boolean
 }
 
@@ -90,5 +97,13 @@ export const APP_PLUGIN_DESCRIPTORS: AppPluginDescriptor[] = [
     ],
     requiresModelConfig: false,
     hidden: true
+  },
+  {
+    id: CODEGRAPH_PLUGIN_ID,
+    builtin: true,
+    toolNames: [CODEGRAPH_EXPLORE_TOOL_NAME],
+    requiresModelConfig: false,
+    // opt-in, disabled by default; needs a one-time grammar download (dev builds bypass it)
+    requiresDownload: false
   }
 ]

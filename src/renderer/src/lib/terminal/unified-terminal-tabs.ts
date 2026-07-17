@@ -22,7 +22,7 @@ export type UnifiedTerminalTab =
       title: string
       badge: 'SSH'
       icon: LucideIcon
-      status: 'connecting' | 'connected' | 'disconnected' | 'error'
+      status: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error'
       cwd: string
       shell: string
       meta: string

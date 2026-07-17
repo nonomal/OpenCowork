@@ -114,6 +114,20 @@ class AgentBridgeClient {
     )
   }
 
+  /**
+   * Cancel a specific sub-agent run (queued or running, including background/team
+   * children that agent:cancel cannot reach) by its Task tool_use id.
+   */
+  async cancelSubAgent(
+    toolUseId: string,
+    sessionId?: string
+  ): Promise<{ cancelled: boolean; count: number }> {
+    return (await this.request('agent/cancel-subagent', {
+      toolUseId,
+      sessionId
+    })) as { cancelled: boolean; count: number }
+  }
+
   async requestStopAgent(runId: string): Promise<{ stopped: boolean; runId?: string }> {
     return await invokeMessagePackBinary<{ stopped: boolean; runId?: string }>(
       toMessagePackChannel('agent:request-stop'),
