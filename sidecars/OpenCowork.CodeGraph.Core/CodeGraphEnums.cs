@@ -112,6 +112,10 @@ internal static class CodeGraphLanguage
     public const string VbNet = "vbnet";
     public const string Erlang = "erlang";
     public const string Terraform = "terraform";
+    // Grammar-expansion set (TreeSitter.DotNet 1.3.0 ships all four dylibs).
+    public const string Bash = "bash";
+    public const string Haskell = "haskell";
+    public const string Julia = "julia";
     public const string Unknown = "unknown";
 
     public static readonly string[] All =
@@ -119,7 +123,8 @@ internal static class CodeGraphLanguage
         TypeScript, JavaScript, Tsx, Jsx, ArkTs, Python, Go, Rust, Java, C, Cpp,
         CSharp, Razor, Php, Ruby, Swift, Kotlin, Dart, Svelte, Vue, Astro, Liquid,
         Pascal, Scala, Lua, Luau, ObjC, R, Solidity, Nix, Yaml, Twig, Xml,
-        Properties, Cfml, CfScript, CfQuery, Cobol, VbNet, Erlang, Terraform, Unknown
+        Properties, Cfml, CfScript, CfQuery, Cobol, VbNet, Erlang, Terraform,
+        Bash, Haskell, Julia, Unknown
     };
 }
 

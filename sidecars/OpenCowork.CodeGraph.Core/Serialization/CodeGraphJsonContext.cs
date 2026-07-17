@@ -15,6 +15,41 @@ using System.Text.Json.Serialization;
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(CodeGraphStatusResult))]
 [JsonSerializable(typeof(CodeGraphDbSmokeResult))]
+// M5 tool surface (reference/02 §4). Tool-shaped result (all 8 query RPCs), the two
+// structured index/sync results, the two streamed progress/complete events, the
+// instructions result, and the tools-list definition graph. Nested tool-def records
+// (InputSchema/Property/Annotations) + the Dictionary/array members each get an
+// explicit entry (source-gen resolves each JsonTypeInfo; no reflection fallback).
+[JsonSerializable(typeof(CodeGraphToolResult))]
+[JsonSerializable(typeof(CodeGraphIndexResponse))]
+[JsonSerializable(typeof(CodeGraphSyncResponse))]
+[JsonSerializable(typeof(CodeGraphInstructionsResult))]
+[JsonSerializable(typeof(CodeGraphIndexProgressEvent))]
+[JsonSerializable(typeof(CodeGraphIndexComplete))]
+[JsonSerializable(typeof(CodeGraphToolsListResult))]
+[JsonSerializable(typeof(CodeGraphProjectListResult))]
+[JsonSerializable(typeof(CodeGraphProjectInfo))]
+[JsonSerializable(typeof(CodeGraphRemoveProjectResult))]
+// Structured-read DTOs for the visualization UI (plan/codex-graph/07 §2). Each result
+// record + its nested element records get an entry (source-gen wires the IReadOnlyList
+// members once the element type is registered — the CodeGraphProjectListResult pattern).
+[JsonSerializable(typeof(CodeGraphIndexStatus))]
+[JsonSerializable(typeof(CodeGraphStatsResult))]
+[JsonSerializable(typeof(CodeGraphAnalyticsResult))]
+[JsonSerializable(typeof(CodeGraphPromptContextResult))]
+[JsonSerializable(typeof(CodeGraphCountBucket))]
+[JsonSerializable(typeof(CodeGraphSubgraphResult))]
+[JsonSerializable(typeof(CodeGraphNodeView))]
+[JsonSerializable(typeof(CodeGraphEdgeView))]
+[JsonSerializable(typeof(CodeGraphFilesResult))]
+[JsonSerializable(typeof(CodeGraphFileNode))]
+[JsonSerializable(typeof(CodeGraphNodeListResult))]
+[JsonSerializable(typeof(CodeGraphToolDefinition))]
+[JsonSerializable(typeof(CodeGraphToolDefinition[]))]
+[JsonSerializable(typeof(CodeGraphToolInputSchema))]
+[JsonSerializable(typeof(CodeGraphToolProperty))]
+[JsonSerializable(typeof(Dictionary<string, CodeGraphToolProperty>))]
+[JsonSerializable(typeof(CodeGraphToolAnnotations))]
 // List<string> underpins the reflection-free string[] JSON-column codec in
 // CodeGraphStore (nodes.decorators / nodes.type_parameters / unresolved_refs.
 // candidates). Required because JsonSerializerIsReflectionEnabledByDefault=false:

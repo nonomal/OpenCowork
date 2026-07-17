@@ -50,6 +50,37 @@ internal readonly struct CodeGraphTsPoint
     public readonly uint Column;
 }
 
+// 1:1 with C `TSInput` (0.25 layout — the `decode` slot was ADDED in 0.25, and this
+// binding requires 0.25+ anyway: it links ts_parser_parse_with_options, which first
+// shipped there). UTF-8 only; `Decode` stays null (built-in encodings ignore it).
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct CodeGraphTsInput
+{
+    public void* Payload;
+    // const char* (*read)(void *payload, uint32_t byte_index, TSPoint position, uint32_t *bytes_read)
+    public delegate* unmanaged<void*, uint, CodeGraphTsPoint, uint*, byte*> Read;
+    public int Encoding; // TSInputEncodingUTF8 == 0
+    public void* Decode; // DecodeFunction — null for built-in encodings
+}
+
+// 1:1 with C `TSParseState` — handed to the progress callback during a parse.
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct CodeGraphTsParseState
+{
+    public void* Payload;
+    public uint CurrentByteOffset;
+    public byte HasError; // C bool (1 byte)
+}
+
+// 1:1 with C `TSParseOptions`. The callback returns C bool (1 byte): nonzero
+// CANCELS the parse (ts_parser_parse_with_options then returns NULL).
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct CodeGraphTsParseOptions
+{
+    public void* Payload;
+    public delegate* unmanaged<CodeGraphTsParseState*, byte> ProgressCallback;
+}
+
 // tree-sitter ABI / lib-name constants. MinAbi/MaxAbi are PLACEHOLDER bounds —
 // pin them once the libtree-sitter version is fixed (reference/03 open question).
 // The hard gate remains ts_parser_set_language returning true (reference/03 §5.4).
@@ -89,8 +120,14 @@ internal static unsafe partial class CodeGraphTsBindings
     [LibraryImport(Lib)]
     internal static partial void ts_parser_reset(nint parser);
 
+    // Timeout-capable parse (0.25+). ts_parser_set_timeout_micros was DELETED from
+    // libtree-sitter 0.25 (this build does not export it) — the sanctioned guard is
+    // a progress callback on parse options that returns true to cancel; the parse
+    // then returns NULL. TSInput/TSParseOptions cross BY VALUE as blittable structs
+    // whose function pointers are [UnmanagedCallersOnly] statics (AOT-legal).
     [LibraryImport(Lib)]
-    internal static partial void ts_parser_set_timeout_micros(nint parser, ulong micros);
+    internal static partial nint ts_parser_parse_with_options(
+        nint parser, nint oldTree, CodeGraphTsInput input, CodeGraphTsParseOptions options);
 
     // ---- Tree ---------------------------------------------------------------
     [LibraryImport(Lib)]

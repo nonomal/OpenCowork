@@ -109,6 +109,39 @@ internal sealed partial class CodeGraphStore : IDisposable
     internal int ExecuteNonQuery(string sql, params CodeGraphSqlParam[] parameters) =>
         ExecuteNonQuery(null, sql, parameters);
 
+    // ------------------------------------------------------------------
+    // Fast-init FTS bulk mode (M7-W2, upstream fast-init)
+    // ------------------------------------------------------------------
+
+    private bool ftsBulkActive;
+
+    // Drop the FTS mirror triggers for a FRESH bulk index: per-row FTS maintenance is
+    // a large share of bulk insert cost, and the external-content index can be
+    // re-derived from `nodes` in one 'rebuild' pass at the end. ONLY correct when the
+    // nodes table starts empty under the caller (fresh DB) — an existing FTS index
+    // would go stale for rows written outside the bulk window.
+    internal void BeginFtsBulk()
+    {
+        ExecuteNonQuery("DROP TRIGGER IF EXISTS nodes_ai");
+        ExecuteNonQuery("DROP TRIGGER IF EXISTS nodes_ad");
+        ExecuteNonQuery("DROP TRIGGER IF EXISTS nodes_au");
+        ftsBulkActive = true;
+    }
+
+    // Rebuild nodes_fts from `nodes` once and re-arm the triggers (schema fold is
+    // idempotent). Safe to call unconditionally — a no-op unless BeginFtsBulk ran.
+    internal void EndFtsBulk()
+    {
+        if (!ftsBulkActive)
+        {
+            return;
+        }
+
+        ftsBulkActive = false;
+        ExecuteNonQuery("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')");
+        CodeGraphSchema.Initialize(connection);
+    }
+
     internal int ExecuteNonQuery(
         SqliteTransaction? transaction,
         string sql,

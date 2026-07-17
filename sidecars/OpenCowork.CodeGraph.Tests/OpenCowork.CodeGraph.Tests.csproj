@@ -35,4 +35,17 @@
   <ItemGroup>
     <ProjectReference Include="..\OpenCowork.CodeGraph.Core\OpenCowork.CodeGraph.Core.csproj" />
   </ItemGroup>
+
+  <!-- WS-B M2 real-parse tests: the TreeSitter.DotNet osx-arm64 native grammars must
+       sit beside the test bin so the Core [LibraryImport] binding resolves them
+       (libtree-sitter.dylib for the parser API + libtree-sitter-<lang>.dylib for each
+       grammar entry point). The glob copies all of them. Guarded on the dev-bootstrap
+       cache path so the build is a clean no-op on a host/RID without these dylibs — the
+       real-parse tests then self-skip and only the pure-function tier runs. -->
+  <ItemGroup Condition="Exists('$(HOME)/.nuget/packages/treesitter.dotnet/1.3.0/runtimes/osx-arm64/native')">
+    <None Include="$(HOME)/.nuget/packages/treesitter.dotnet/1.3.0/runtimes/osx-arm64/native/libtree-sitter*.dylib">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
 </Project>

@@ -343,6 +343,40 @@ internal sealed partial class CodeGraphStore
         return names;
     }
 
+    // Distinct symbol names defined in the given files (queries.ts getNodeNamesByFiles).
+    // The #1240 failed-ref retry feeds these into GetRetryableFailedReferences: when a
+    // synced file gains a symbol, refs in UNCHANGED files that failed against the old
+    // graph and carry a matching name_tail become retryable. Chunked IN-list; empty in
+    // → empty out.
+    public List<string> GetNodeNamesByFiles(IReadOnlyList<string> filePaths)
+    {
+        var names = new List<string>();
+        if (filePaths.Count == 0)
+        {
+            return names;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < filePaths.Count; i += ChunkSize)
+        {
+            var length = Math.Min(ChunkSize, filePaths.Count - i);
+            using var command = Connection.CreateCommand();
+            var placeholders = BindInList(command, filePaths, i, length);
+            command.CommandText = $"SELECT DISTINCT name FROM nodes WHERE file_path IN ({placeholders})";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var name = reader.GetString(0);
+                if (seen.Add(name))
+                {
+                    names.Add(name);
+                }
+            }
+        }
+
+        return names;
+    }
+
     // Streamed counterpart of GetAllNodeNames (queries.ts:1923) — fresh cursor.
     public IEnumerable<string> IterateNodeNames()
     {

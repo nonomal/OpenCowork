@@ -49,6 +49,107 @@ internal static partial class CodeGraphGrammarEntries
 
     [LibraryImport("tree-sitter-rust", EntryPoint = "tree_sitter_rust")]
     internal static partial nint Rust();
+
+    [LibraryImport("tree-sitter-c", EntryPoint = "tree_sitter_c")]
+    internal static partial nint C();
+
+    [LibraryImport("tree-sitter-cpp", EntryPoint = "tree_sitter_cpp")]
+    internal static partial nint Cpp();
+
+    // tree-sitter-php exports tree_sitter_php (the full HTML-aware grammar); the
+    // PHP-only variant tree_sitter_php_only is absent from this dylib.
+    [LibraryImport("tree-sitter-php", EntryPoint = "tree_sitter_php")]
+    internal static partial nint Php();
+
+    [LibraryImport("tree-sitter-ruby", EntryPoint = "tree_sitter_ruby")]
+    internal static partial nint Ruby();
+
+    [LibraryImport("tree-sitter-scala", EntryPoint = "tree_sitter_scala")]
+    internal static partial nint Scala();
+
+    // --- M7 niche languages (15). Each vendors its own grammar lib; the whole set
+    // compiles with every lib ABSENT and resolves per-grammar only once the lib is
+    // download-available for the RID (reference/03 §5.3). ---
+
+    [LibraryImport("tree-sitter-swift", EntryPoint = "tree_sitter_swift")]
+    internal static partial nint Swift();
+
+    [LibraryImport("tree-sitter-kotlin", EntryPoint = "tree_sitter_kotlin")]
+    internal static partial nint Kotlin();
+
+    [LibraryImport("tree-sitter-dart", EntryPoint = "tree_sitter_dart")]
+    internal static partial nint Dart();
+
+    [LibraryImport("tree-sitter-objc", EntryPoint = "tree_sitter_objc")]
+    internal static partial nint ObjC();
+
+    // ArkTS (HarmonyOS): a tsx-based fork vendored as tree-sitter-arkts.
+    [LibraryImport("tree-sitter-arkts", EntryPoint = "tree_sitter_arkts")]
+    internal static partial nint ArkTs();
+
+    [LibraryImport("tree-sitter-cobol", EntryPoint = "tree_sitter_cobol")]
+    internal static partial nint Cobol();
+
+    // VB.NET: vendored govindbanura/tree-sitter-vbnet.
+    [LibraryImport("tree-sitter-vbnet", EntryPoint = "tree_sitter_vbnet")] // TODO verify entrypoint vs the built grammar
+    internal static partial nint VbNet();
+
+    [LibraryImport("tree-sitter-erlang", EntryPoint = "tree_sitter_erlang")]
+    internal static partial nint Erlang();
+
+    [LibraryImport("tree-sitter-nix", EntryPoint = "tree_sitter_nix")]
+    internal static partial nint Nix();
+
+    // Terraform/OpenTofu uses the HCL grammar (tree-sitter-hcl exports tree_sitter_hcl).
+    [LibraryImport("tree-sitter-hcl", EntryPoint = "tree_sitter_hcl")] // TODO verify entrypoint vs the built grammar
+    internal static partial nint Terraform();
+
+    [LibraryImport("tree-sitter-solidity", EntryPoint = "tree_sitter_solidity")]
+    internal static partial nint Solidity();
+
+    // Vendored ABI-15 @tree-sitter-grammars/tree-sitter-lua (the Luau grammar
+    // reuses its node names).
+    [LibraryImport("tree-sitter-lua", EntryPoint = "tree_sitter_lua")]
+    internal static partial nint Lua();
+
+    [LibraryImport("tree-sitter-luau", EntryPoint = "tree_sitter_luau")]
+    internal static partial nint Luau();
+
+    [LibraryImport("tree-sitter-r", EntryPoint = "tree_sitter_r")]
+    internal static partial nint R();
+
+    // tree-sitter-cfml ships THREE grammars as separate dylibs: cfml (tag-based
+    // <cfcomponent>/HTML), cfscript (modern bare-script `component { … }`), and
+    // cfquery (`#hash#` call expressions inside a <cfquery> SQL body). The CFML
+    // embedded extractor dialect-switches between them (analysis/01 §R6).
+    [LibraryImport("tree-sitter-cfml", EntryPoint = "tree_sitter_cfml")]
+    internal static partial nint Cfml();
+
+    [LibraryImport("tree-sitter-cfscript", EntryPoint = "tree_sitter_cfscript")]
+    internal static partial nint CfScript();
+
+    [LibraryImport("tree-sitter-cfquery", EntryPoint = "tree_sitter_cfquery")]
+    internal static partial nint CfQuery();
+
+    [LibraryImport("tree-sitter-pascal", EntryPoint = "tree_sitter_pascal")]
+    internal static partial nint Pascal();
+
+    // --- Grammar-expansion set (TreeSitter.DotNet 1.3.0 ships all four dylibs).
+    // Bash/Haskell/Julia parse via their own grammar + config; Razor is handled by
+    // the bespoke embedded extractor (regex directives + @code C# delegation) and
+    // never actually resolves its grammar — the entry is wired for completeness. ---
+
+    [LibraryImport("tree-sitter-bash", EntryPoint = "tree_sitter_bash")]
+    internal static partial nint Bash();
+
+    [LibraryImport("tree-sitter-haskell", EntryPoint = "tree_sitter_haskell")]
+    internal static partial nint Haskell();
+
+    [LibraryImport("tree-sitter-julia", EntryPoint = "tree_sitter_julia")]
+    internal static partial nint Julia();
+
+    [LibraryImport("tree-sitter-razor", EntryPoint = "tree_sitter_razor")]
+    internal static partial nint Razor();
 }
 
 internal sealed class CodeGraphGrammarRegistry
@@ -124,6 +225,33 @@ internal sealed class CodeGraphGrammarRegistry
         CodeGraphLanguageIds.Java => CodeGraphGrammarEntries.Java(),
         CodeGraphLanguageIds.CSharp => CodeGraphGrammarEntries.CSharp(),
         CodeGraphLanguageIds.Rust => CodeGraphGrammarEntries.Rust(),
+        CodeGraphLanguageIds.C => CodeGraphGrammarEntries.C(),
+        CodeGraphLanguageIds.Cpp => CodeGraphGrammarEntries.Cpp(),
+        CodeGraphLanguageIds.Php => CodeGraphGrammarEntries.Php(),
+        CodeGraphLanguageIds.Ruby => CodeGraphGrammarEntries.Ruby(),
+        CodeGraphLanguageIds.Scala => CodeGraphGrammarEntries.Scala(),
+        CodeGraphLanguageIds.Swift => CodeGraphGrammarEntries.Swift(),
+        CodeGraphLanguageIds.Kotlin => CodeGraphGrammarEntries.Kotlin(),
+        CodeGraphLanguageIds.Dart => CodeGraphGrammarEntries.Dart(),
+        CodeGraphLanguageIds.ObjC => CodeGraphGrammarEntries.ObjC(),
+        CodeGraphLanguageIds.ArkTs => CodeGraphGrammarEntries.ArkTs(),
+        CodeGraphLanguageIds.Cobol => CodeGraphGrammarEntries.Cobol(),
+        CodeGraphLanguageIds.VbNet => CodeGraphGrammarEntries.VbNet(),
+        CodeGraphLanguageIds.Erlang => CodeGraphGrammarEntries.Erlang(),
+        CodeGraphLanguageIds.Nix => CodeGraphGrammarEntries.Nix(),
+        CodeGraphLanguageIds.Terraform => CodeGraphGrammarEntries.Terraform(),
+        CodeGraphLanguageIds.Solidity => CodeGraphGrammarEntries.Solidity(),
+        CodeGraphLanguageIds.Lua => CodeGraphGrammarEntries.Lua(),
+        CodeGraphLanguageIds.Luau => CodeGraphGrammarEntries.Luau(),
+        CodeGraphLanguageIds.R => CodeGraphGrammarEntries.R(),
+        CodeGraphLanguageIds.Cfml => CodeGraphGrammarEntries.Cfml(),
+        CodeGraphLanguageIds.CfScript => CodeGraphGrammarEntries.CfScript(),
+        CodeGraphLanguageIds.CfQuery => CodeGraphGrammarEntries.CfQuery(),
+        CodeGraphLanguageIds.Pascal => CodeGraphGrammarEntries.Pascal(),
+        CodeGraphLanguageIds.Bash => CodeGraphGrammarEntries.Bash(),
+        CodeGraphLanguageIds.Haskell => CodeGraphGrammarEntries.Haskell(),
+        CodeGraphLanguageIds.Julia => CodeGraphGrammarEntries.Julia(),
+        CodeGraphLanguageIds.Razor => CodeGraphGrammarEntries.Razor(),
         _ => 0
     };
 }
@@ -143,4 +271,31 @@ internal static class CodeGraphLanguageIds
     public const string Java = "java";
     public const string CSharp = "csharp";
     public const string Rust = "rust";
+    public const string C = "c";
+    public const string Cpp = "cpp";
+    public const string Php = "php";
+    public const string Ruby = "ruby";
+    public const string Scala = "scala";
+    public const string Swift = "swift";
+    public const string Kotlin = "kotlin";
+    public const string Dart = "dart";
+    public const string ObjC = "objc";
+    public const string ArkTs = "arkts";
+    public const string Cobol = "cobol";
+    public const string VbNet = "vbnet";
+    public const string Erlang = "erlang";
+    public const string Nix = "nix";
+    public const string Terraform = "terraform";
+    public const string Solidity = "solidity";
+    public const string Lua = "lua";
+    public const string Luau = "luau";
+    public const string R = "r";
+    public const string Cfml = "cfml";
+    public const string CfScript = "cfscript";
+    public const string CfQuery = "cfquery";
+    public const string Pascal = "pascal";
+    public const string Bash = "bash";
+    public const string Haskell = "haskell";
+    public const string Julia = "julia";
+    public const string Razor = "razor";
 }

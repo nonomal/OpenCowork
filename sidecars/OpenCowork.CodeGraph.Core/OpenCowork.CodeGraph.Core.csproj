@@ -24,6 +24,11 @@
     <InternalsVisibleTo Include="OpenCowork.CodeGraph.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Shared worker runtime/transport/host (IWorkerModule, WorkerResponse, dispatch,
+         msgpack IPC, SystemModule). CodeGraphModule implements IWorkerModule from here. -->
+    <ProjectReference Include="..\OpenCowork.Worker.Runtime\OpenCowork.Worker.Runtime.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
   </ItemGroup>
