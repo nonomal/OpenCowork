@@ -1,5 +1,8 @@
 import { app, session } from 'electron'
-import { getNativeWorker } from '../lib/native-worker'
+import { migrateLegacySubAgentHistorySettings } from '../db/sub-agent-history-dao'
+import { initializeDatabase } from '../db/database'
+import { getNativeWorker, stopCodeGraphWorker } from '../lib/native-worker'
+import { clearCodeGraphSyncQueues } from '../lib/codegraph-sync'
 import { registerMessagePackHandler } from './messagepack-handler'
 import {
   sanitizePermissionPolicy,
@@ -14,10 +17,16 @@ type MutationResult = {
   error?: string | null
 }
 
+const PERSISTED_SETTINGS_STORE_KEY = 'opencowork-settings'
+
 let settingsCache: Record<string, unknown> | null = null
 let settingsHydrated = false
 let hydratePromise: Promise<Record<string, unknown>> | null = null
 let pendingWrite: Promise<unknown> | null = null
+let agentHistoryMigrationPromise: Promise<void> | null = null
+
+// Tracks the last-observed CodeGraph flag so we act only on the true→false edge.
+let lastKnownCodeGraphEnabled = false
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -37,7 +46,8 @@ export async function initializeSettingsCache(): Promise<Record<string, unknown>
 export async function reloadSettingsCache(): Promise<Record<string, unknown>> {
   if (hydratePromise) return hydratePromise
 
-  hydratePromise = nativeSettingsRequest<Record<string, unknown>>('settings/read')
+  hydratePromise = ensureAgentHistoryMigrated()
+    .then(() => nativeSettingsRequest<Record<string, unknown>>('settings/read'))
     .then((settings) => {
       settingsCache = isPlainRecord(settings) ? settings : {}
       settingsHydrated = true
@@ -53,6 +63,27 @@ export async function reloadSettingsCache(): Promise<Record<string, unknown>> {
     })
 
   return await hydratePromise
+}
+
+async function ensureAgentHistoryMigrated(): Promise<void> {
+  agentHistoryMigrationPromise ??= initializeDatabase()
+    .then(() => migrateLegacySubAgentHistorySettings())
+    .then((result) => {
+      if (!result.success) {
+        throw new Error(result.error || 'Sub-agent history migration failed')
+      }
+      if (result.migrated) {
+        console.log('[Settings] Migrated sub-agent history to SQLite', {
+          imported: result.imported
+        })
+      }
+    })
+    .catch((error) => {
+      agentHistoryMigrationPromise = null
+      console.warn('[Settings] Failed to migrate sub-agent history:', error)
+    })
+
+  await agentHistoryMigrationPromise
 }
 
 // Synchronous callers read the in-memory snapshot. Before Electron is ready, keep this accessor
@@ -86,7 +117,9 @@ export function decodePersistedStoreState<T>(raw: unknown): T | null {
 
 export function readPersistedSettingsState(): Record<string, unknown> {
   const root = readSettings()
-  return decodePersistedStoreState<Record<string, unknown>>(root['opencowork-settings']) ?? {}
+  return (
+    decodePersistedStoreState<Record<string, unknown>>(root[PERSISTED_SETTINGS_STORE_KEY]) ?? {}
+  )
 }
 
 export function readShellEnvironmentVariablesText(): string {
@@ -94,6 +127,36 @@ export function readShellEnvironmentVariablesText(): string {
   return typeof persistedSettings.shellEnvironmentVariablesText === 'string'
     ? persistedSettings.shellEnvironmentVariablesText
     : ''
+}
+
+/**
+ * Opt-in CodeGraph feature flag (default false). The renderer persists it as
+ * `codegraphEnabled` inside the `opencowork-settings` store blob; the sidecar
+ * router reads it here to gate `codegraph/*` requests to the CodeGraph worker.
+ */
+export function readCodeGraphEnabled(): boolean {
+  return readPersistedSettingsState().codegraphEnabled === true
+}
+
+/**
+ * React to the CodeGraph toggle persisted by the renderer store. CodeGraph is
+ * lazy — enabling never eager-starts the worker here (the sidecar router spawns
+ * it on the first `codegraph/*` request). Disabling stops the worker so its
+ * process and native grammars are released. Acts only on the true→false edge.
+ */
+function syncCodeGraphWorkerFromSettings(): void {
+  const enabled = readCodeGraphEnabled()
+  if (lastKnownCodeGraphEnabled && !enabled) {
+    clearCodeGraphSyncQueues()
+    void stopCodeGraphWorker().catch((error) => {
+      console.warn(
+        `[Settings] Failed to stop CodeGraph worker on disable: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+    })
+  }
+  lastKnownCodeGraphEnabled = enabled
 }
 
 /** Permission whitelist snapshot for run requests built in the main process (cron, fallback). */
@@ -162,6 +225,12 @@ export function registerSettingsHandlers(): void {
     if (args.key === 'systemProxyUrl') {
       await applySystemProxy(normalizeProxyUrl(args.value))
       return { success: true }
+    }
+
+    // The renderer persists its whole settings store under one blob key; observe
+    // it to release the CodeGraph worker when the user disables the feature.
+    if (args.key === PERSISTED_SETTINGS_STORE_KEY) {
+      syncCodeGraphWorkerFromSettings()
     }
 
     return { success: true }

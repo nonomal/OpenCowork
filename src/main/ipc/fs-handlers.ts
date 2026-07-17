@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'url'
 import { recordLocalTextWriteChange } from './agent-change-handlers'
 import { safeSendMessagePackToWindow } from '../window-ipc'
 import { getNativeWorker } from '../lib/native-worker'
+import { notifyCodeGraphFileChanged } from '../lib/codegraph-sync'
 import {
   decodeMessagePackPayload,
   encodeMessagePackPayload,
@@ -140,7 +141,10 @@ function isMissingFileErrorMessage(error: string): boolean {
     /No such file/i.test(error) ||
     /Could not find (?:file|a part of the path)/i.test(error) ||
     /(?:system )?cannot find (?:the )?(?:file|path)(?: specified)?/i.test(error) ||
-    /file not found/i.test(error)
+    /file not found/i.test(error) ||
+    // .NET AOT builds with trimmed resource strings surface raw resource keys
+    // (e.g. "IO_FileNotFound_FileName, /path") instead of readable messages.
+    /\bIO_(?:FileNotFound|PathNotFound)/.test(error)
   )
 }
 
@@ -473,6 +477,8 @@ function scheduleDirectoryWatcherSync(entry: WatchedDirectoryEntry): void {
 function scheduleDirectoryChanged(entry: WatchedDirectoryEntry, changedPath: string | null): void {
   if (entry.closed) return
   if (shouldIgnoreWatchedChange(changedPath, entry.rootPath)) return
+
+  notifyCodeGraphFileChanged(entry.rootPath, changedPath ?? undefined)
 
   if (entry.timer) clearTimeout(entry.timer)
   entry.timer = setTimeout(() => {
@@ -929,22 +935,51 @@ export function registerFsHandlers(): void {
     }
   )
 
-  registerMessagePackHandler<
-    { defaultPath?: string; filters?: Electron.FileFilter[] } | undefined
-  >('fs:select-save-file', async (args) => {
-    const win = BrowserWindow.getFocusedWindow()
-    if (!win) return { canceled: true }
-    const result = await dialog.showSaveDialog(win, {
-      defaultPath: args?.defaultPath,
-      filters: args?.filters
-    })
-    if (result.canceled || !result.filePath) return { canceled: true }
-    return { path: result.filePath }
+  registerMessagePackHandler<{ defaultPath?: string; filters?: Electron.FileFilter[] } | undefined>(
+    'fs:select-save-file',
+    async (args) => {
+      const win = BrowserWindow.getFocusedWindow()
+      if (!win) return { canceled: true }
+      const result = await dialog.showSaveDialog(win, {
+        defaultPath: args?.defaultPath,
+        filters: args?.filters
+      })
+      if (result.canceled || !result.filePath) return { canceled: true }
+      return { path: result.filePath }
+    }
+  )
+
+  // Save-as for an existing local file. Copies inside the main process so the
+  // bytes never cross IPC — no size limit, unlike fs:read-file-binary.
+  registerMessagePackHandler<{
+    sourcePath: string
+    defaultName?: string
+    filters?: Electron.FileFilter[]
+  }>('fs:download-file-copy', async (args) => {
+    try {
+      const sourcePath = path.resolve(args.sourcePath)
+      const stat = await fs.promises.stat(sourcePath)
+      if (!stat.isFile()) return { error: `Not a file: ${sourcePath}` }
+      const win = BrowserWindow.getFocusedWindow()
+      if (!win) return { canceled: true }
+      const result = await dialog.showSaveDialog(win, {
+        defaultPath: args.defaultName?.trim() || path.basename(sourcePath),
+        filters: args.filters
+      })
+      if (result.canceled || !result.filePath) return { canceled: true }
+      await fs.promises.copyFile(sourcePath, result.filePath)
+      return { success: true, filePath: result.filePath }
+    } catch (err) {
+      return { error: String(err) }
+    }
   })
 
   // Binary file read/write returns or accepts base64; use MessagePack from renderer for large data.
   registerFsMessagePackHandler<FsReadFileBinaryArgs>('fs:read-file-binary', handleFsReadFileBinary)
-  registerFsMessagePackHandler<FsWriteFileBinaryArgs>('fs:write-file-binary', handleFsWriteFileBinary)
+  registerFsMessagePackHandler<FsWriteFileBinaryArgs>(
+    'fs:write-file-binary',
+    handleFsWriteFileBinary
+  )
 
   // File watching
   const fileWatchers = new Map<string, WatchedFileEntry>()

@@ -8,6 +8,9 @@ import * as path from 'path'
 import { decode, encode } from '@msgpack/msgpack'
 import { readNativeMessagePackRoute, type NativeMessagePackRoute } from './messagepack-route-reader'
 import { writeCrashLog } from '../crash-logger'
+// Resolved lazily at spawn time (function-level cycle — safe): tells the CodeGraph
+// worker where to load its downloaded/dev tree-sitter grammars from.
+import { resolveCodeGraphGrammarsDir } from './codegraph-assets'
 
 const NATIVE_WORKER_STDERR_TAIL_LINES = 40
 const NATIVE_WORKER_STDERR_MAX_LINE = 2000
@@ -29,11 +32,70 @@ const REQUIRED_NATIVE_WORKER_METHODS = [
   'settings/get',
   'settings/set',
   'settings/delete',
+  'db/sub-agent-history-index',
+  'db/sub-agent-history-list',
   'souls/builtin-list',
   'sync/files-capture',
   'sync/files-apply',
   'sync/files-delete'
 ]
+
+// Per-worker configuration. The two supervised sidecars (the eager main worker
+// and the opt-in CodeGraph worker) share all transport/lifecycle machinery and
+// differ only in the values below. NATIVE_CONFIG reproduces the historical
+// hard-coded main-worker behavior exactly, so getNativeWorker() is byte-identical
+// to the pre-parameterization manager.
+export interface NativeWorkerConfig {
+  /** Stable id used in diagnostics; distinguishes the two worker instances. */
+  id: 'native' | 'codegraph'
+  /** Resolves the worker executable path (name + readiness gate) or null when absent. */
+  resolveBinaryPath: () => string | null
+  /** Error thrown by start() when the binary cannot be resolved. */
+  missingBinaryMessage: string
+  /** Boot gate: routes that must exist after connect. Empty ⇒ never gate boot. */
+  requiredMethods: string[]
+  /** Heartbeat cadence — CodeGraph runs looser because it is isolated + compute-heavy. */
+  heartbeatIntervalMs: number
+  heartbeatTimeoutMs: number
+  heartbeatMaxMisses: number
+  /** Creates the per-spawn IPC endpoint (unix socket path / Windows named pipe). */
+  createEndpoint: () => string
+  /** Builds the child-process environment. */
+  createEnv: () => NodeJS.ProcessEnv
+  /** Removes orphaned endpoint files left by previous, now-dead main processes. */
+  sweepStaleEndpoints: () => void
+}
+
+const NATIVE_CONFIG: NativeWorkerConfig = {
+  id: 'native',
+  resolveBinaryPath: resolveNativeWorkerPath,
+  missingBinaryMessage:
+    'Native worker is missing. Run `npm run native:publish` before starting OpenCowork.',
+  requiredMethods: REQUIRED_NATIVE_WORKER_METHODS,
+  heartbeatIntervalMs: NATIVE_WORKER_HEARTBEAT_INTERVAL_MS,
+  heartbeatTimeoutMs: NATIVE_WORKER_HEARTBEAT_TIMEOUT_MS,
+  heartbeatMaxMisses: NATIVE_WORKER_HEARTBEAT_MAX_MISSES,
+  createEndpoint: createNativeWorkerEndpoint,
+  createEnv: createNativeWorkerEnv,
+  sweepStaleEndpoints: sweepStaleNativeWorkerEndpoints
+}
+
+// The opt-in CodeGraph sidecar: never gates boot (requiredMethods empty), runs a
+// looser heartbeat so a heavy index cannot trip a strict ping, and uses a distinct
+// endpoint prefix + sweep so it never collides with the main worker's sockets.
+const CODEGRAPH_CONFIG: NativeWorkerConfig = {
+  id: 'codegraph',
+  resolveBinaryPath: resolveCodeGraphWorkerPath,
+  missingBinaryMessage:
+    'CodeGraph worker is missing. Run `npm run codegraph:publish` before enabling CodeGraph.',
+  requiredMethods: [],
+  heartbeatIntervalMs: 30_000,
+  heartbeatTimeoutMs: 10_000,
+  heartbeatMaxMisses: 3,
+  createEndpoint: createCodeGraphWorkerEndpoint,
+  createEnv: createCodeGraphWorkerEnv,
+  sweepStaleEndpoints: sweepStaleCodeGraphWorkerEndpoints
+}
 
 let nativeWorkerStartupBarrier: Promise<void> | null = null
 let nativeWorkerShutdownLatched = false
@@ -76,6 +138,7 @@ type PendingRequest = {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
   timer: ReturnType<typeof setTimeout>
+  removeAbortListener?: () => void
 }
 
 type NativeWorkerResponse = {
@@ -120,7 +183,7 @@ class NativeWorkerManager {
   private lifecycle = new EventEmitter()
   private stderrTail: string[] = []
 
-  constructor() {
+  constructor(private config: NativeWorkerConfig = NATIVE_CONFIG) {
     // powerMonitor is only usable once the app is ready; the manager may be
     // constructed earlier during module init.
     void app.whenReady().then(() => this.installPowerMonitor())
@@ -196,7 +259,8 @@ class NativeWorkerManager {
   async request<T = unknown>(
     method: string,
     params?: unknown,
-    timeoutMs?: number | null
+    timeoutMs?: number | null,
+    signal?: AbortSignal
   ): Promise<T> {
     // Renderer requests arrive over MessagePack, which encodes an omitted
     // timeout as nil -> null, bypassing a default parameter; setTimeout(cb, null)
@@ -205,7 +269,14 @@ class NativeWorkerManager {
       typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
         ? timeoutMs
         : DEFAULT_NATIVE_WORKER_TIMEOUT_MS
+    if (signal?.aborted) {
+      throw createAbortError(method)
+    }
+
     await this.ensureStarted()
+    if (signal?.aborted) {
+      throw createAbortError(method)
+    }
     const socket = this.socket
     if (!socket || !this.isRunning) {
       throw new Error('Native worker is not running')
@@ -227,7 +298,11 @@ class NativeWorkerManager {
 
     return await new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
+        const pending = this.pending.get(id)
+        if (!pending) return
         this.pending.delete(id)
+        pending.removeAbortListener?.()
+        this.sendCancelRequest(id)
         console.warn('[NativeWorker] request timeout', {
           id,
           method,
@@ -235,17 +310,31 @@ class NativeWorkerManager {
           payloadBytes,
           pending: this.pending.size
         })
-        reject(new Error(`Native worker request timed out: ${method}`))
+        pending.reject(new Error(`Native worker request timed out: ${method}`))
       }, effectiveTimeoutMs)
 
-      this.pending.set(id, {
+      const pending: PendingRequest = {
         method,
         startedAt,
         payloadBytes,
         resolve: (value) => resolve(value as T),
         reject,
         timer
-      })
+      }
+
+      if (signal) {
+        const onAbort = (): void => {
+          if (!this.pending.delete(id)) return
+          clearTimeout(timer)
+          pending.removeAbortListener?.()
+          this.sendCancelRequest(id)
+          pending.reject(createAbortError(method))
+        }
+        signal.addEventListener('abort', onAbort, { once: true })
+        pending.removeAbortListener = () => signal.removeEventListener('abort', onAbort)
+      }
+
+      this.pending.set(id, pending)
 
       try {
         socket.write(frame, (error) => {
@@ -268,17 +357,15 @@ class NativeWorkerManager {
   }
 
   private async start(): Promise<void> {
-    const workerPath = resolveNativeWorkerPath()
+    const workerPath = this.config.resolveBinaryPath()
     if (!workerPath) {
-      throw new Error(
-        'Native worker is missing. Run `npm run native:publish` before starting OpenCowork.'
-      )
+      throw new Error(this.config.missingBinaryMessage)
     }
 
-    sweepStaleNativeWorkerEndpoints()
-    const endpoint = createNativeWorkerEndpoint()
+    this.config.sweepStaleEndpoints()
+    const endpoint = this.config.createEndpoint()
     cleanupNativeWorkerEndpoint(endpoint)
-    const childEnv = createNativeWorkerEnv()
+    const childEnv = this.config.createEnv()
     console.log('[NativeWorker] starting', {
       workerPath,
       transport: process.platform === 'win32' ? 'named-pipe' : 'unix-domain-socket',
@@ -381,6 +468,10 @@ class NativeWorkerManager {
   }
 
   private async verifyRequiredMethods(workerPath: string): Promise<void> {
+    // An empty gate (the CodeGraph worker) never blocks boot: skip the route
+    // probe entirely so a lazy sidecar starts on first use without a boot check.
+    if (this.config.requiredMethods.length === 0) return
+
     let routes: NativeWorkerRoutesResult
     try {
       routes = await this.request<NativeWorkerRoutesResult>('worker/routes', {}, 10_000)
@@ -399,7 +490,7 @@ class NativeWorkerManager {
         ? routes.methods.filter((method): method is string => typeof method === 'string')
         : []
     )
-    const missing = REQUIRED_NATIVE_WORKER_METHODS.filter((method) => !methods.has(method))
+    const missing = this.config.requiredMethods.filter((method) => !methods.has(method))
     if (missing.length > 0) {
       throw new Error(
         [
@@ -526,6 +617,7 @@ class NativeWorkerManager {
     if (!pending) return
 
     clearTimeout(pending.timer)
+    pending.removeAbortListener?.()
     this.pending.delete(response.id)
     const elapsedMs = Date.now() - pending.startedAt
     if (typeof response.error === 'string' && response.error) {
@@ -556,6 +648,7 @@ class NativeWorkerManager {
     const pending = this.pending.get(id)
     if (!pending) return
     clearTimeout(pending.timer)
+    pending.removeAbortListener?.()
     this.pending.delete(id)
     console.warn('[NativeWorker] request write failed', {
       id,
@@ -617,6 +710,7 @@ class NativeWorkerManager {
 
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer)
+      pending.removeAbortListener?.()
       pending.reject(error)
     }
     this.pending.clear()
@@ -676,7 +770,7 @@ class NativeWorkerManager {
     this.stopHeartbeat()
     this.heartbeatTimer = setInterval(() => {
       void this.runHeartbeat()
-    }, NATIVE_WORKER_HEARTBEAT_INTERVAL_MS)
+    }, this.config.heartbeatIntervalMs)
     this.heartbeatTimer.unref?.()
   }
 
@@ -698,7 +792,7 @@ class NativeWorkerManager {
     }
 
     try {
-      await this.request('worker/ping', {}, NATIVE_WORKER_HEARTBEAT_TIMEOUT_MS)
+      await this.request('worker/ping', {}, this.config.heartbeatTimeoutMs)
       this.heartbeatMisses = 0
     } catch (error) {
       if (!this.isRunning || this.stopping || this.autoRestartDisabled) return
@@ -707,7 +801,7 @@ class NativeWorkerManager {
         misses: this.heartbeatMisses,
         error: asError(error).message
       })
-      if (this.heartbeatMisses >= NATIVE_WORKER_HEARTBEAT_MAX_MISSES) {
+      if (this.heartbeatMisses >= this.config.heartbeatMaxMisses) {
         this.closeWorker(new Error('Native worker heartbeat failed'))
       }
     }
@@ -745,7 +839,7 @@ class NativeWorkerManager {
     this.startHeartbeat()
     if (this.pending.size > 0) return
     try {
-      await this.request('worker/ping', {}, NATIVE_WORKER_HEARTBEAT_TIMEOUT_MS)
+      await this.request('worker/ping', {}, this.config.heartbeatTimeoutMs)
       logNativeWorkerDebug('post-resume health check ok', {})
     } catch (error) {
       if (!this.isRunning || this.stopping || this.autoRestartDisabled) return
@@ -770,17 +864,64 @@ class NativeWorkerManager {
       this.stderrTail.splice(0, this.stderrTail.length - NATIVE_WORKER_STDERR_TAIL_LINES)
     }
   }
+
+  private sendCancelRequest(requestId: number): void {
+    const socket = this.socket
+    if (!socket || socket.destroyed || !this.isRunning) return
+
+    try {
+      const payload = encode({ method: 'worker/cancel', params: { requestId } })
+      socket.write(createFrame(payload), (error) => {
+        if (error) {
+          logNativeWorkerDebug('cancel frame write failed', {
+            requestId,
+            message: error.message
+          })
+        }
+      })
+    } catch (error) {
+      logNativeWorkerDebug('cancel frame encode failed', {
+        requestId,
+        message: asError(error).message
+      })
+    }
+  }
 }
 
 let nativeWorker: NativeWorkerManager | null = null
 
 export function getNativeWorker(): NativeWorkerManager {
-  nativeWorker ??= new NativeWorkerManager()
+  nativeWorker ??= new NativeWorkerManager(NATIVE_CONFIG)
   return nativeWorker
 }
 
 export async function stopNativeWorker(): Promise<void> {
   await nativeWorker?.stop()
+}
+
+// The opt-in CodeGraph sidecar mirrors the main-worker singleton but is LAZY:
+// this getter constructs the manager, yet nothing calls ensureStarted() at boot.
+// The first `codegraph/*` request (routed only when the feature is enabled) is
+// what spawns the process; disabling the feature calls stopCodeGraphWorker().
+let codeGraphWorker: NativeWorkerManager | null = null
+
+export function getCodeGraphWorker(): NativeWorkerManager {
+  codeGraphWorker ??= new NativeWorkerManager(CODEGRAPH_CONFIG)
+  return codeGraphWorker
+}
+
+export async function stopCodeGraphWorker(): Promise<void> {
+  await codeGraphWorker?.stop()
+}
+
+// Status probe for the plugin settings UI — true only after a lazy spawn.
+export function isCodeGraphWorkerRunning(): boolean {
+  return codeGraphWorker?.isRunning === true
+}
+
+// Main-worker status probe (CodeGraph is source-merged into it).
+export function isNativeWorkerRunning(): boolean {
+  return nativeWorker?.isRunning === true
 }
 
 function createFrame(payload: Uint8Array): Buffer {
@@ -795,6 +936,12 @@ function createFrame(payload: Uint8Array): Buffer {
     FRAME_HEADER_BYTES
   )
   return frame
+}
+
+function createAbortError(method: string): Error {
+  const error = new Error(`Native worker request aborted: ${method}`)
+  error.name = 'AbortError'
+  return error
 }
 
 async function connectNativeWorker(endpoint: string, child: ChildProcess): Promise<net.Socket> {
@@ -919,6 +1066,12 @@ function createNativeWorkerEnv(): NodeJS.ProcessEnv {
   }
   env.OPEN_COWORK_APP_VERSION = app.getVersion().trim()
   env.OPEN_COWORK_NATIVE_SLOW_MS ??= String(getNativeWorkerSlowRequestMs())
+  // CodeGraph is source-merged into this worker: point its tree-sitter loads at
+  // the grammar dir (bundled beside the binary, dev NuGet, or explicit override).
+  const grammarsDir = resolveCodeGraphGrammarsDir()
+  if (grammarsDir) {
+    env.OPEN_COWORK_CODEGRAPH_GRAMMARS_DIR ??= grammarsDir
+  }
   return env
 }
 
@@ -996,7 +1149,7 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-function resolveNativeWorkerPath(): string | null {
+export function resolveNativeWorkerPath(): string | null {
   const overridePath = process.env.OPEN_COWORK_NATIVE_WORKER_PATH?.trim()
   if (overridePath && fs.existsSync(overridePath)) {
     return overridePath
@@ -1004,15 +1157,6 @@ function resolveNativeWorkerPath(): string | null {
 
   const executableName =
     process.platform === 'win32' ? 'OpenCowork.Native.Worker.exe' : 'OpenCowork.Native.Worker'
-  const debugWorkerPath = path.join(
-    process.cwd(),
-    'sidecars',
-    'OpenCowork.Native.Worker',
-    'bin',
-    'Debug',
-    'net10.0',
-    executableName
-  )
   const releaseNativePath = path.join(
     process.cwd(),
     'sidecars',
@@ -1048,7 +1192,7 @@ function resolveNativeWorkerPath(): string | null {
           executableName
         )
       ]
-    : [debugWorkerPath, resourceWorkerPath, releaseNativePath, releasePublishPath]
+    : [resourceWorkerPath, releaseNativePath, releasePublishPath]
 
   return app.isPackaged
     ? (candidates.find(isNativeWorkerCandidateReady) ?? null)
@@ -1102,4 +1246,139 @@ function getSqliteNativeLibraryNames(): string[] {
   if (process.platform === 'darwin') return ['libe_sqlite3.dylib', 'e_sqlite3.dylib']
   if (process.platform === 'linux') return ['libe_sqlite3.so', 'e_sqlite3.so']
   return ['libe_sqlite3']
+}
+
+// --- CodeGraph sidecar helpers ------------------------------------------------
+// These mirror the main-worker resolvers but target the OpenCowork.CodeGraph.Worker
+// binary and a distinct endpoint namespace. They are only reached through
+// getCodeGraphWorker()/CODEGRAPH_CONFIG, so the main-worker path above is untouched.
+
+export function resolveCodeGraphWorkerPath(): string | null {
+  const overridePath = process.env.OPEN_COWORK_CODEGRAPH_WORKER_PATH?.trim()
+  if (overridePath && fs.existsSync(overridePath)) {
+    return overridePath
+  }
+
+  const executableName =
+    process.platform === 'win32' ? 'OpenCowork.CodeGraph.Worker.exe' : 'OpenCowork.CodeGraph.Worker'
+  const releaseNativePath = path.join(
+    process.cwd(),
+    'sidecars',
+    'OpenCowork.CodeGraph.Worker',
+    'bin',
+    'Release',
+    'net10.0',
+    getCurrentRid(),
+    'native',
+    executableName
+  )
+  const releasePublishPath = path.join(
+    process.cwd(),
+    'sidecars',
+    'OpenCowork.CodeGraph.Worker',
+    'bin',
+    'Release',
+    'net10.0',
+    getCurrentRid(),
+    'publish',
+    executableName
+  )
+  const resourceWorkerPath = path.join(
+    process.cwd(),
+    'resources',
+    'codegraph-worker',
+    executableName
+  )
+  const candidates = app.isPackaged
+    ? [
+        path.join(process.resourcesPath, 'codegraph-worker', executableName),
+        path.join(process.resourcesPath, 'resources', 'codegraph-worker', executableName),
+        path.join(
+          process.resourcesPath,
+          'app.asar.unpacked',
+          'resources',
+          'codegraph-worker',
+          executableName
+        )
+      ]
+    : [resourceWorkerPath, releaseNativePath, releasePublishPath]
+
+  return app.isPackaged
+    ? (candidates.find(isCodeGraphWorkerCandidateReady) ?? null)
+    : findNewestCodeGraphWorkerCandidate(candidates)
+}
+
+// Language grammars are downloaded on enable, but SQLite is a hard startup
+// dependency just like it is for the main worker. Never select a partially
+// published executable that is missing its RID-specific SQLite library.
+function isCodeGraphWorkerCandidateReady(candidate: string): boolean {
+  return isNativeWorkerCandidateReady(candidate)
+}
+
+function findNewestCodeGraphWorkerCandidate(candidates: string[]): string | null {
+  const ready = candidates
+    .filter(isCodeGraphWorkerCandidateReady)
+    .map((candidate) => ({
+      candidate,
+      mtimeMs: fs.statSync(candidate).mtimeMs
+    }))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+
+  return ready[0]?.candidate ?? null
+}
+
+function createCodeGraphWorkerEndpoint(): string {
+  const id = `${process.pid}-${Date.now().toString(36)}-${randomUUID()}`
+  if (process.platform === 'win32') {
+    return `\\\\.\\pipe\\open-cowork-codegraph-${id}`
+  }
+
+  return path.join('/tmp', `open-cowork-codegraph-${id}.sock`)
+}
+
+function createCodeGraphWorkerEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  if (readBooleanEnv('OPEN_COWORK_NATIVE_DEBUG') === null && !app.isPackaged) {
+    env.OPEN_COWORK_NATIVE_DEBUG = '1'
+  }
+  env.OPEN_COWORK_APP_VERSION = app.getVersion().trim()
+  env.OPEN_COWORK_NATIVE_SLOW_MS ??= String(getNativeWorkerSlowRequestMs())
+  // Point the worker at the resolved grammar dir (download cache, dev NuGet, or
+  // an explicit override) so its [LibraryImport] tree-sitter loads resolve.
+  const grammarsDir = resolveCodeGraphGrammarsDir()
+  if (grammarsDir) {
+    env.OPEN_COWORK_CODEGRAPH_GRAMMARS_DIR ??= grammarsDir
+  }
+  return env
+}
+
+let staleCodeGraphEndpointSweepDone = false
+
+// Parallels sweepStaleNativeWorkerEndpoints but matches the codegraph-prefixed
+// socket names, with its own one-shot guard so each namespace is swept once.
+function sweepStaleCodeGraphWorkerEndpoints(): void {
+  if (process.platform === 'win32' || staleCodeGraphEndpointSweepDone) return
+  staleCodeGraphEndpointSweepDone = true
+
+  let entries: string[]
+  try {
+    entries = fs.readdirSync('/tmp')
+  } catch {
+    return
+  }
+
+  for (const entry of entries) {
+    const match = /^open-cowork-codegraph-(\d+)-.+\.sock$/.exec(entry)
+    if (!match) continue
+    const ownerPid = Number.parseInt(match[1], 10)
+    if (!Number.isFinite(ownerPid) || ownerPid === process.pid || isProcessAlive(ownerPid)) {
+      continue
+    }
+    try {
+      fs.rmSync(path.join('/tmp', entry), { force: true })
+      console.log('[CodeGraphWorker] removed stale endpoint of dead process', { entry, ownerPid })
+    } catch {
+      // Best effort; a locked file just stays behind.
+    }
+  }
 }

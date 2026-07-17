@@ -353,15 +353,10 @@ async function syncMcpServers(
       warn(warnings, `${manifest.id}: MCP server "${serverName}" sync failed: ${result.error}`)
       continue
     }
-    synced.push(id)
-    if (mcpManager) {
-      await mcpManager.connectServer(config).catch((err) => {
-        warn(
-          warnings,
-          `${manifest.id}: MCP server "${serverName}" registered but failed to connect: ${err}`
-        )
-      })
+    if (mcpManager?.isConnected(id)) {
+      await mcpManager.disconnectServer(id)
     }
+    synced.push(id)
   }
 
   for (const stale of previous.filter((id) => !synced.includes(id))) {

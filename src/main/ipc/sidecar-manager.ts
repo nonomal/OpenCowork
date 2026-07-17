@@ -12,7 +12,7 @@ import {
 import type { AgentStreamEvent, ToolCallStateWire } from '../../shared/agent-stream-protocol'
 import { AGENT_STREAM_PROTOCOL_VERSION } from '../../shared/agent-stream-protocol'
 import type { InteractiveAgentEvent, ToolCallState } from '../../shared/agent-loop-types'
-import { readPermissionPolicySnapshot } from './settings-handlers'
+import { readCodeGraphEnabled, readPermissionPolicySnapshot } from './settings-handlers'
 import {
   SIDECAR_APPROVAL_REQUEST_MSGPACK_CHANNEL,
   SIDECAR_APPROVAL_RESPONSE_MSGPACK_CHANNEL,
@@ -33,7 +33,7 @@ import {
   desktopInputType
 } from './desktop-control'
 import { getNativeAgentRuntimeManager } from './native-agent-runtime'
-import { stopNativeWorker } from '../lib/native-worker'
+import { getNativeWorker, stopNativeWorker } from '../lib/native-worker'
 import { getNativeSshConnectionPayload } from './ssh-connection-payload'
 import {
   executeChannelSpecificPluginTool,
@@ -200,6 +200,41 @@ function isMessagePackTraceEnabled(): boolean {
 function logMessagePackTrace(message: string, details: Record<string, unknown>): void {
   if (!isMessagePackTraceEnabled()) return
   console.log(`[Sidecar][MessagePack] ${message}`, details)
+}
+
+const CODEGRAPH_METHOD_PREFIX = 'codegraph/'
+
+// Success-shaped by convention: a codegraph/* call must NEVER throw back into the
+// agent loop. A disabled feature (or a transient worker failure) resolves as
+// guidance so a stale tool reference can't poison the session.
+function codeGraphNotReadyResult(message: string): {
+  success: true
+  isError: false
+  errorKind: 'not_indexed'
+  message: string
+} {
+  return { success: true, isError: false, errorKind: 'not_indexed', message }
+}
+
+export async function handleCodeGraphRequest(
+  method: string,
+  params: unknown,
+  timeoutMs?: number
+): Promise<unknown> {
+  if (!readCodeGraphEnabled()) {
+    return codeGraphNotReadyResult(
+      'CodeGraph is disabled. Enable it in Settings to index this project for code navigation.'
+    )
+  }
+  try {
+    // CodeGraph is source-merged into the main worker (single binary, one
+    // e_sqlite3): codegraph/* dispatches on the same supervised worker.
+    return await getNativeWorker().request(method, params, timeoutMs)
+  } catch (error) {
+    return codeGraphNotReadyResult(
+      `CodeGraph is unavailable: ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
 }
 
 function enrichAgentRunParams(params: unknown): unknown {
@@ -1072,6 +1107,34 @@ export function registerSidecarHandlers(): void {
           enabled: await isPluginToolEnabled(pluginArgs.pluginId, pluginArgs.toolName)
         }
       }
+      case 'codegraph:tool': {
+        // Agent tool calls (codegraph_explore, ...) from the in-worker runtime. The
+        // main worker cannot reach the CodeGraph sidecar directly; route through the
+        // same enabled-gated, success-shaped path the renderer passthrough uses.
+        const cgArgs = (params ?? {}) as {
+          name?: string
+          input?: Record<string, unknown>
+          workingFolder?: string
+        }
+        const toolName = typeof cgArgs.name === 'string' ? cgArgs.name : ''
+        if (!toolName.startsWith('codegraph_')) {
+          return codeGraphNotReadyResult(`Unknown CodeGraph tool: ${toolName || '(missing)'}`)
+        }
+        const cgMethod = `codegraph/${toolName.slice('codegraph_'.length)}`
+        const input =
+          cgArgs.input && typeof cgArgs.input === 'object'
+            ? { ...(cgArgs.input as Record<string, unknown>) }
+            : {}
+        if (
+          cgArgs.workingFolder &&
+          input.projectPath === undefined &&
+          input.workingFolder === undefined
+        ) {
+          input.workingFolder = cgArgs.workingFolder
+        }
+        // Explore over a large indexed graph can be slow; give it a generous timeout.
+        return await handleCodeGraphRequest(cgMethod, input, 120_000)
+      }
       case DESKTOP_SCREENSHOT_CAPTURE:
         return await captureDesktopScreenshot()
       case DESKTOP_INPUT_CLICK:
@@ -1194,6 +1257,13 @@ export function registerSidecarHandlers(): void {
     params?: unknown
     timeoutMs?: number
   }>('sidecar:request', async (_event, { method, params, timeoutMs }) => {
+    // CodeGraph is an opt-in second sidecar. Route codegraph/* to its own lazy
+    // worker BEFORE any main-worker isRunning/ensure-start below, so a codegraph
+    // call neither boots nor depends on the main worker. Gated on the setting;
+    // resolves success-shaped when disabled (never throws).
+    if (typeof method === 'string' && method.startsWith(CODEGRAPH_METHOD_PREFIX)) {
+      return await handleCodeGraphRequest(method, params, timeoutMs)
+    }
     console.log(`[Sidecar] request start: ${method}`)
     if (!manager.isRunning) {
       console.warn(`[Sidecar] request starting sidecar because it is not running: ${method}`)
