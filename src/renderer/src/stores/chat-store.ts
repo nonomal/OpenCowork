@@ -2254,6 +2254,21 @@ async function loadRequestContextMessages(
   return mergeResidentTailWithFetchedPrefix(residentMessages, fetchedMessages, maxMessages)
 }
 
+/**
+ * A quoted message can be rendered while the previous turn is still running.
+ * Keep that optimistic bubble visible immediately, but place it after the
+ * in-flight turn when assembling the next provider request so tool_use and
+ * tool_result pairs remain contiguous and valid.
+ */
+function movePendingQuotedMessagesToRequestTail(messages: UnifiedMessage[]): UnifiedMessage[] {
+  const pending = messages.filter((message) => message.meta?.quotedPending === true)
+  if (pending.length === 0) return messages
+
+  const pendingIds = new Set(pending.map((message) => message.id))
+  const rest = messages.filter((message) => !pendingIds.has(message.id))
+  return [...rest, ...pending]
+}
+
 function hasMeaningfulAssistantContent(message: UnifiedMessage): boolean {
   if (message.role !== 'assistant') return true
   if (typeof message.content === 'string') return message.content.trim().length > 0
@@ -3370,6 +3385,7 @@ export const useChatStore = create<ChatStore>()(
         options?.includeTrailingAssistantPlaceholder ?? true
 
       let messages = await loadRequestContextMessages(session, options?.requestContextMaxMessages)
+      messages = movePendingQuotedMessagesToRequestTail(messages)
       const initialShape = countToolReplayBlocks(messages)
       const preCompactSanitized = sanitizeToolBlocksForResend(messages)
       messages = applyLatestCompactRequestView(preCompactSanitized.messages)

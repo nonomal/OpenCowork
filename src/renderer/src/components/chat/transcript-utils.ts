@@ -162,6 +162,16 @@ function isTransparentSystemMessage(message: UnifiedMessage): boolean {
   return message.role === 'system' && !isCompactBoundaryMessage(message)
 }
 
+/**
+ * An optimistically rendered quoted prompt can sit between an assistant's
+ * tool_use block and the tool_result messages while that tool call is still
+ * in flight. It remains a normal, visible user bubble, but it must not break
+ * the bookkeeping that associates those tool results with their assistant.
+ */
+function isTransparentQuotedPendingMessage(message: UnifiedMessage): boolean {
+  return message.role === 'user' && message.meta?.quotedPending === true
+}
+
 function collectToolResults(
   blocks: ContentBlock[],
   target: Map<string, { content: ToolResultContent; isError?: boolean }>
@@ -211,7 +221,7 @@ function buildTailToolExecutionState(messages: UnifiedMessage[]): TailToolExecut
       assistantIndex -= 1
       continue
     }
-    if (isTransparentSystemMessage(message)) {
+    if (isTransparentSystemMessage(message) || isTransparentQuotedPendingMessage(message)) {
       assistantIndex -= 1
       continue
     }
@@ -365,9 +375,11 @@ export function buildTranscriptStaticAnalysis(
     } else if (isToolResultOnlyUserMessage(message) && currentAssistantMessageId) {
       const bucket = assistantContributors.get(currentAssistantMessageId)
       if (bucket) bucket.contributors.push(message)
-    } else if (isTransparentSystemMessage(message)) {
+    } else if (isTransparentSystemMessage(message) || isTransparentQuotedPendingMessage(message)) {
       // Hidden system reminders are metadata injected into the transcript. They should
       // not sever the assistant tool_use -> user tool_result association used by cards.
+      // An optimistically rendered quoted prompt has the same bookkeeping role
+      // until the in-flight tool result arrives.
     } else {
       currentAssistantMessageId = null
     }
@@ -459,7 +471,7 @@ export function getToolResultsLookup(
       continue
     }
 
-    if (isTransparentSystemMessage(message)) {
+    if (isTransparentSystemMessage(message) || isTransparentQuotedPendingMessage(message)) {
       continue
     }
 

@@ -358,6 +358,33 @@ function addMessageWithSync(sessionId: string, message: UnifiedMessage): void {
   emitSessionRuntimeSync({ kind: 'add_message', sessionId, message })
 }
 
+function updateMessageWithSync(
+  sessionId: string,
+  messageId: string,
+  patch: Partial<UnifiedMessage>
+): void {
+  useChatStore.getState().updateMessage(sessionId, messageId, patch)
+  emitSessionRuntimeSync({ kind: 'update_message', sessionId, messageId, patch })
+}
+
+function buildUserMessageContent(
+  text: string,
+  images?: ImageAttachment[]
+): UnifiedMessage['content'] {
+  const textBlocks: Array<Extract<ContentBlock, { type: 'text' }>> = []
+  if (text) {
+    textBlocks.push({ type: 'text', text })
+  }
+
+  if (images && images.length > 0) {
+    return [...textBlocks, ...images.map(imageAttachmentToContentBlock)]
+  }
+  if (textBlocks.length === 1 && textBlocks[0]) {
+    return textBlocks[0].text
+  }
+  return textBlocks
+}
+
 function setStreamingMessageIdWithSync(sessionId: string, messageId: string | null): void {
   if (messageId === null) {
     flushRuntimeForegroundMutations()
@@ -603,8 +630,8 @@ export interface SendMessageOptions {
   /**
    * When set, the user message has already been appended to the transcript
    * and sendMessage should run the agent loop against it without inserting a
-   * duplicate user message. This intentionally skips UserPromptSubmit because
-   * the message is already persisted.
+   * duplicate user message. UserPromptSubmit still runs before the request so
+   * hooks can block or transform the pre-rendered message.
    */
   preRenderedUserMessageId?: string
   /** Hide an internal process-only queued message from the queue UI. */
@@ -2036,73 +2063,6 @@ export function hasActiveSessionRunForSession(sessionId: string): boolean {
   return hasActiveSessionRun(sessionId)
 }
 
-function collectMessageToolUseIds(message: UnifiedMessage | undefined): Set<string> {
-  const ids = new Set<string>()
-  if (!message || !Array.isArray(message.content)) return ids
-
-  for (const block of message.content) {
-    if (block.type !== 'tool_use' || !block.id) continue
-    ids.add(block.id)
-  }
-  return ids
-}
-
-function collectMessageToolResultIds(message: UnifiedMessage | undefined): Set<string> {
-  const ids = new Set<string>()
-  if (!message || !Array.isArray(message.content)) return ids
-
-  for (const block of message.content) {
-    if (block.type !== 'tool_result' || !block.toolUseId) continue
-    ids.add(block.toolUseId)
-  }
-  return ids
-}
-
-function hasUnresolvedTailToolUse(sessionId: string): boolean {
-  const chatState = useChatStore.getState()
-  const session = chatState.sessions.find((item) => item.id === sessionId)
-  if (!session) return false
-
-  const streamingMessageId = chatState.streamingMessages[sessionId] ?? null
-  const preferredAssistantIndex = streamingMessageId
-    ? session.messages.findIndex((message) => message.id === streamingMessageId)
-    : -1
-  const startIndex =
-    preferredAssistantIndex >= 0 ? preferredAssistantIndex : session.messages.length - 1
-
-  for (let index = startIndex; index >= 0; index -= 1) {
-    const message = session.messages[index]
-    if (message?.role !== 'assistant') continue
-
-    const toolUseIds = collectMessageToolUseIds(message)
-    if (toolUseIds.size === 0) {
-      return false
-    }
-
-    const pairedToolUseIds = new Set<string>()
-    for (
-      let candidateIndex = index + 1;
-      candidateIndex < session.messages.length;
-      candidateIndex += 1
-    ) {
-      const candidate = session.messages[candidateIndex]
-      if (candidate?.role !== 'user') break
-
-      const resultIds = collectMessageToolResultIds(candidate)
-      if (resultIds.size === 0) break
-
-      for (const resultId of resultIds) {
-        if (toolUseIds.has(resultId)) pairedToolUseIds.add(resultId)
-      }
-      if (pairedToolUseIds.size === toolUseIds.size) return false
-    }
-
-    return true
-  }
-
-  return false
-}
-
 function requestStopAfterCurrentRequest(sessionId: string): boolean {
   if (!hasActiveSessionRun(sessionId)) return false
   stopAfterCurrentRequestSessions.add(sessionId)
@@ -2202,24 +2162,26 @@ export function quotePendingSessionMessageIntoConversation(
   const hasImages = !!target.images && target.images.length > 0
   const trimmedText = target.text.trim()
   if (!trimmedText && !hasImages && !target.command) return false
+  const shouldSettleQuotedOrdering = hasActiveSessionRun(sessionId)
 
-  if (hasActiveSessionRun(sessionId) && hasUnresolvedTailToolUse(sessionId)) {
-    const remaining = [...queue.slice(0, index), ...queue.slice(index + 1)]
-    const processAfterToolResults: QueuedSessionMessage = {
-      ...target,
-      source: 'quoted',
-      dispatchMode: 'after_loop',
-      options: target.options ? { ...target.options } : undefined
-    }
+  // Render the quoted message optimistically. The actual agent request is still
+  // dispatched through the hidden queue entry below, so the current run can
+  // finish its response before the quoted turn starts.
+  const userMessageText = trimmedText || (target.command ? `/${target.command.name}` : '')
+  const userMsg: UnifiedMessage = {
+    id: nanoid(),
+    role: 'user',
+    content: buildUserMessageContent(userMessageText, target.images),
+    createdAt: Date.now(),
+    source: 'quoted',
+    ...(shouldSettleQuotedOrdering ? { meta: { quotedPending: true } } : {})
+  }
+  addMessageWithSync(sessionId, userMsg)
 
-    replaceSessionPendingMessages(sessionId, [processAfterToolResults, ...remaining])
-    setPendingSessionDispatchPaused(sessionId, false)
-
-    if (!requestStopAfterCurrentRequest(sessionId)) {
-      dispatchNextQueuedMessage(sessionId)
-    }
-
-    return true
+  const processOnlyOptions: SendMessageOptions = {
+    ...(target.options ?? {}),
+    preRenderedUserMessageId: userMsg.id,
+    hiddenFromQueueView: true
   }
 
   const remaining = [...queue.slice(0, index), ...queue.slice(index + 1)]
@@ -2227,7 +2189,7 @@ export function quotePendingSessionMessageIntoConversation(
     ...target,
     source: 'quoted',
     dispatchMode: 'after_loop',
-    options: { ...(target.options ?? {}), hiddenFromQueueView: true }
+    options: processOnlyOptions
   }
 
   replaceSessionPendingMessages(sessionId, [processOnly, ...remaining])
@@ -3236,6 +3198,45 @@ function buildSystemSubAgentContext(batch: PendingSubAgentWakeMessage[]): string
   ].join('\n')
 }
 
+async function settlePreRenderedQuotedMessageOrder(
+  sessionId: string,
+  messageId: string
+): Promise<void> {
+  const chatStore = useChatStore.getState()
+  const residentMessage = chatStore
+    .getSessionMessages(sessionId)
+    .find((message) => message.id === messageId)
+  if (!residentMessage?.meta?.quotedPending) return
+
+  try {
+    const messages = await chatStore.getFullSessionMessagesForMutation(sessionId)
+    const index = messages.findIndex((message) => message.id === messageId)
+    if (index < 0) return
+
+    const settledMeta = { ...(messages[index].meta ?? {}) }
+    delete settledMeta.quotedPending
+    const settledMessage: UnifiedMessage = {
+      ...messages[index],
+      meta: settledMeta
+    }
+    if (index === messages.length - 1) {
+      updateMessageWithSync(sessionId, messageId, { meta: settledMessage.meta })
+      return
+    }
+
+    const reordered = [...messages.slice(0, index), ...messages.slice(index + 1), settledMessage]
+    chatStore.replaceSessionMessages(sessionId, reordered)
+  } catch (error) {
+    // Keep the marker when normalization fails; request assembly will still
+    // move the optimistic message behind any pending tool results.
+    console.warn('[ChatActions] Failed to settle quoted message order:', {
+      sessionId,
+      messageId,
+      error: error instanceof Error ? error.message : String(error)
+    })
+  }
+}
+
 /**
  * Resume a main Agent from standalone background SubAgent completions. The completion
  * report is request-only context and is never appended to the visible user transcript.
@@ -3306,16 +3307,22 @@ function dispatchNextQueuedMessage(sessionId: string): boolean {
   if (!next) return false
 
   setPendingSessionDispatchPaused(sessionId, false)
+  const send = _sendMessageFn
   setTimeout(() => {
-    void _sendMessageFn?.(
-      next.text,
-      next.images,
-      next.source ?? 'queued',
-      sessionId,
-      next.command,
-      undefined,
-      next.options
-    )
+    void (async () => {
+      if (next.options?.preRenderedUserMessageId) {
+        await settlePreRenderedQuotedMessageOrder(sessionId, next.options.preRenderedUserMessageId)
+      }
+      await send?.(
+        next.text,
+        next.images,
+        next.source ?? 'queued',
+        sessionId,
+        next.command,
+        undefined,
+        next.options
+      )
+    })()
   }, 0)
   return true
 }
@@ -4358,7 +4365,7 @@ export function useChatActions(): {
         const shouldAppendUserMessage =
           source !== 'continue' && source !== 'subagent' && !preRenderedUserMessageId
         const selectedFileReadContext =
-          shouldAppendUserMessage && source !== 'team'
+          source !== 'continue' && source !== 'team' && source !== 'subagent'
             ? await buildSelectedFileReadContext({
                 text: resolvedCommand.userText || text,
                 options,
@@ -4380,7 +4387,8 @@ export function useChatActions(): {
           turnRequestContextTexts.push(selectedFileReadContext.contextText)
         }
         let hookAdjustedPrompt: string | null = null
-        if (shouldAppendUserMessage) {
+        const shouldRunUserPromptSubmit = source !== 'continue' && source !== 'subagent'
+        if (shouldRunUserPromptSubmit) {
           const hookPrompt =
             resolvedCommand.userText ||
             (resolvedCommand.command ? `/${resolvedCommand.command.name}` : text) ||
@@ -4402,6 +4410,11 @@ export function useChatActions(): {
           })) as HookRunResult
           if (hookResult.blocked) {
             clearPreflightIndicator()
+            if (preRenderedUserMessageId) {
+              // A pre-rendered quote must not leak into a later request when a
+              // UserPromptSubmit hook rejects it.
+              useChatStore.getState().removeMessageById(sessionId, preRenderedUserMessageId)
+            }
             toast.error('Message blocked by hook', {
               description: hookResult.reason || 'A UserPromptSubmit hook blocked this message.'
             })
@@ -4412,9 +4425,41 @@ export function useChatActions(): {
             hookAdjustedPrompt = hookResult.updatedPrompt
           }
           turnRequestContextTexts.push(...collectHookContextTexts(hookResult))
+
+          // A quoted message is visible before this hook/API preflight finishes.
+          // Keep the transcript in sync if the hook rewrites the prompt.
+          if (preRenderedUserMessageId && hookAdjustedPrompt !== null) {
+            const preRenderedText =
+              hookAdjustedPrompt ||
+              resolvedCommand.userText ||
+              (resolvedCommand.command ? `/${resolvedCommand.command.name}` : '')
+            updateMessageWithSync(sessionId, preRenderedUserMessageId, {
+              content: buildUserMessageContent(preRenderedText, images)
+            })
+          }
         }
+        if (preRenderedUserMessageId && selectedFileReadContext.meta) {
+          const preRenderedMessage = useChatStore
+            .getState()
+            .getSessionMessages(sessionId)
+            .find((message) => message.id === preRenderedUserMessageId)
+          if (preRenderedMessage) {
+            updateMessageWithSync(sessionId, preRenderedUserMessageId, {
+              meta: {
+                ...(preRenderedMessage.meta ?? {}),
+                selectedFileReads: selectedFileReadContext.meta
+              }
+            })
+          }
+        }
+        const preRenderedUserMessage = preRenderedUserMessageId
+          ? (useChatStore
+              .getState()
+              .getSessionMessages(sessionId)
+              .find((message) => message.id === preRenderedUserMessageId) ?? null)
+          : null
         // Add user message (multi-modal when images attached)
-        let expectedUserRequestMessage: UnifiedMessage | null = null
+        let expectedUserRequestMessage: UnifiedMessage | null = preRenderedUserMessage
         if (shouldAppendUserMessage) {
           let userContent: string | ContentBlock[]
           const textBlocks: Array<Extract<ContentBlock, { type: 'text' }>> = []

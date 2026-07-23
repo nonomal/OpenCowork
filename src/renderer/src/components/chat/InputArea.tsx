@@ -29,7 +29,6 @@ import {
   ShieldAlert,
   ShieldCheck,
   Check,
-  Shapes,
   Users,
   Wrench,
   type LucideIcon
@@ -127,11 +126,6 @@ import { ModelIcon } from '@renderer/components/settings/provider-icons'
 import { FileAwareEditor, type FileAwareEditorHandle } from './FileAwareEditor'
 import { TokenCounter } from './TokenCounter'
 import { listCommands, type CommandCatalogItem } from '@renderer/lib/commands/command-loader'
-import { resolveConfiguredActiveMcpIds, useMcpStore } from '@renderer/stores/mcp-store'
-import {
-  resolveEffectiveActiveExtensionIds,
-  useExtensionStore
-} from '@renderer/stores/extension-store'
 import { usePlanStore } from '@renderer/stores/plan-store'
 import { useGoalStore } from '@renderer/stores/goal-store'
 import { useSkillsStore } from '@renderer/stores/skills-store'
@@ -360,85 +354,6 @@ function ContextRing({
             </p>
           )}
         </div>
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
-function ActiveMcpsBadge({ projectId }: { projectId?: string | null }): React.JSX.Element | null {
-  const { t } = useTranslation('chat')
-  const activeMcpIdsByProject = useMcpStore((s) => s.activeMcpIdsByProject)
-  const servers = useMcpStore((s) => s.servers)
-  const serverTools = useMcpStore((s) => s.serverTools)
-  const activeMcpIds = React.useMemo(
-    () =>
-      resolveConfiguredActiveMcpIds({
-        projectId,
-        activeMcpIdsByProject,
-        servers
-      }),
-    [activeMcpIdsByProject, projectId, servers]
-  )
-  if (activeMcpIds.length === 0) return null
-  const activeServers = servers.filter((s) => activeMcpIds.includes(s.id))
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className="composer-status-pill flex cursor-default items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px]">
-          <span className="size-1.5 rounded-full bg-current animate-pulse opacity-80" />
-          <span>{t('skills.mcpCount', { count: activeMcpIds.length })}</span>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="top">
-        <p className="text-xs font-medium">{t('skills.activeMcpServers')}</p>
-        {activeServers.map((s) => (
-          <p key={s.id} className="text-xs text-muted-foreground">
-            {s.name} ({t('skills.mcpToolCount', { count: serverTools[s.id]?.length ?? 0 })})
-          </p>
-        ))}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
-function ActiveExtensionsBadge({
-  projectId
-}: {
-  projectId?: string | null
-}): React.JSX.Element | null {
-  const { t } = useTranslation('chat')
-  const activeExtensionIdsByProject = useExtensionStore((s) => s.activeExtensionIdsByProject)
-  const extensions = useExtensionStore((s) => s.extensions)
-  const activeExtensionIds = React.useMemo(
-    () =>
-      resolveEffectiveActiveExtensionIds({
-        projectId,
-        activeExtensionIdsByProject,
-        extensions
-      }),
-    [activeExtensionIdsByProject, extensions, projectId]
-  )
-  if (activeExtensionIds.length === 0) return null
-
-  const activeExtensions = extensions.filter((extension) =>
-    activeExtensionIds.includes(extension.id)
-  )
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className="composer-status-pill flex cursor-default items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px]">
-          <Shapes className="size-3" />
-          <span>{t('skills.extensionCount', { count: activeExtensionIds.length })}</span>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="top">
-        <p className="text-xs font-medium">{t('skills.activeCustomExtensions')}</p>
-        {activeExtensions.map((extension) => (
-          <p key={extension.id} className="text-xs text-muted-foreground">
-            {extension.manifest.name} (
-            {t('skills.extensionToolCount', { count: extension.manifest.tools.length })})
-          </p>
-        ))}
       </TooltipContent>
     </Tooltip>
   )
@@ -3736,9 +3651,6 @@ export function InputArea({
     />
   )
 
-  const activeMcpBadge = <ActiveMcpsBadge projectId={activeProjectId} />
-  const activeExtensionBadge = <ActiveExtensionsBadge projectId={activeProjectId} />
-
   const folderControl = onSelectFolder && !hideWorkingFolderPicker && (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -4767,8 +4679,6 @@ export function InputArea({
                 </div>
                 {webSearchToggleControl}
                 {skillsMenuControl}
-                {activeMcpBadge}
-                {activeExtensionBadge}
                 {folderControl}
               </div>
 

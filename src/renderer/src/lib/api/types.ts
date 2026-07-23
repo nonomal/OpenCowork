@@ -281,6 +281,11 @@ export interface MessageMeta {
   compactSummary?: CompactSummaryMeta
   /** Files explicitly selected by the user and read into the hidden turn context. */
   selectedFileReads?: SelectedFileReadsMeta
+  /**
+   * A quoted message rendered before the preceding turn finishes. Request
+   * assembly keeps it behind any in-flight tool results until that turn settles.
+   */
+  quotedPending?: boolean
   /** Inline compression status card — present on the synthetic system placeholder, not on real messages. */
   compressionStatus?: CompressionStatusMeta
   /** Provider/model that produced this specific message, when it differs from the parent session. */

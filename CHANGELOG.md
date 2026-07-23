@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.4] - 2026-07-23
+
+### Added
+
+- Added a compact active-additions count to the chat composer and refreshed the skills menu with clearer sections, descriptions, and plugin/skill indicators.
+- Added chat actions and localization support for the updated composer menu, including plan mode, goal mode, and media attachment entries.
+
+### Changed
+
+- Improved chat action handling and transcript metadata for the updated composer interactions.
+- Expanded local media access to support persisted images and videos from both application storage locations.
+
 ## [1.2.3] - 2026-07-22
 
 ### Added

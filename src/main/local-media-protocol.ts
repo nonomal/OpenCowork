@@ -16,7 +16,13 @@ export const LOCAL_MEDIA_SCHEME = 'oc-media'
 const URL_PREFIX = `${LOCAL_MEDIA_SCHEME}://local/`
 
 const ALLOWED_ROOTS = [
-  path.join(homedir(), '.open-cowork', 'image')
+  // Main-process persistence uses ~/open-cowork/{image,video}; native media
+  // providers persist under ~/.open-cowork/media/{images,video}.
+  path.join(homedir(), 'open-cowork', 'image'),
+  path.join(homedir(), 'open-cowork', 'video'),
+  path.join(homedir(), '.open-cowork', 'media', 'images'),
+  path.join(homedir(), '.open-cowork', 'media', 'video'),
+  path.join(homedir(), '.open-cowork', 'media', 'videos')
 ]
 
 const ALLOWED_EXTENSIONS = new Set([
@@ -41,7 +47,12 @@ const ALLOWED_EXTENSIONS = new Set([
 
 function isWithinRoot(filePath: string, root: string): boolean {
   const relativePath = path.relative(root, filePath)
-  return relativePath !== '' && relativePath !== '..' && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath)
+  return (
+    relativePath !== '' &&
+    relativePath !== '..' &&
+    !relativePath.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relativePath)
+  )
 }
 
 function isAllowedOrigin(origin: string | null): boolean {
