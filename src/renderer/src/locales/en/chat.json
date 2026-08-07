@@ -1,4 +1,4 @@
-{
+﻿{
   "input": {
     "placeholder": "Type a message...",
     "placeholderClarify": "Describe your idea and I will keep probing until the requirements are clear...",
@@ -21,6 +21,7 @@
     "thinkingOff": "Off",
     "noModelSettings": "No extra settings for this model (e.g. deep thinking, fast mode)",
     "contextCompressionThreshold": "Context compression threshold",
+    "contextCompressionFallback": "Summary unavailable; older context removed",
     "thinkingLevel": "Thinking: {{level}}",
     "effortDesc": {
       "none": "No reasoning",
@@ -151,7 +152,11 @@
     "startAcp": "Start an ACP session",
     "startAcpDesc": "First clarify the goal, background, constraints, and acceptance criteria. Then design the architecture and delegate tasks before writing code.",
     "homeTitleAcp": "ACP mode",
-    "homeDescAcp": "In ACP mode, begin by clarifying goals, background, constraints, and acceptance criteria. Then propose an architecture and task breakdown before implementation."
+    "homeDescAcp": "In ACP mode, begin by clarifying goals, background, constraints, and acceptance criteria. Then propose an architecture and task breakdown before implementation.",
+    "fileReference": {
+      "remove": "Remove reference",
+      "removePlugin": "Remove plugin reference"
+    }
   },
   "planReview": {
     "awaitingReview": "Awaiting Review",
@@ -306,6 +311,7 @@
     "recommended": "Recommended",
     "previewBadge": "Preview",
     "previewTitle": "Option preview",
+    "previewEmpty": "Hover or select an option to see its preview.",
     "notesTitle": "Notes (optional)",
     "notesPlaceholder": "Add constraints, preferences, or context…",
     "autoAnswered": "Auto-answered",
@@ -990,6 +996,7 @@
     "activeTools": "{{count}} active tools",
     "toolExecutions": "{{count}} tool executions",
     "completionFinished": "Completed",
+    "processSummary": "Processed",
     "metricTokens": "Tokens",
     "metricCost": "Cost",
     "metricTotalDuration": "Total",
@@ -1031,6 +1038,7 @@
       "titleTool": "Tool execution failed",
       "titleRuntime": "Runtime error",
       "titleRuntimeUnavailable": "Local runtime unavailable",
+      "titleRuntimeFatal": "Local runtime needs repair",
       "titleAuth": "Authentication failed",
       "titleRateLimit": "Rate limited",
       "titleQuota": "Quota or balance exhausted",
@@ -1044,6 +1052,7 @@
       "descTool": "The tool call failed. You can retry or inspect the details below.",
       "descRuntime": "The agent runtime raised an exception. You can try regenerating.",
       "descRuntimeUnavailable": "OpenCowork could not reach the local Native Worker. It has already tried to restart it; retry the message or rebuild the native worker if this repeats.",
+      "descRuntimeFatal": "The local Native Worker cannot recover on its own (stale or incompatible binary). Rebuild it with `npm run native:publish` (development) or reinstall OpenCowork, then restart the app.",
       "descAuth": "Check your API key, organization, or permission settings.",
       "descRateLimit": "You have been rate limited. Retry later or reduce concurrency.",
       "descQuota": "Your account quota or balance is insufficient. Review billing.",

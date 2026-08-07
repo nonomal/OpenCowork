@@ -1,4 +1,4 @@
-import type { BuiltinProviderPreset } from './types'
+﻿import type { BuiltinProviderPreset } from './types'
 
 export const routinAiPreset: BuiltinProviderPreset = {
   builtinId: 'routin-ai',
@@ -7,7 +7,10 @@ export const routinAiPreset: BuiltinProviderPreset = {
   // v6: prioritize OpenAI (GPT 5.6 Terra first), Anthropic, then MiMo in the model list.
   // v7: add the OpenAI Sora 2 video model.
   // v8: add the Volcengine Seedance 2.0 video models (structured task params).
-  version: 8,
+  // v9: add Qwen3.8 Max Preview and Claude Opus 5.
+  // v10: add GPT Image 2 All / Fast / 4K image models.
+  // v11: DeepSeek 模型改用 OpenAI Chat Completions 协议（openai-chat）
+  version: 11,
   name: 'Routin AI',
   type: 'openai-chat',
   defaultBaseUrl: 'https://api.routin.ai/v1',
@@ -43,10 +46,10 @@ export const routinAiPreset: BuiltinProviderPreset = {
       maxOutputTokens: 128_000,
       supportsVision: true,
       supportsFunctionCall: false,
-      inputPrice: 2.5,
-      outputPrice: 15,
-      cacheCreationPrice: 3.125,
-      cacheHitPrice: 0.25,
+      inputPrice: 2,
+      outputPrice: 12,
+      cacheCreationPrice: 2.5,
+      cacheHitPrice: 0.2,
       supportsThinking: true,
       thinkingConfig: {
         bodyParams: {},
@@ -83,6 +86,24 @@ export const routinAiPreset: BuiltinProviderPreset = {
       }
     },
     {
+      id: 'claude-opus-5',
+      name: 'Claude Opus 5',
+      icon: 'claude',
+      type: 'anthropic',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 128_000,
+      supportsVision: true,
+      supportsFunctionCall: true,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: { thinking: { type: 'adaptive' } },
+        forceTemperature: 1,
+        reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+        defaultReasoningEffort: 'high'
+      }
+    },
+    {
       id: 'mimo-v2.5-pro',
       name: 'MiMo V2.5 Pro',
       icon: 'mimo',
@@ -102,10 +123,11 @@ export const routinAiPreset: BuiltinProviderPreset = {
       }
     },
     {
-      id: 'K3',
+      id: 'kimi-k3',
       name: 'Kimi K3',
       icon: 'kimi',
       enabled: true,
+      type: 'anthropic',
       contextLength: 1_048_576,
       maxOutputTokens: 131_072,
       supportsVision: true,
@@ -721,10 +743,10 @@ export const routinAiPreset: BuiltinProviderPreset = {
       maxOutputTokens: 128_000,
       supportsVision: true,
       supportsFunctionCall: false,
-      inputPrice: 1,
-      outputPrice: 6,
-      cacheCreationPrice: 1.25,
-      cacheHitPrice: 0.1,
+      inputPrice: 0.2,
+      outputPrice: 1.2,
+      cacheCreationPrice: 0.25,
+      cacheHitPrice: 0.02,
       supportsThinking: true,
       thinkingConfig: {
         bodyParams: {},
@@ -884,6 +906,36 @@ export const routinAiPreset: BuiltinProviderPreset = {
     {
       id: 'gpt-image-2',
       name: 'GPT Image 2',
+      icon: 'openai',
+      enabled: true,
+      category: 'image',
+      type: 'openai-images',
+      supportsVision: true,
+      supportsFunctionCall: false
+    },
+    {
+      id: 'gpt-image-2-all',
+      name: 'GPT Image 2 All',
+      icon: 'openai',
+      enabled: true,
+      category: 'image',
+      type: 'openai-images',
+      supportsVision: true,
+      supportsFunctionCall: false
+    },
+    {
+      id: 'gpt-image-2-fast',
+      name: 'GPT Image 2 Fast',
+      icon: 'openai',
+      enabled: true,
+      category: 'image',
+      type: 'openai-images',
+      supportsVision: true,
+      supportsFunctionCall: false
+    },
+    {
+      id: 'gpt-image-2-4k',
+      name: 'GPT Image 2 4K',
       icon: 'openai',
       enabled: true,
       category: 'image',
@@ -1088,7 +1140,7 @@ export const routinAiPreset: BuiltinProviderPreset = {
       maxOutputTokens: 384_000,
       supportsVision: false,
       supportsFunctionCall: true,
-      type: 'anthropic',
+      type: 'openai-chat',
       inputPrice: 1,
       outputPrice: 2,
       cacheCreationPrice: 1,
@@ -1108,7 +1160,7 @@ export const routinAiPreset: BuiltinProviderPreset = {
       maxOutputTokens: 384_000,
       supportsVision: false,
       supportsFunctionCall: true,
-      type: 'anthropic',
+      type: 'openai-chat',
       inputPrice: 12,
       outputPrice: 24,
       cacheCreationPrice: 12,
@@ -1187,7 +1239,9 @@ export const routinAiPreset: BuiltinProviderPreset = {
       icon: 'gemini',
       enabled: true,
       category: 'image',
-      type: 'gemini',
+      // Routin AI is an OpenAI-compatible relay, so Google's native transport is not
+      // reachable here; images go through the OpenAI Images route.
+      type: 'openai-images',
       supportsVision: true,
       supportsFunctionCall: false
     },
@@ -1197,7 +1251,7 @@ export const routinAiPreset: BuiltinProviderPreset = {
       icon: 'gemini',
       enabled: true,
       category: 'image',
-      type: 'gemini',
+      type: 'openai-images',
       supportsVision: true,
       supportsFunctionCall: false
     },
@@ -1560,6 +1614,22 @@ export const routinAiPreset: BuiltinProviderPreset = {
         defaultReasoningEffort: 'high'
       }
     },
+    // ── Qwen ──
+    {
+      id: 'Qwen3.8-Max-Preview',
+      name: 'Qwen3.8 Max Preview',
+      icon: 'qwen',
+      enabled: true,
+      contextLength: 1_000_000,
+      maxOutputTokens: 32_768,
+      supportsVision: false,
+      supportsFunctionCall: true,
+      supportsThinking: true,
+      thinkingConfig: {
+        bodyParams: { thinking: { type: 'enabled' } },
+        disabledBodyParams: { thinking: { type: 'disabled' } }
+      }
+    },
     // ── Qwen3.5 ──
     {
       id: 'qwen3.5-27b',
@@ -1745,6 +1815,7 @@ const ROUTIN_AI_PLAN_MODEL_ORDER = [
   'gpt-5.6-luna',
   'gpt-5.6-sol',
   'claude-fable-5',
+  'claude-opus-5',
   'claude-sonnet-5',
   'claude-opus-4-8',
   'claude-opus-4-7',
@@ -1760,7 +1831,8 @@ const routinAiModelById = new Map(routinAiPreset.defaultModels.map((m) => [m.id,
 export const routinAiPlanPreset: BuiltinProviderPreset = {
   builtinId: 'routin-ai-plan',
   // v2: gpt-5.4+ models support the Responses WebSocket transport (supportsWebsocket)
-  version: 2,
+  // v3: add Claude Opus 5 to the plan model list.
+  version: 3,
   name: 'Routin AI（套餐）',
   type: 'openai-chat',
   defaultBaseUrl: 'https://api.routin.ai/plan/v1',

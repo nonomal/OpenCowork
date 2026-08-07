@@ -197,6 +197,10 @@ import {
 import { ensureDefaultChatWorkingFolder } from '@renderer/lib/chat-working-folder'
 import { ensureRequestToolCatalogFresh } from '@renderer/lib/tools/dynamic-tool-catalog'
 import {
+  buildExtensionToolDefinitionsForProject,
+  replaceExtensionToolDefinitions
+} from '@renderer/lib/extensions/extension-tools'
+import {
   escapeGoalXmlText,
   goalStatusLabel,
   validateGoalObjective
@@ -212,6 +216,7 @@ import {
   runSidecarContextCompression,
   streamSidecarProviderTurn
 } from '@renderer/lib/ipc/agent-bridge'
+import { getNativeWorkerState } from '@renderer/lib/ipc/native-worker-state'
 import {
   buildSidecarAgentRunRequest,
   isNativeSidecarProviderConfig,
@@ -229,7 +234,6 @@ import type { AgentStreamEvent } from '../../../shared/agent-stream-protocol'
 
 /** Per-session abort controllers — module-level so concurrent sessions don't overwrite each other */
 const sessionAbortControllers = new Map<string, AbortController>()
-const stopAfterCurrentRequestSessions = new Set<string>()
 const continuingToolExecutionSessions = new Set<string>()
 const pendingGoalContinuationSessions = new Set<string>()
 const scheduledGoalContinuationSessions = new Set<string>()
@@ -2066,52 +2070,6 @@ export function hasActiveSessionRunForSession(sessionId: string): boolean {
   return hasActiveSessionRun(sessionId)
 }
 
-function requestStopAfterCurrentRequest(sessionId: string): boolean {
-  if (!hasActiveSessionRun(sessionId)) return false
-  stopAfterCurrentRequestSessions.add(sessionId)
-  return true
-}
-
-function abortCurrentRunImmediately(sessionId: string): void {
-  const activeAbortController = sessionAbortControllers.get(sessionId)
-  if (activeAbortController && !activeAbortController.signal.aborted) {
-    activeAbortController.abort()
-  }
-  void cancelSidecarRun(sessionId)
-}
-
-async function requestSidecarRunStopAfterCurrentIteration(sessionId: string): Promise<boolean> {
-  const runId = sessionSidecarRunIds.get(sessionId)
-  if (!runId) return false
-  try {
-    const result = await agentBridge.requestStopAgent(runId)
-    if (result.stopped) {
-      console.log('[ChatActions] sidecar graceful stop requested', { sessionId, runId })
-      return true
-    }
-  } catch (error) {
-    console.warn('[ChatActions] sidecar graceful stop request failed', {
-      sessionId,
-      runId,
-      error: error instanceof Error ? error.message : String(error)
-    })
-  }
-  return false
-}
-
-function stopActiveRunAfterCurrentRequest(sessionId: string): void {
-  if (!stopAfterCurrentRequestSessions.delete(sessionId)) return
-  if (sessionSidecarRunIds.has(sessionId)) {
-    void requestSidecarRunStopAfterCurrentIteration(sessionId).then((stopped) => {
-      if (!stopped) {
-        abortCurrentRunImmediately(sessionId)
-      }
-    })
-    return
-  }
-  abortCurrentRunImmediately(sessionId)
-}
-
 export function promotePendingSessionMessageForImmediateDispatch(
   sessionId: string,
   messageId: string
@@ -2198,7 +2156,7 @@ export function quotePendingSessionMessageIntoConversation(
   replaceSessionPendingMessages(sessionId, [processOnly, ...remaining])
   setPendingSessionDispatchPaused(sessionId, false)
 
-  if (!requestStopAfterCurrentRequest(sessionId)) {
+  if (!hasActiveSessionRun(sessionId)) {
     dispatchNextQueuedMessage(sessionId)
   }
 
@@ -3350,7 +3308,6 @@ function abortTeamForSession(sessionId: string, clearPendingApprovals = false): 
 function finishStoppingSession(sessionId: string): void {
   setPendingSessionDispatchPaused(sessionId, true)
   clearGoalContinuationState(sessionId)
-  stopAfterCurrentRequestSessions.delete(sessionId)
 
   const ac = sessionAbortControllers.get(sessionId)
   if (ac) {
@@ -3577,6 +3534,7 @@ async function canUseSidecarForAgentRun(args: {
   provider: ProviderConfig
   tools: ToolDefinition[]
   sessionId?: string
+  projectId?: string | null
   workingFolder?: string
   sshConnectionId?: string
   maxIterations: number
@@ -3597,6 +3555,8 @@ async function canUseSidecarForAgentRun(args: {
     provider: args.provider,
     tools: args.tools,
     sessionId: args.sessionId,
+    projectId: args.projectId,
+    sessionPromptMode: args.sessionMode,
     workingFolder: args.workingFolder,
     sshConnectionId: args.sshConnectionId,
     maxIterations: args.maxIterations,
@@ -3726,14 +3686,36 @@ function createSidecarEventStream(options: {
       const startFirstProgressTimer = (): void => {
         clearFirstProgressTimer()
         firstProgressTimer = setTimeout(() => {
-          const error = new Error(
-            `Sidecar run started but produced no progress within ${Math.round(
-              SIDECAR_FIRST_PROGRESS_TIMEOUT_MS / 1000
-            )}s`
-          )
+          // The deadline only measures a READY worker's silence. While it is
+          // still starting or being supervision-restarted, re-arm instead of
+          // failing: cold boots legitimately spend 10-30s loading skills/index.
+          const workerState = getNativeWorkerState()
+          if (workerState.state === 'starting' || workerState.state === 'restarting') {
+            console.log('[ChatActions] first-progress deadline deferred; worker not ready yet', {
+              sessionId,
+              runId,
+              workerState: workerState.state,
+              logLabel
+            })
+            startFirstProgressTimer()
+            return
+          }
+          const error =
+            workerState.state === 'fatal'
+              ? new Error(
+                  `Local runtime is unavailable (native worker fatal): ${
+                    workerState.lastError ?? 'unknown error'
+                  }`
+                )
+              : new Error(
+                  `Sidecar run started but produced no progress within ${Math.round(
+                    SIDECAR_FIRST_PROGRESS_TIMEOUT_MS / 1000
+                  )}s`
+                )
           console.warn('[ChatActions] Sidecar run stalled before first progress event', {
             sessionId,
             runId,
+            workerState: workerState.state,
             logLabel
           })
           if (runId) {
@@ -3941,7 +3923,7 @@ function createSubAgentEventBuffer(sessionId: string): {
   }
 }
 
-export type ManualCompressionResult = 'compressed' | 'skipped' | 'blocked' | 'failed'
+export type ManualCompressionResult = 'compressed' | 'fallback' | 'skipped' | 'blocked' | 'failed'
 
 export function useChatActions(): {
   sendMessage: (
@@ -4589,6 +4571,9 @@ export function useChatActions(): {
         sessionAbortControllers.set(sessionId, abortController)
 
         await ensureRequestToolCatalogFresh()
+        const scopedExtensionToolDefs = await buildExtensionToolDefinitionsForProject(
+          session?.projectId ?? null
+        )
 
         const mode = sessionMode
         const activeChannels = useChannelStore.getState().getActiveChannels()
@@ -4619,7 +4604,10 @@ export function useChatActions(): {
         }
         const chatMcpContext =
           mode === 'chat' ? resolveActiveMcpContext(session?.projectId ?? null) : null
-        const registeredToolDefs = toolRegistry.getStableDefinitions()
+        const registeredToolDefs = replaceExtensionToolDefinitions(
+          toolRegistry.getStableDefinitions(),
+          scopedExtensionToolDefs
+        )
         const baseChatModeToolDefs =
           mode === 'chat' &&
           !(providerResolution.modelConfig?.category === 'image' && source !== 'continue')
@@ -4741,7 +4729,6 @@ export function useChatActions(): {
             agentStore.setSessionStatus(sessionId, 'completed')
             sessionAbortControllers.delete(sessionId)
             sessionSidecarRunIds.delete(sessionId)
-            stopAfterCurrentRequestSessions.delete(sessionId)
             if (sessionScope === 'main' && !abortController.signal.aborted) {
               void runMemoryAutomationForSession({
                 sessionId,
@@ -4772,7 +4759,10 @@ export function useChatActions(): {
             chatMcpContext ?? resolveActiveMcpContext(session?.projectId ?? null)
 
           // Filter out team tools when the feature is disabled. Capture after registration changes.
-          const allToolDefs = toolRegistry.getStableDefinitions()
+          const allToolDefs = replaceExtensionToolDefinitions(
+            toolRegistry.getStableDefinitions(),
+            scopedExtensionToolDefs
+          )
           const finalToolDefs = filterTeamToolDefinitions(allToolDefs, settings.teamToolsEnabled)
           let promptCandidateToolDefs = finalToolDefs
 
@@ -5161,12 +5151,19 @@ export function useChatActions(): {
             })
 
             const maxParallelTools = getConfiguredMaxParallelTools()
+            // A tool-result continuation writes into the existing assistant bubble, but
+            // must still be a distinct worker run. Reusing the message ID here restarts
+            // the worker's per-run sequence at 1 under an already-seen ID, causing the
+            // stream receiver to discard all early events as duplicates.
+            const sidecarRunId = source === 'continue' ? nanoid() : assistantMsgId
             const sidecarRequest = buildSidecarAgentRunRequest({
               messages: messagesToSend,
               provider: agentProviderConfig,
               tools: effectiveToolDefs,
-              runId: assistantMsgId,
+              runId: sidecarRunId,
               sessionId,
+              projectId: session?.projectId,
+              sessionPromptMode: sessionMode,
               workingFolder: sessionWorkingFolder,
               maxIterations: DEFAULT_AGENT_MAX_ITERATIONS,
               forceApproval: false,
@@ -5201,6 +5198,7 @@ export function useChatActions(): {
               provider: agentProviderConfig,
               tools: effectiveToolDefs,
               sessionId,
+              projectId: session?.projectId,
               workingFolder: sessionWorkingFolder,
               sshConnectionId: session?.sshConnectionId,
               maxIterations: DEFAULT_AGENT_MAX_ITERATIONS,
@@ -6054,7 +6052,6 @@ export function useChatActions(): {
                         : undefined
                     })
                   }
-                  stopActiveRunAfterCurrentRequest(sessionId!)
                   break
                 }
 
@@ -6333,7 +6330,6 @@ export function useChatActions(): {
             setStreamingMessageIdWithSync(sessionId, null)
             sessionAbortControllers.delete(sessionId)
             sessionSidecarRunIds.delete(sessionId)
-            stopAfterCurrentRequestSessions.delete(sessionId)
             // Derive global isRunning from remaining running sessions
             const hasOtherRunning = Object.values(useAgentStore.getState().runningSessions).some(
               (s) => s === 'running' || s === 'retrying'
@@ -6751,8 +6747,16 @@ export function useChatActions(): {
         messages,
         provider: scopedConfig,
         focusPrompt: focusPrompt || undefined,
+        // Zero-preserve: the summary becomes the entire model-visible context.
+        preserveCount: 0,
         preTokens
       })
+      if (result.summarizerFailed) {
+        toast.error('Compression failed', {
+          description: result.error || 'The summary request failed; original context was preserved.'
+        })
+        return 'failed'
+      }
       if (!result.compressed) {
         toast.warning('No compression needed', {
           description: 'No compressible context found'
@@ -7037,6 +7041,8 @@ async function runSimpleChat(
     provider: config,
     tools: [],
     sessionId,
+    projectId: chatStore.sessions.find((item) => item.id === sessionId)?.projectId,
+    sessionPromptMode: 'chat',
     maxIterations: 1,
     forceApproval: false,
     sessionMode: 'chat',

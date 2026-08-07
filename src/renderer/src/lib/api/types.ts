@@ -1,4 +1,4 @@
-// ===== Unified API Type System =====
+﻿// ===== Unified API Type System =====
 
 // --- Token Usage ---
 
@@ -211,12 +211,16 @@ export interface CompactBoundaryMeta {
   trigger: 'auto' | 'manual'
   preTokens: number
   messagesSummarized: number
+  /** Id of the paired compactSummary message; survives row reordering. */
+  summaryId?: string
   preservedSegment?: CompactBoundarySegment
 }
 
 export interface CompactSummaryMeta {
   messagesSummarized: number
   recentMessagesPreserved: boolean
+  /** Legacy marker: an older runtime persisted a fallback after summarization failed. */
+  summarizerFailed?: boolean
   /** UI hint for summaries created while an assistant message is still streaming. */
   displayAnchor?: {
     assistantMessageId: string
@@ -311,6 +315,13 @@ export interface UnifiedMessage {
    * Not persisted to the database.
    */
   _revision?: number
+  /** Renderer-only marker used by content-aware message windows. Preview rows keep
+   * their timeline position while the full SQLite content is fetched on demand. */
+  contentState?: 'full' | 'preview'
+  /** UTF-8 byte size reported by the lightweight message index. */
+  contentBytes?: number
+  /** Renderer-only logical order copied from SQLite for gap-safe window anchors. */
+  sortOrder?: number
 }
 
 // --- Streaming Events ---
@@ -415,7 +426,9 @@ export type ProviderType =
   | 'openai-video'
   | 'seedance-video'
   | 'xai-video'
-  | 'gemini'
+  /** Google Interactions API (POST /interactions). Replaced the legacy generateContent transport. */
+  | 'gemini-interactions'
+  /** Vertex AI still exposes only generateContent on aiplatform.googleapis.com. */
   | 'vertex-ai'
 export type ResponseSummary = 'auto' | 'concise' | 'detailed'
 export type ResponsesImageGenerationAction = 'auto' | 'generate' | 'edit'
@@ -728,6 +741,11 @@ export interface ProviderConfig {
   useSystemProxy?: boolean
   /** Whether to skip TLS certificate validation for this provider request */
   allowInsecureTls?: boolean
+  /**
+   * Deadline for this request to return response headers, in seconds.
+   * 0 waits indefinitely. Sourced from the global apiRequestTimeoutSeconds setting.
+   */
+  requestTimeoutSeconds?: number
   /** Whether thinking mode is enabled for this request */
   thinkingEnabled?: boolean
   /** Thinking configuration from the active model */

@@ -1,12 +1,22 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 
+/// <summary>
+/// Vertex AI transport (generateContent on aiplatform.googleapis.com).
+///
+/// Google AI Studio's `gemini` generateContent path was removed in favour of
+/// <see cref="AgentRuntimeGeminiInteractionsProvider"/>. Vertex AI keeps this transport
+/// because the Interactions API is not served on aiplatform.googleapis.com.
+/// </summary>
 internal static class AgentRuntimeGeminiProvider
 {
-    private static readonly HttpClient Http = WorkerHttpClientFactory.Create();
+    // Infinite client timeout: the effective deadline is user-configurable and therefore
+    // applied per request via AgentRuntimeRequestTimeout.
+    private static readonly HttpClient Http = WorkerHttpClientFactory.Create(
+        timeout: Timeout.InfiniteTimeSpan);
     private static readonly JsonWriterOptions WriterOptions = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
@@ -19,7 +29,7 @@ internal static class AgentRuntimeGeminiProvider
         AgentRuntimeTools.AgentRuntimeRunState state,
         WorkerRequestContext context)
     {
-        var providerType = JsonHelpers.GetString(provider, "type") ?? "gemini";
+        var providerType = JsonHelpers.GetString(provider, "type") ?? "vertex-ai";
         var model = JsonHelpers.GetString(provider, "model") ?? string.Empty;
         var url = BuildApiUrl(providerType, JsonHelpers.GetString(provider, "baseUrl"), model, stream: true);
         var body = BuildRequestBody(parameters, provider, conversation);
@@ -50,9 +60,11 @@ internal static class AgentRuntimeGeminiProvider
         var parseState = new GeminiParseState();
         WorkerLog.Debug($"gemini request start provider={providerType} model={model} url={url}");
 
-        using var response = await Http.SendAsync(
+        using var response = await AgentRuntimeRequestTimeout.SendAsync(
+            Http,
             request,
-            HttpCompletionOption.ResponseHeadersRead,
+            provider,
+            "Gemini",
             state.CancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -243,7 +255,15 @@ internal static class AgentRuntimeGeminiProvider
                     PartialInput: partialInput));
         }
 
-        var call = new AgentRuntimeNativeToolCall(id, name, args);
+        var parseError = args.ValueKind == JsonValueKind.Object
+            ? null
+            : "Expected Tool args to be a JSON object.";
+        var call = new AgentRuntimeNativeToolCall(
+            id,
+            name,
+            args.ValueKind == JsonValueKind.Object ? args : AgentRuntimeProviderSupport.CreateEmptyObjectElement(),
+            RawArguments: argsJson,
+            ParseError: parseError);
         parseState.ToolCalls.Add(call);
     }
 

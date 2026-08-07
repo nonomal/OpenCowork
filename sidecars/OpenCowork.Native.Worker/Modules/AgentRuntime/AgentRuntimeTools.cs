@@ -1,10 +1,15 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text.Json;
 
 internal static class AgentRuntimeTools
 {
-    private const int ProtocolVersion = 1;
+    private const int StreamProtocolVersion =
+        OpenCowork.Contracts.Generated.WorkerContractConstants.AgentStreamProtocolVersion;
+    private const int RuntimeProtocolVersion = 2;
+    private const string CoreManifestHash =
+        "cba1df437a6c37e73b0c151ebbcfb1045ebef6a232652f52a077ecaf7eab778a";
     private const int MaxConcurrentRuns = 8;
+    private static readonly string WorkerInstanceId = Guid.NewGuid().ToString("N");
     private static readonly ConcurrentDictionary<string, AgentRuntimeRunState> ActiveRuns = new(StringComparer.Ordinal);
     private static readonly SemaphoreSlim RunSlots = new(MaxConcurrentRuns, MaxConcurrentRuns);
     private static long generatedRunId;
@@ -14,7 +19,7 @@ internal static class AgentRuntimeTools
         _ = parameters;
         WorkerLog.Info("agent runtime initialized runtime=native-aot");
         return WorkerResponse.Json(
-            new AgentRuntimeInitializeResult(true, "native-aot", "0.1"),
+            CreateInitializeResult(),
             WorkerJsonContext.Default.AgentRuntimeInitializeResult);
     }
 
@@ -39,7 +44,7 @@ internal static class AgentRuntimeTools
         AgentRuntimeSubAgentCancellationScope.CancelAll("shutdown");
         WorkerLog.Info("agent runtime shutdown");
         return WorkerResponse.Json(
-            new AgentRuntimeInitializeResult(true, "native-aot", "0.1"),
+            CreateInitializeResult(),
             WorkerJsonContext.Default.AgentRuntimeInitializeResult);
     }
 
@@ -53,7 +58,7 @@ internal static class AgentRuntimeTools
             "provider.openai-responses" or
             "provider.openai-images" or
             "provider.anthropic" or
-            "provider.gemini" or
+            "provider.gemini-interactions" or
             "provider.vertex-ai" or
             "agent.stream.msgpack" or
             "sidecar.reverse.msgpack" or
@@ -89,6 +94,13 @@ internal static class AgentRuntimeTools
 
     public static Task<WorkerResponse> RunAsync(JsonElement parameters, WorkerRequestContext context)
     {
+        var capabilityError = AgentRuntimeCapabilityPolicy.ValidateRunRequest(parameters);
+        if (capabilityError is not null)
+        {
+            WorkerLog.Warn($"agent run rejected reason={FormatLogValue(capabilityError)}");
+            return Task.FromResult(WorkerResponse.Error(capabilityError));
+        }
+
         if (!RunSlots.Wait(0))
         {
             return Task.FromResult(WorkerResponse.Error(
@@ -265,7 +277,9 @@ internal static class AgentRuntimeTools
                 new AgentRuntimeStreamEvent(
                     "error",
                     Message: ex.Message,
-                    ErrorType: ex.GetType().Name,
+                    // A stable code where we have one, so the renderer can categorise the error
+                    // without pattern-matching on message text. Falls back to the CLR type name.
+                    ErrorType: ResolveErrorType(ex),
                     Details: ex.Message,
                     StackTrace: ex.StackTrace));
             await OpenAIChatRuntime.EmitLoopEndFromOuterAsync(
@@ -285,6 +299,27 @@ internal static class AgentRuntimeTools
         }
     }
 
+    /// <summary>
+    /// Maps an exception to a stable, machine-readable error code where one applies. The renderer
+    /// categorises errors from this value; without it, it is left matching on message text, which
+    /// is unreliable both across locales and under UseSystemResourceKeys in published builds.
+    /// </summary>
+    private static string ResolveErrorType(Exception exception)
+    {
+        return exception switch
+        {
+            AgentRuntimeProviderTransportException transport => transport.Fault.Kind switch
+            {
+                WorkerHttpFaultKind.TlsCertificate or
+                WorkerHttpFaultKind.TlsHandshake => "network_tls",
+                WorkerHttpFaultKind.Proxy => "network_proxy",
+                _ => "network_transport"
+            },
+            TimeoutException => "network_timeout",
+            _ => exception.GetType().Name
+        };
+    }
+
     internal static async Task EmitAsync(
         AgentRuntimeRunState state,
         WorkerRequestContext context,
@@ -296,7 +331,7 @@ internal static class AgentRuntimeTools
         }
 
         var envelope = new AgentRuntimeStreamEnvelope(
-            ProtocolVersion,
+            StreamProtocolVersion,
             state.RunId,
             state.SessionId,
             state.NextSeq(),
@@ -318,6 +353,31 @@ internal static class AgentRuntimeTools
                 $"agent stream emitted transport=msgpack runId={state.RunId} seq={envelope.Seq} " +
                 $"events={events.Length} bytes={messagePackEvent.Payload.Length}");
         }
+    }
+
+    private static AgentRuntimeInitializeResult CreateInitializeResult()
+    {
+        return new AgentRuntimeInitializeResult(
+            true,
+            "native-aot",
+            "0.2",
+            RuntimeProtocolVersion,
+            [2],
+            CoreManifestHash,
+            WorkerInstanceId,
+            new AgentRuntimeFeatureSet(
+                CapabilitySnapshot: true,
+                StrictToolValidation: true,
+                DurableEvents: false,
+                DurableInbox: false,
+                CheckpointRecovery: false,
+                ToolReconciliation: false,
+                LaneScheduler: false),
+            new AgentRuntimeCompatibility(
+                AcceptsV1RunRequest: true,
+                CanRecoverV2Run: false,
+                MinimumRendererVersion: "1.2.8",
+                MinimumMainVersion: "1.2.8"));
     }
 
     private static string NormalizeRunId(string? runId)

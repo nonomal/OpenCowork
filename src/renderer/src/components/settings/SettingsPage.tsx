@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+﻿import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   ArrowLeft,
   Settings,
@@ -35,14 +35,18 @@ import { useChatStore } from '@renderer/stores/chat-store'
 import {
   clampMaxParallelToolCalls,
   clampMaxConcurrentSubAgents,
+  clampApiRequestTimeoutSeconds,
   DEFAULT_THEME_MODE,
   DEFAULT_MAX_PARALLEL_TOOL_CALLS,
   DEFAULT_MAX_CONCURRENT_SUB_AGENTS,
+  DEFAULT_API_REQUEST_TIMEOUT_SECONDS,
   DEFAULT_SHELL_EXECUTION_ENDPOINT,
   MAX_MAX_PARALLEL_TOOL_CALLS,
   MIN_MAX_PARALLEL_TOOL_CALLS,
   MAX_MAX_CONCURRENT_SUB_AGENTS,
   MIN_MAX_CONCURRENT_SUB_AGENTS,
+  MAX_API_REQUEST_TIMEOUT_SECONDS,
+  MIN_API_REQUEST_TIMEOUT_SECONDS,
   resolveShellExecutable,
   type ShellExecutionEndpoint,
   useSettingsStore
@@ -1408,6 +1412,62 @@ function GeneralPanel(): React.JSX.Element {
 
       <Separator />
 
+      {/* API Request Timeout */}
+      <section className="space-y-3">
+        <div className="flex items-start justify-between gap-3 max-w-lg">
+          <div className="min-w-0">
+            <label className="text-sm font-medium">
+              {t('general.apiRequestTimeout', { defaultValue: 'API Request Timeout' })}
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {t('general.apiRequestTimeoutDesc', {
+                defaultValue:
+                  'How long to wait for a model to start responding, in seconds. Raise this for local models (e.g. Ollama) that need a long warm-up. Set 0 to wait indefinitely until you cancel.'
+              })}
+            </p>
+          </div>
+          <Input
+            type="number"
+            min={MIN_API_REQUEST_TIMEOUT_SECONDS}
+            max={MAX_API_REQUEST_TIMEOUT_SECONDS}
+            step={10}
+            value={settings.apiRequestTimeoutSeconds}
+            onChange={(e) =>
+              settings.updateSettings({
+                apiRequestTimeoutSeconds: clampApiRequestTimeoutSeconds(Number(e.target.value))
+              })
+            }
+            className="w-24 shrink-0 text-sm"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          {[0, 100, 300, 600, 1800].map((value) => (
+            <button
+              key={value}
+              onClick={() => settings.updateSettings({ apiRequestTimeoutSeconds: value })}
+              className={`rounded px-2 py-0.5 text-[10px] transition-colors ${
+                settings.apiRequestTimeoutSeconds === value
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {value === 0
+                ? t('general.apiRequestTimeoutNoLimit', { defaultValue: 'No limit' })
+                : `${value}s`}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground/70">
+          {t('general.apiRequestTimeoutHint', {
+            defaultValue:
+              'Only bounds the wait before the first response; an active stream is never cut off. Default {{default}}s.',
+            default: DEFAULT_API_REQUEST_TIMEOUT_SECONDS
+          })}
+        </p>
+      </section>
+
+      <Separator />
+
       {/* Context Compression */}
       <section className="space-y-3">
         <div className="flex items-center justify-between max-w-lg">
@@ -1661,6 +1721,7 @@ function GeneralPanel(): React.JSX.Element {
               toolbarCollapsedByDefault: false,
               maxParallelToolCalls: DEFAULT_MAX_PARALLEL_TOOL_CALLS,
               maxConcurrentSubAgents: DEFAULT_MAX_CONCURRENT_SUB_AGENTS,
+              apiRequestTimeoutSeconds: DEFAULT_API_REQUEST_TIMEOUT_SECONDS,
               autoUpdateEnabled: true,
               apiKey: currentKey
             })
@@ -3850,7 +3911,10 @@ export function SettingsPage(): React.JSX.Element {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-muted/10">
-      <header
+      <motion.header
+        initial={animationsEnabled ? { opacity: 0, y: -4 } : false}
+        animate={{ opacity: 1, y: 0 }}
+        transition={animationsEnabled ? { duration: 0.18, ease: 'easeOut' } : { duration: 0 }}
         className={`titlebar-drag relative flex h-10 shrink-0 items-center gap-3 border-b bg-background/90 px-3 backdrop-blur ${isMac ? 'pl-[104px]' : 'pr-[132px]'}`}
         style={{ paddingRight: isMac ? undefined : 'calc(132px + 0.75rem)' }}
       >
@@ -3874,22 +3938,34 @@ export function SettingsPage(): React.JSX.Element {
             <WindowControls />
           </div>
         ) : null}
-      </header>
+      </motion.header>
 
       <div className="flex min-h-0 flex-1">
         <div className="flex w-[236px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
           <nav className="flex-1 space-y-5 overflow-y-auto px-2.5 pb-2 pt-4">
-            {menuGroupDefs.map((group) => (
-              <div key={group.labelKey} className="space-y-0.5">
+            {menuGroupDefs.map((group, groupIndex) => (
+              <motion.div
+                key={group.labelKey}
+                initial={animationsEnabled ? { opacity: 0, x: -6 } : false}
+                animate={{ opacity: 1, x: 0 }}
+                transition={
+                  animationsEnabled
+                    ? { duration: 0.2, delay: groupIndex * 0.03, ease: 'easeOut' }
+                    : { duration: 0 }
+                }
+                className="space-y-0.5"
+              >
                 <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground/70">
                   {t(group.labelKey)}
                 </p>
                 {group.items.map((item) => {
                   const active = effectiveSettingsTab === item.id
                   return (
-                    <button
+                    <motion.button
                       key={item.id}
+                      type="button"
                       onClick={() => setSettingsTab(item.id)}
+                      whileTap={animationsEnabled ? { scale: 0.985 } : undefined}
                       className={`group relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] transition-colors duration-150 ${
                         active
                           ? `font-medium text-sidebar-accent-foreground${
@@ -3902,7 +3978,7 @@ export function SettingsPage(): React.JSX.Element {
                         <motion.div
                           layoutId="settings-nav-active"
                           className="absolute inset-0 rounded-lg bg-sidebar-accent"
-                          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                          transition={{ type: 'spring', stiffness: 420, damping: 32, mass: 0.7 }}
                         />
                       )}
                       <span
@@ -3917,10 +3993,10 @@ export function SettingsPage(): React.JSX.Element {
                       <span className="relative z-10 min-w-0 flex-1 truncate">
                         {t(item.labelKey)}
                       </span>
-                    </button>
+                    </motion.button>
                   )
                 })}
-              </div>
+              </motion.div>
             ))}
           </nav>
 

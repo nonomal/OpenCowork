@@ -37,6 +37,7 @@ type Category =
   | 'server'
   | 'badRequest'
   | 'unknown'
+  | 'runtimeFatal'
 
 interface CategoryView {
   icon: React.ComponentType<{ className?: string }>
@@ -59,6 +60,11 @@ const CATEGORY_VIEW: Record<Category, CategoryView> = {
     icon: ServerCrash,
     titleKey: 'assistantMessage.agentError.titleRuntimeUnavailable',
     descKey: 'assistantMessage.agentError.descRuntimeUnavailable'
+  },
+  runtimeFatal: {
+    icon: ServerCrash,
+    titleKey: 'assistantMessage.agentError.titleRuntimeFatal',
+    descKey: 'assistantMessage.agentError.descRuntimeFatal'
   },
   auth: {
     icon: KeyRound,
@@ -112,16 +118,46 @@ const CATEGORY_VIEW: Record<Category, CategoryView> = {
   }
 }
 
+/**
+ * Stable error codes emitted by the native runtime. These are matched before any text pattern:
+ * message text varies by locale, and framework exception messages degrade to resource keys in
+ * the AOT-published worker, so text matching alone is not dependable.
+ */
+const ERROR_CODE_CATEGORY: Record<string, Category> = {
+  network_transport: 'network',
+  network_tls: 'network',
+  network_proxy: 'network',
+  network_timeout: 'timeout',
+  transport_circuit_open: 'temporaryPause',
+  sidecar_unavailable: 'runtimeUnavailable'
+}
+
 function classify(code: AgentErrorCode, message: string, errorType?: string): Category {
+  if (errorType && ERROR_CODE_CATEGORY[errorType]) return ERROR_CODE_CATEGORY[errorType]
+
   const haystack = `${errorType ?? ''} ${message ?? ''}`.toLowerCase()
   const httpMatch = haystack.match(/\b([45]\d{2})\b/)
   const status = httpMatch ? Number(httpMatch[1]) : undefined
 
+  // Fatal means retry cannot self-heal (stale binary, protocol mismatch,
+  // restart budget exhausted); checked before the generic runtime patterns so
+  // the card shows rebuild guidance instead of "just retry".
+  if (/native worker fatal|protocol mismatch|failed to restart after \d+ attempts/.test(haystack)) {
+    return 'runtimeFatal'
+  }
   if (/sidecar|native worker|native runtime|local agent runtime/.test(haystack)) {
     return 'runtimeUnavailable'
   }
+  // Checked before the abort test: a transport failure often mentions a cancelled or aborted
+  // connection, and reporting that as a user cancellation hides a real network problem.
+  if (
+    /econnreset|econnrefused|enotfound|epipe|eai_again|socket hang up|network|fetch failed|socket|dns|tls|ssl|certificate|cert_|handshake/.test(
+      haystack
+    )
+  )
+    return 'network'
   if (/abort|cancel/.test(haystack)) return 'aborted'
-  if (/timeout|timed out|etimedout/.test(haystack)) return 'timeout'
+  if (/timeout|timed out|etimedout|within \d+s/.test(haystack)) return 'timeout'
   if (/rate ?limit|too many requests|429/.test(haystack)) return 'rateLimit'
   if (/quota|insufficient[_ ]?(balance|quota|credit)|billing|payment/.test(haystack)) return 'quota'
   if (
@@ -130,9 +166,6 @@ function classify(code: AgentErrorCode, message: string, errorType?: string): Ca
     )
   )
     return 'auth'
-  if (errorType === 'transport_circuit_open') return 'temporaryPause'
-  if (/econnrefused|enotfound|network|fetch failed|socket|dns|tls|ssl/.test(haystack))
-    return 'network'
   if (status && status >= 500) return 'server'
   if (status === 400 || /bad request|invalid request/.test(haystack)) return 'badRequest'
 

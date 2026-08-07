@@ -1,4 +1,4 @@
-﻿import * as React from 'react'
+import * as React from 'react'
 import { useState as useLocalState } from 'react'
 import { toast } from 'sonner'
 import {
@@ -102,7 +102,7 @@ import {
   type ImageAttachment
 } from '@renderer/lib/image-attachments'
 import {
-  createSelectFileToken,
+  createFileReferenceMarkdown,
   getSelectFileMentionQuery,
   selectFileTextToPlainText
 } from '@renderer/lib/select-file-tags'
@@ -176,6 +176,7 @@ import { cn } from '@renderer/lib/utils'
 import { resolveProjectMemoryTextFile } from '@renderer/lib/agent/memory-files'
 import { isProjectSession, workspaceContextAvailable } from '@renderer/lib/session-scope'
 import { getDroppedLocalPaths } from '@renderer/lib/drag-folder'
+import { InlineStepsPanel } from '@renderer/components/cowork/StepsPanel'
 import { GoalSessionBar } from '@renderer/components/goal/GoalSessionControls'
 
 interface ContextRingProps {
@@ -1564,7 +1565,6 @@ export function InputArea({
   const defaultSessionInputHeight = Math.max(DEFAULT_SESSION_INPUT_HEIGHT, minComposerHeight)
   const [documentNodes, setDocumentNodes] = React.useState<EditorDocumentNode[]>([])
   const [selectedFiles, setSelectedFiles] = React.useState<SelectedFileItem[]>([])
-  const [highlightedFileId, setHighlightedFileId] = React.useState<string | null>(null)
   const [editorSelection, setEditorSelection] = React.useState({ start: 0, end: 0 })
   const text = React.useMemo(
     () => editorDocumentToPlainText(documentNodes, selectedFiles),
@@ -1603,6 +1603,15 @@ export function InputArea({
   const [selectedOptionIndex, setSelectedOptionIndex] = React.useState(0)
   const currentLanguage = useSettingsStore((state) => state.language)
   const mainModelSelectionMode = useSettingsStore((state) => state.mainModelSelectionMode)
+  const fileReferenceLabels = React.useMemo(
+    () => ({
+      removeFile: t('input.fileReference.remove', { defaultValue: 'Remove reference' }),
+      removePlugin: t('input.fileReference.removePlugin', {
+        defaultValue: 'Remove plugin reference'
+      })
+    }),
+    [t]
+  )
   const autoApprove = useSettingsStore((state) => state.autoApprove)
   const permissionWhitelistEnabled = useSettingsStore((state) => state.permissionPolicy.enabled)
   const clarifyAutoAcceptRecommended = useSettingsStore(
@@ -2204,14 +2213,6 @@ export function InputArea({
     selectedFilesRef.current = selectedFiles
   }, [selectedFiles])
 
-  React.useEffect(() => {
-    if (!highlightedFileId) return
-    const timer = window.setTimeout(() => {
-      setHighlightedFileId((current) => (current === highlightedFileId ? null : current))
-    }, 1600)
-    return () => window.clearTimeout(timer)
-  }, [highlightedFileId])
-
   const applyEditorStateFromSerializedText = React.useCallback(
     (nextText: string, baseFiles: SelectedFileItem[] = selectedFilesRef.current) => {
       const nextState = deserializeEditorState(nextText, workingFolder, baseFiles)
@@ -2533,7 +2534,7 @@ export function InputArea({
           : ' '
 
       replaceSelectionWithText(
-        `${createSelectFileToken(file.sendPath)}${suffix}`,
+        `${createFileReferenceMarkdown(file.sendPath, file.name)}${suffix}`,
         mention,
         0,
         nextFiles
@@ -2778,7 +2779,6 @@ export function InputArea({
     setAttachedImages(persistedDraft?.images ? cloneImageAttachments(persistedDraft.images) : [])
     setPreviewImage(null)
     setSelectedSkill(persistedDraft?.skill ?? null)
-    setHighlightedFileId(null)
     setEditorSelection({ start: 0, end: 0 })
 
     const rafId = window.requestAnimationFrame(() => {
@@ -2933,7 +2933,7 @@ export function InputArea({
       if (filesToInsert.length === 0) return
 
       const replacement = filesToInsert
-        .map((file) => createSelectFileToken(file.sendPath))
+        .map((file) => createFileReferenceMarkdown(file.sendPath, file.name))
         .filter(Boolean)
         .join('\n')
 
@@ -3032,12 +3032,6 @@ export function InputArea({
     [openFilePreview]
   )
 
-  const handleLocateFileReference = React.useCallback((fileId: string) => {
-    setHighlightedFileId(fileId)
-    editorRef.current?.scrollToReference(fileId)
-    editorRef.current?.focus()
-  }, [])
-
   const handleEditorSelectionChange = React.useCallback(
     (selection: { start: number; end: number }) => {
       setEditorSelection((current) =>
@@ -3106,7 +3100,6 @@ export function InputArea({
 
     setDocumentNodes([])
     setSelectedFiles([])
-    setHighlightedFileId(null)
     setEditorSelection({ start: 0, end: 0 })
     setAttachedImages([])
     setPreviewImage(null)
@@ -3585,6 +3578,10 @@ export function InputArea({
         return t('input.compressingContext', { defaultValue: 'Compressing context...' })
       case 'compressed':
         return t('input.contextCompressed', { defaultValue: 'Context compressed' })
+      case 'fallback':
+        return t('input.contextCompressionFallback', {
+          defaultValue: 'Summary unavailable; older context removed'
+        })
       case 'skipped':
         return t('input.contextCompressionSkipped', { defaultValue: 'No compression needed' })
       case 'blocked':
@@ -3725,7 +3722,7 @@ export function InputArea({
               size="sm"
               className={cn(
                 composerIconControlClass,
-                'gap-1.5 px-2 text-xs font-medium',
+                'group overflow-hidden gap-0 px-1.5 text-xs font-medium transition-[gap,padding,width] duration-200 ease-out hover:gap-1.5 hover:px-2 focus-visible:gap-1.5 focus-visible:px-2',
                 permissionMode === 'fullAccess' && 'text-amber-600 dark:text-amber-400',
                 permissionMode === 'whitelist' && 'text-emerald-600 dark:text-emerald-400'
               )}
@@ -3736,7 +3733,7 @@ export function InputArea({
               ) : (
                 <ShieldCheck className="size-3.5" />
               )}
-              <span className="max-w-24 truncate">
+              <span className="max-w-0 truncate whitespace-nowrap opacity-0 transition-[max-width,opacity] duration-200 ease-out group-hover:max-w-24 group-hover:opacity-100 group-focus-visible:max-w-24 group-focus-visible:opacity-100">
                 {permissionMode === 'fullAccess'
                   ? t('permission.fullAccess')
                   : permissionMode === 'whitelist'
@@ -4201,6 +4198,7 @@ export function InputArea({
       )}
 
       <div className={composerWidthClass}>
+        {projectScoped && draftSessionId && <InlineStepsPanel sessionId={draftSessionId} />}
         <div
           ref={containerRef}
           className={cn(
@@ -4463,7 +4461,7 @@ export function InputArea({
                   !activeFileMention &&
                   !slashMenuOpen
                 )}
-                highlightedFileId={highlightedFileId}
+                referenceLabels={fileReferenceLabels}
                 onDocumentChange={handleEditorDocumentChange}
                 onSelectionChange={handleEditorSelectionChange}
                 onFocus={handleRecommendationFocus}
@@ -4475,7 +4473,6 @@ export function InputArea({
                   handleRecommendationCompositionEnd()
                 }}
                 onReferencePreview={handlePreviewFile}
-                onReferenceLocate={handleLocateFileReference}
                 onReferenceDelete={handleRemoveFileReference}
                 className="h-full w-full"
               />

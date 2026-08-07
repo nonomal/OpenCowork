@@ -24,6 +24,7 @@ concurrency:
 permissions:
   contents: write
   actions: read
+  id-token: write
 
 jobs:
   # ── 准备阶段：提取版本号与发布内容 ──
@@ -159,6 +160,9 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
+          # OpenCowork.Native.Worker source-links the shared worker runtime out of
+          # sidecars/codegraph, so native:publish fails without the submodule.
+          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -187,6 +191,23 @@ jobs:
         run: npm run native:publish
         env:
           OPEN_COWORK_NATIVE_WORKER_RID: ${{ matrix.native_worker_rid }}
+
+      - name: Package CLI Native Worker (${{ matrix.native_worker_rid }})
+        run: npm run cli:worker:package
+        env:
+          OPEN_COWORK_NATIVE_WORKER_RID: ${{ matrix.native_worker_rid }}
+
+      - name: Upload CLI Native Worker to Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.prepare.outputs.tag_name }}
+        run: |
+          for file in cli-release-assets/OpenCowork-native-worker-${{ matrix.native_worker_rid }}.tgz*; do
+            [ -f "$file" ] || continue
+            echo "  ⬆️  $(basename "$file")"
+            gh release upload "${TAG_NAME}" "$file" --clobber
+          done
 
       - name: Download compiled app
         uses: actions/download-artifact@v6
@@ -379,6 +400,9 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
+          # OpenCowork.Native.Worker source-links the shared worker runtime out of
+          # sidecars/codegraph, so native:publish fails without the submodule.
+          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -402,6 +426,23 @@ jobs:
         run: npm run native:publish
         env:
           OPEN_COWORK_NATIVE_WORKER_RID: ${{ matrix.native_worker_rid }}
+
+      - name: Package CLI Native Worker (${{ matrix.native_worker_rid }})
+        run: npm run cli:worker:package
+        env:
+          OPEN_COWORK_NATIVE_WORKER_RID: ${{ matrix.native_worker_rid }}
+
+      - name: Upload CLI Native Worker to Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.prepare.outputs.tag_name }}
+        run: |
+          for file in cli-release-assets/OpenCowork-native-worker-${{ matrix.native_worker_rid }}.tgz*; do
+            [ -f "$file" ] || continue
+            echo "  ⬆️  $(basename "$file")"
+            gh release upload "${TAG_NAME}" "$file" --clobber
+          done
 
       - name: Download compiled app
         uses: actions/download-artifact@v6
@@ -652,3 +693,67 @@ jobs:
           TAG_NAME: ${{ needs.prepare.outputs.tag_name }}
           GH_REPO: ${{ github.repository }}
         run: gh release upload "${TAG_NAME}" latest-mac.yml --clobber --repo "${GH_REPO}"
+
+  publish-cli-npm:
+    if: github.event_name == 'release'
+    needs: [prepare, build, build-macos]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: cli/package-lock.json
+
+      - name: Install CLI dependencies
+        run: npm ci --ignore-scripts
+        working-directory: cli
+
+      - name: Sync CLI version to the release
+        run: npm version ${{ needs.prepare.outputs.version }} --no-git-tag-version --allow-same-version
+        working-directory: cli
+
+      - name: Bundle Native Workers in the CLI package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ needs.prepare.outputs.tag_name }}
+        run: |
+          mkdir -p cli/native-worker-archives cli/native-workers
+          gh release download "${TAG_NAME}" \
+            --repo "${GH_REPO}" \
+            --pattern 'OpenCowork-native-worker-*.tgz' \
+            --dir cli/native-worker-archives
+
+          for rid in win-x64 win-arm64 linux-x64 linux-arm64 osx-x64 osx-arm64; do
+            archive="cli/native-worker-archives/OpenCowork-native-worker-${rid}.tgz"
+            if [ ! -f "$archive" ]; then
+              echo "Missing Native Worker archive: $archive"
+              exit 1
+            fi
+            mkdir -p "cli/native-workers/${rid}"
+            tar -xzf "$archive" -C "cli/native-workers/${rid}"
+          done
+
+          rm -rf cli/native-worker-archives
+
+      - name: Publish CLI to npm
+        working-directory: cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          IS_PRERELEASE: ${{ needs.prepare.outputs.is_prerelease }}
+        run: |
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            npm publish --provenance --tag next
+          else
+            npm publish --provenance --tag latest
+          fi

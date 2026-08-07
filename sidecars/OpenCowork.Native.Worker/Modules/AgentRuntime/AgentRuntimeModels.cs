@@ -1,6 +1,30 @@
 using System.Text.Json;
 
-internal sealed record AgentRuntimeInitializeResult(bool Ok, string Runtime, string Version);
+internal sealed record AgentRuntimeInitializeResult(
+    bool Ok,
+    string Runtime,
+    string Version,
+    int ProtocolVersion,
+    int[] SupportedManifestSchemaVersions,
+    string CoreManifestHash,
+    string WorkerInstanceId,
+    AgentRuntimeFeatureSet Features,
+    AgentRuntimeCompatibility Compatibility);
+
+internal sealed record AgentRuntimeFeatureSet(
+    bool CapabilitySnapshot,
+    bool StrictToolValidation,
+    bool DurableEvents,
+    bool DurableInbox,
+    bool CheckpointRecovery,
+    bool ToolReconciliation,
+    bool LaneScheduler);
+
+internal sealed record AgentRuntimeCompatibility(
+    bool AcceptsV1RunRequest,
+    bool CanRecoverV2Run,
+    string MinimumRendererVersion,
+    string MinimumMainVersion);
 
 internal sealed record AgentRuntimeCapabilityResult(bool Supported);
 
@@ -23,7 +47,8 @@ internal sealed record AgentRuntimeContextCompressionResult(
     int OriginalCount,
     int NewCount,
     int? MessagesSummarized = null,
-    bool? SummarizerFailed = null);
+    bool? SummarizerFailed = null,
+    string? Error = null);
 
 internal sealed record AgentRuntimeReverseResponseResult(bool Ok);
 
@@ -79,6 +104,7 @@ internal sealed record AgentRuntimeStreamEvent(
     int? OriginalCount = null,
     int? NewCount = null,
     int? KeptMessageCount = null,
+    bool? SummarizerFailed = null,
     JsonElement[]? Messages = null,
     JsonElement[]? CompactArtifacts = null,
     string? SubAgentName = null,

@@ -1,4 +1,4 @@
-import { create } from 'zustand'
+﻿import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { nanoid } from 'nanoid'
 import type {
@@ -18,7 +18,7 @@ import {
 } from '../lib/api/responses-image-generation'
 import { resolveProviderUserAgent } from '../lib/api/api-user-agent'
 import { aiProviderStorage } from '../lib/ipc/ai-provider-storage'
-import { useSettingsStore } from './settings-store'
+import { useSettingsStore, clampApiRequestTimeoutSeconds } from './settings-store'
 
 export { builtinProviderPresets }
 export type { BuiltinProviderPreset }
@@ -468,7 +468,8 @@ export function normalizeProviderBaseUrl(
     // Anthropic provider will append `/v1/messages` itself.
     return trimmed.replace(/\/v1(?:\/messages)?$/i, '')
   }
-  if (requestType === 'gemini' || requestType === 'vertex-ai') {
+  if (requestType === 'gemini-interactions' || requestType === 'vertex-ai') {
+    // Strip the OpenAI-compat suffix: both Gemini transports target the native surface.
     return trimmed.replace(/\/openai$/i, '')
   }
   return trimmed
@@ -584,6 +585,14 @@ function resolveServiceTier(
 function resolveProviderAccountId(provider: AIProvider): string | undefined {
   const accountId = provider.oauth?.accountId?.trim()
   return accountId ? accountId : undefined
+}
+
+/**
+ * Reads the global request timeout so every provider config carries it to the runtime.
+ * Read at build time rather than captured, so changing the setting affects the next request.
+ */
+function resolveRequestTimeoutSeconds(): number {
+  return clampApiRequestTimeoutSeconds(useSettingsStore.getState().apiRequestTimeoutSeconds)
 }
 
 function resolveResponsesWebsocket(
@@ -1433,6 +1442,7 @@ export const useProviderStore = create<ProviderStore>()(
           ...(provider.allowInsecureTls !== undefined
             ? { allowInsecureTls: provider.allowInsecureTls }
             : {}),
+          requestTimeoutSeconds: resolveRequestTimeoutSeconds(),
           responseSummary: activeModel?.responseSummary,
           ...(responsesImageGeneration ? { responsesImageGeneration } : {}),
           enablePromptCache: activeModel?.enablePromptCache,
@@ -1555,6 +1565,7 @@ export const useProviderStore = create<ProviderStore>()(
           ...(provider.allowInsecureTls !== undefined
             ? { allowInsecureTls: provider.allowInsecureTls }
             : {}),
+          requestTimeoutSeconds: resolveRequestTimeoutSeconds(),
           responseSummary: model?.responseSummary,
           ...(responsesImageGeneration ? { responsesImageGeneration } : {}),
           enablePromptCache: model?.enablePromptCache,
@@ -1660,6 +1671,7 @@ export const useProviderStore = create<ProviderStore>()(
           ...(provider.allowInsecureTls !== undefined
             ? { allowInsecureTls: provider.allowInsecureTls }
             : {}),
+          requestTimeoutSeconds: resolveRequestTimeoutSeconds(),
           responseSummary: fastModel?.responseSummary,
           ...(responsesImageGeneration ? { responsesImageGeneration } : {}),
           enablePromptCache: fastModel?.enablePromptCache,
@@ -1827,12 +1839,42 @@ function migrateLegacyOAuthProviders(): void {
 }
 
 /**
+ * Move providers off the removed `gemini` (generateContent) protocol onto the Interactions
+ * API. Built-in Google is already handled by the preset version bump, so this only rescues
+ * user-created providers, which would otherwise point at a protocol that no longer exists.
+ * Vertex AI is untouched: it has no Interactions endpoint.
+ */
+function migrateLegacyGeminiProviders(): void {
+  const state = useProviderStore.getState()
+  let changed = false
+  const nextProviders = state.providers.map((provider) => {
+    const legacyType = provider.type as ProviderType | 'gemini'
+    if (legacyType !== 'gemini') return provider
+    changed = true
+    return {
+      ...provider,
+      type: 'gemini-interactions' as ProviderType,
+      baseUrl: normalizeProviderBaseUrl(provider.baseUrl, 'gemini-interactions'),
+      models: provider.models.map((model) =>
+        (model.type as ProviderType | 'gemini' | undefined) === 'gemini'
+          ? { ...model, type: 'gemini-interactions' as ProviderType }
+          : model
+      )
+    }
+  })
+  if (changed) {
+    useProviderStore.setState({ providers: nextProviders })
+  }
+}
+
+/**
  * Ensure built-in presets exist and pick a default active provider.
  * Safe to call multiple times — idempotent.
  */
 function ensureBuiltinPresets(): void {
   removeLegacyModelCompressionThresholds()
   migrateLegacyOAuthProviders()
+  migrateLegacyGeminiProviders()
   const currentProviders = useProviderStore.getState().providers
   const upgradedPresets = builtinProviderPresets.filter((preset) => {
     const existing = currentProviders.find((provider) => provider.builtinId === preset.builtinId)

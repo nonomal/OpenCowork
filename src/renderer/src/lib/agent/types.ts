@@ -186,6 +186,8 @@ export type AgentEvent =
       newCount: number
       /** Number of older messages that were summarized (kept visible in UI under the new model). */
       keptMessageCount?: number
+      /** Legacy marker emitted when an older runtime used a failed-summary fallback. */
+      summarizerFailed?: boolean
       compactArtifacts?: UnifiedMessage[]
       messages?: UnifiedMessage[]
     }

@@ -1,4 +1,4 @@
-import { nanoid } from 'nanoid'
+﻿import { nanoid } from 'nanoid'
 import { readPermissionPolicySnapshot, readSettings } from '../ipc/settings-handlers'
 import type {
   ToolCallState,
@@ -94,7 +94,7 @@ type ProviderType =
   | 'openai-responses'
   | 'openai-images'
   | 'openai-video'
-  | 'gemini'
+  | 'gemini-interactions'
   | 'vertex-ai'
 
 type ToolInputSchema =
@@ -278,6 +278,7 @@ interface ProviderConfig {
   requiresApiKey?: boolean
   useSystemProxy?: boolean
   allowInsecureTls?: boolean
+  requestTimeoutSeconds?: number
   responseSummary?: 'auto' | 'concise' | 'detailed'
   enablePromptCache?: boolean
   enableSystemPromptCache?: boolean
@@ -394,7 +395,7 @@ const activeRuns = new Map<string, AbortController>()
 const executionState = new Map<string, ExecutionState>()
 
 function normalizeProviderType(type: ProviderType): ProviderType {
-  if (type === 'gemini' || type === 'vertex-ai') return 'openai-chat'
+  if (type === 'vertex-ai') return 'openai-chat'
   return type
 }
 
@@ -450,7 +451,7 @@ function normalizeProviderBaseUrl(baseUrl: string, requestType: ProviderType): s
   if (normalizedType === 'anthropic') {
     return trimmed.replace(/\/v1(?:\/messages)?$/i, '')
   }
-  if (requestType === 'gemini' || requestType === 'vertex-ai') {
+  if (requestType === 'gemini-interactions' || requestType === 'vertex-ai') {
     return trimmed.replace(/\/openai$/i, '')
   }
   return trimmed
@@ -520,6 +521,16 @@ function getEffectiveMaxTokens(
   const userMaxTokens = Number(settings.maxTokens ?? 32000)
   if (!model?.maxOutputTokens) return userMaxTokens
   return Math.min(userMaxTokens, model.maxOutputTokens)
+}
+
+/**
+ * Mirrors clampApiRequestTimeoutSeconds in the renderer settings store. Duplicated rather than
+ * imported because the cron runtime reads persisted settings directly in the main process.
+ */
+function getApiRequestTimeoutSeconds(settings: Record<string, unknown>): number {
+  const value = Number(settings.apiRequestTimeoutSeconds)
+  if (!Number.isFinite(value)) return 100
+  return Math.min(86_400, Math.max(0, Math.floor(value)))
 }
 
 function isReasoningEffortLevel(value: unknown): value is ReasoningEffortLevel {
@@ -625,6 +636,7 @@ function buildProviderConfigById(
     ...(provider.allowInsecureTls !== undefined
       ? { allowInsecureTls: provider.allowInsecureTls }
       : {}),
+    requestTimeoutSeconds: getApiRequestTimeoutSeconds(settings),
     userAgent: resolveApiUserAgent(provider.userAgent),
     ...(requestOverrides ? { requestOverrides } : {}),
     ...(provider.instructionsPrompt ? { instructionsPrompt: provider.instructionsPrompt } : {}),
@@ -739,6 +751,7 @@ async function resolveCronProviderConfig(
     model: fallbackModel,
     maxTokens: Number(settings.maxTokens ?? 32000),
     temperature: Number(settings.temperature ?? 0.7),
+    requestTimeoutSeconds: getApiRequestTimeoutSeconds(settings),
     userAgent: getDefaultApiUserAgent()
   }
 }

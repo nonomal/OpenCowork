@@ -8,11 +8,13 @@ using System.Text.RegularExpressions;
 internal static partial class AgentRuntimeSubAgentExecutor
 {
     private const string TaskToolName = "Task";
-    private const int DefaultMaxTurns = 12;
+    private const int DefaultMaxTurns = 1000;
     private const int MaxRecentTaskInvocationKeys = 512;
     private const long RecentTaskInvocationTtlMs = 6 * 60 * 60 * 1_000;
     private const string AgentsDirectoryName = ".open-cowork/agents";
     private const string CustomSubAgentType = "custom";
+    public const string NestedTaskDeniedMessage =
+        "Task is unavailable inside a sub-agent. Complete the assigned task and report the result to the parent agent.";
 
     private static readonly JsonWriterOptions WriterOptions = new()
     {
@@ -29,8 +31,9 @@ internal static partial class AgentRuntimeSubAgentExecutor
 
     public static bool CanExecute(string toolName, JsonElement parameters)
     {
-        _ = parameters;
-        return IsTaskTool(toolName);
+        // Task is a parent-only capability. Child runs still inherit the rest of the
+        // parent's tool set, but must never be able to create another child run.
+        return IsTaskTool(toolName) && !IsSubAgentRun(parameters);
     }
 
     public static bool IsSubAgentRun(JsonElement parameters)
@@ -56,6 +59,13 @@ internal static partial class AgentRuntimeSubAgentExecutor
             return ErrorResult($"Native sub-agent tool not registered: {call.Name}");
         }
 
+        // Keep a defensive guard here in addition to CanExecute so a direct caller cannot
+        // bypass the parent-only boundary and recursively create sub-agents.
+        if (IsSubAgentRun(parameters))
+        {
+            return ErrorResult(NestedTaskDeniedMessage);
+        }
+
         return await ExecuteTaskAsync(call, parameters, state, context, cancellationToken);
     }
 
@@ -71,11 +81,7 @@ internal static partial class AgentRuntimeSubAgentExecutor
             return await ExecuteBackgroundTaskAsync(call, parameters, parentState, context, cancellationToken);
         }
 
-        var subAgentType = JsonHelpers.GetString(call.Input, "subagent_type")?.Trim() ?? string.Empty;
-        if (subAgentType.Length == 0)
-        {
-            return ErrorResult("`subagent_type` is required for synchronous Task.");
-        }
+        var subAgentType = ResolveRequestedSubAgentType(call.Input);
 
         var definition = ResolveDefinition(subAgentType, parameters, call.Input);
         if (definition is null)
@@ -449,7 +455,7 @@ internal static partial class AgentRuntimeSubAgentExecutor
 
     private static string BuildTaskDedupKey(JsonElement input)
     {
-        var subType = JsonHelpers.GetString(input, "subagent_type")?.Trim() ?? string.Empty;
+        var subType = ResolveRequestedSubAgentType(input);
         var prompt =
             NormalizeTaskPrompt(JsonHelpers.GetString(input, "prompt")) ??
             NormalizeTaskPrompt(JsonHelpers.GetString(input, "query")) ??
@@ -457,6 +463,12 @@ internal static partial class AgentRuntimeSubAgentExecutor
             NormalizeTaskPrompt(JsonHelpers.GetString(input, "target")) ??
             string.Empty;
         return $"{subType}::{prompt}";
+    }
+
+    private static string ResolveRequestedSubAgentType(JsonElement input)
+    {
+        var subAgentType = JsonHelpers.GetString(input, "subagent_type")?.Trim();
+        return string.IsNullOrWhiteSpace(subAgentType) ? CustomSubAgentType : subAgentType;
     }
 
     private static string? NormalizeTaskPrompt(string? value)
@@ -888,6 +900,10 @@ internal static partial class AgentRuntimeSubAgentExecutor
             writer.WriteBoolean("captureFinalMessages", true);
             writer.WriteBoolean("captureUncompressedFinalMessages", true);
             writer.WriteBoolean("subAgentRun", true);
+            // Do not merge the parent's extra tool catalog into a leaf worker. The
+            // explicit Task filtering above is the primary boundary; this flag keeps
+            // catalog expansion disabled if the child parameters are inspected again.
+            writer.WriteBoolean("subAgentToolExpansionDisabled", true);
             writer.WriteBoolean("subAgentConcurrencySlotInherited", true);
         });
     }
@@ -990,6 +1006,12 @@ internal static partial class AgentRuntimeSubAgentExecutor
         tools.RemoveAll(tool =>
             AgentRuntimePlanExecutor.IsPlanTool(JsonHelpers.GetString(tool, "name") ?? string.Empty));
 
+        // Sub-agents are leaf workers. Never expose the delegation tool to a child, even
+        // when it was present in the parent's tools or catalog. The runtime also rejects
+        // Task calls from sub-agent parameters, so this remains enforced if a provider
+        // emits a tool call that was not advertised.
+        tools.RemoveAll(tool => IsTaskTool(JsonHelpers.GetString(tool, "name") ?? string.Empty));
+
         return tools;
     }
 
@@ -1019,8 +1041,8 @@ internal static partial class AgentRuntimeSubAgentExecutor
         builder.AppendLine("You are a specialized OpenCowork sub-agent dispatched by a parent agent.");
         builder.AppendLine("Complete exactly one focused task. You do not see the earlier conversation.");
         builder.AppendLine("Use available tools decisively, verify your work, and keep changes scoped to the delegated task.");
-        builder.AppendLine("You inherit the same tools and tool permissions exposed to the parent agent for this run.");
-        builder.AppendLine("You may use Task for further delegation when it is available and materially helps complete the work.");
+        builder.AppendLine("You inherit the parent's tools and permissions except the Task delegation tool.");
+        builder.AppendLine("You are a leaf worker: do not create, spawn, or delegate to another sub-agent.");
         if (!string.IsNullOrWhiteSpace(workingFolder))
         {
             builder.AppendLine($"Working folder: {workingFolder}");
@@ -1032,6 +1054,11 @@ internal static partial class AgentRuntimeSubAgentExecutor
     {
         var builder = new StringBuilder(systemPrompt.TrimEnd());
         builder.AppendLine();
+        builder.AppendLine();
+        builder.AppendLine("<delegation_boundary>");
+        builder.AppendLine("This is a leaf sub-agent run. The Task delegation tool is unavailable to you.");
+        builder.AppendLine("Do not create, spawn, or delegate to another sub-agent; complete the assigned task and report it to the parent agent.");
+        builder.AppendLine("</delegation_boundary>");
         builder.AppendLine();
         builder.AppendLine("<final_report_protocol>");
         builder.AppendLine("Your final assistant message is the task report returned verbatim to the parent agent.");

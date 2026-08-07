@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
@@ -21,7 +21,10 @@ internal static class OpenAIChatRuntime
         "</turn-context>";
     private const string PlanRevisionInstruction =
         "Please revise the current plan file accordingly with Write/Edit, then call ExitPlanMode.";
-    private static readonly HttpClient Http = WorkerHttpClientFactory.Create();
+    // Infinite client timeout: the effective deadline is user-configurable and therefore
+    // applied per request via AgentRuntimeRequestTimeout.
+    private static readonly HttpClient Http = WorkerHttpClientFactory.Create(
+        timeout: Timeout.InfiniteTimeSpan);
     private static readonly JsonWriterOptions WriterOptions = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
@@ -34,7 +37,7 @@ internal static class OpenAIChatRuntime
     {
         var provider = GetObject(parameters, "provider");
         var providerType = JsonHelpers.GetString(provider, "type") ?? string.Empty;
-        if (providerType is not ("openai-chat" or "openai-responses" or "anthropic" or "gemini" or "vertex-ai"))
+        if (providerType is not ("openai-chat" or "openai-responses" or "anthropic" or "gemini-interactions" or "vertex-ai"))
         {
             throw new InvalidOperationException($"Native AgentRuntime provider is not migrated yet: {providerType}");
         }
@@ -134,7 +137,8 @@ internal static class OpenAIChatRuntime
                     try
                     {
                         var originalCount = wireConversation.Count;
-                        var preserveCount = iteration == 1 ? GetInitialCompressionPreserveCount(wireConversation) : 0;
+                        // Zero-preserve: the compression summary replaces the whole prior context.
+                        const int preserveCount = 0;
                         WorkerLog.Info(
                             $"agent context compression start runId={state.RunId} tokens={lastInputTokens} " +
                             $"messages={originalCount} preserveCount={preserveCount}");
@@ -174,11 +178,18 @@ internal static class OpenAIChatRuntime
                                     OriginalCount: originalCount,
                                     NewCount: compressed.Messages.Length,
                                     KeptMessageCount: summarized,
+                                    SummarizerFailed: compressed.Result.SummarizerFailed,
                                     CompactArtifacts: ExtractCompactArtifacts(compressed.Messages)));
                             WorkerLog.Info(
                                 $"agent context compression ok runId={state.RunId} original={originalCount} " +
                                 $"compressed={compressed.Messages.Length} summarized={summarized}");
                             lastInputTokens = 0;
+                        }
+                        else if (compressed.Result.SummarizerFailed == true)
+                        {
+                            WorkerLog.Warn(
+                                $"agent context compression preserved original context after summarizer failure " +
+                                $"runId={state.RunId} error={compressed.Result.Error}");
                         }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
@@ -314,7 +325,7 @@ internal static class OpenAIChatRuntime
     {
         var provider = GetObject(parameters, "provider");
         var providerType = JsonHelpers.GetString(provider, "type") ?? string.Empty;
-        if (providerType is not ("openai-chat" or "openai-responses" or "anthropic" or "gemini" or "vertex-ai"))
+        if (providerType is not ("openai-chat" or "openai-responses" or "anthropic" or "gemini-interactions" or "vertex-ai"))
         {
             throw new InvalidOperationException($"Native AgentRuntime provider is not migrated yet: {providerType}");
         }
@@ -531,30 +542,6 @@ internal static class OpenAIChatRuntime
         return 0;
     }
 
-    private static int GetInitialCompressionPreserveCount(IReadOnlyList<JsonElement> messages)
-    {
-        return ShouldPreserveInitialUserMessage(messages.Count > 0 ? messages[^1] : default) ? 1 : 0;
-    }
-
-    private static bool ShouldPreserveInitialUserMessage(JsonElement message)
-    {
-        if (message.ValueKind != JsonValueKind.Object ||
-            JsonHelpers.GetString(message, "role") != "user" ||
-            IsCompactSummaryLikeMessage(message))
-        {
-            return false;
-        }
-
-        if (!message.TryGetProperty("content", out var content) ||
-            content.ValueKind != JsonValueKind.Array ||
-            content.GetArrayLength() == 0)
-        {
-            return true;
-        }
-
-        return !content.EnumerateArray().All(block => JsonHelpers.GetString(block, "type") == "tool_result");
-    }
-
     private static bool IsCompactSummaryLikeMessage(JsonElement message)
     {
         if (message.TryGetProperty("meta", out var meta) &&
@@ -648,7 +635,18 @@ internal static class OpenAIChatRuntime
                 state,
                 context);
         }
-        if (providerType is "gemini" or "vertex-ai")
+        if (providerType == "gemini-interactions")
+        {
+            return await AgentRuntimeGeminiInteractionsProvider.ExecuteTurnAsync(
+                parameters,
+                provider,
+                conversation,
+                state,
+                context);
+        }
+        // Vertex AI has no Interactions endpoint on aiplatform.googleapis.com, so it stays
+        // on generateContent.
+        if (providerType == "vertex-ai")
         {
             return await AgentRuntimeGeminiProvider.ExecuteTurnAsync(
                 parameters,
@@ -697,9 +695,11 @@ internal static class OpenAIChatRuntime
         var toolBuffers = new Dictionary<int, ToolCallBuffer>();
         var toolCalls = new List<AgentRuntimeNativeToolCall>();
 
-        using var response = await Http.SendAsync(
+        using var response = await AgentRuntimeRequestTimeout.SendAsync(
+            Http,
             request,
-            HttpCompletionOption.ResponseHeadersRead,
+            provider,
+            "OpenAI-compatible chat",
             state.CancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -904,7 +904,6 @@ internal static class OpenAIChatRuntime
         if (finishReason is "tool_calls" or "function_call")
         {
             FlushRemainingToolBuffers(toolBuffers, completedToolCalls);
-            return true;
         }
 
         if (toolBuffers.Count > 0)
@@ -912,7 +911,10 @@ internal static class OpenAIChatRuntime
             FlushRemainingToolBuffers(toolBuffers, completedToolCalls);
         }
 
-        return finishReason is "stop" or "length" or "content_filter";
+        // OpenAI-compatible APIs commonly emit usage in a separate terminal
+        // chunk after the chunk carrying finish_reason. Keep consuming until
+        // [DONE] (or EOF) so that an empty choices array cannot hide usage.
+        return false;
     }
 
     private static async Task ProcessJsonResponseAsync(
@@ -1053,10 +1055,17 @@ internal static class OpenAIChatRuntime
                 ? $"call_{buffer.Index}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}"
                 : buffer.Id;
             var name = buffer.Name;
-            var input = TryParseJsonObject(buffer.Arguments.ToString(), out var parsedInput)
+            var rawArguments = buffer.Arguments.ToString();
+            var parsed = TryParseJsonObject(rawArguments, out var parsedInput);
+            var input = parsed
                 ? parsedInput
                 : CreateEmptyObjectElement();
-            completedToolCalls.Add(new AgentRuntimeNativeToolCall(id, name, input));
+            completedToolCalls.Add(new AgentRuntimeNativeToolCall(
+                id,
+                name,
+                input,
+                RawArguments: rawArguments,
+                ParseError: parsed ? null : "Expected a valid JSON object."));
         }
         toolBuffers.Clear();
     }
@@ -1156,11 +1165,18 @@ internal static class OpenAIChatRuntime
         bool nativeTool,
         AgentRuntimePermissionPolicy permissionPolicy)
     {
-        // forceApproval is an explicit per-run escalation and beats the whitelist;
-        // the deny branch in ExecuteSingleToolCallAsync beats both.
+        // forceApproval is an explicit per-run escalation and beats full access / the whitelist;
+        // the deny branch in ExecuteSingleToolCallAsync beats every approval-skip mode.
         if (JsonHelpers.GetBool(parameters, "forceApproval", false))
         {
             return true;
+        }
+        if (string.Equals(
+                JsonHelpers.GetString(parameters, "permissionMode"),
+                "fullAccess",
+                StringComparison.Ordinal))
+        {
+            return false;
         }
         if (!nativeTool)
         {
@@ -1181,6 +1197,46 @@ internal static class OpenAIChatRuntime
     {
         var hookContextTexts = new List<string>();
         var call = originalCall;
+        var authorization = AgentRuntimeCapabilityPolicy.Resolve(parameters, call.Name);
+        if (!authorization.Authorized || !authorization.Visible)
+        {
+            if (AgentRuntimeSubAgentExecutor.IsTaskTool(call.Name) &&
+                AgentRuntimeSubAgentExecutor.IsSubAgentRun(parameters))
+            {
+                state.RequestStop("error");
+            }
+            return await RejectToolCallBeforeExecutionAsync(
+                call,
+                authorization.ErrorCode ?? "tool_not_authorized",
+                authorization.ErrorMessage ?? $"Tool '{call.Name}' is not authorized.",
+                state,
+                context);
+        }
+        if (!string.IsNullOrWhiteSpace(call.ParseError))
+        {
+            WorkerLog.Warn(
+                $"agent tool arguments rejected runId={state.RunId} tool={call.Name} id={call.Id} " +
+                $"rawLength={call.RawArguments?.Length ?? 0}");
+            return await RejectToolCallBeforeExecutionAsync(
+                call,
+                "invalid_tool_arguments",
+                $"Tool '{call.Name}' arguments are not valid JSON: {call.ParseError}",
+                state,
+                context);
+        }
+        var validation = AgentRuntimeToolSchemaValidator.Validate(
+            authorization.InputSchema!.Value,
+            call.Input);
+        if (!validation.Valid)
+        {
+            return await RejectToolCallBeforeExecutionAsync(
+                call,
+                "invalid_tool_arguments",
+                $"Tool '{call.Name}' arguments failed validation at {validation.Path}: " +
+                    validation.Message,
+                state,
+                context);
+        }
         var nativeTool = AgentRuntimeNativeToolExecutor.CanExecute(call.Name, parameters);
         WorkerLog.Debug(
             $"agent tool dispatch runId={state.RunId} tool={call.Name} id={call.Id} " +
@@ -1198,6 +1254,19 @@ internal static class OpenAIChatRuntime
         if (preHook.UpdatedInput.HasValue && preHook.UpdatedInput.Value.ValueKind == JsonValueKind.Object)
         {
             call = call with { Input = preHook.UpdatedInput.Value.Clone() };
+            validation = AgentRuntimeToolSchemaValidator.Validate(
+                authorization.InputSchema!.Value,
+                call.Input);
+            if (!validation.Valid)
+            {
+                return await RejectToolCallBeforeExecutionAsync(
+                    call,
+                    "invalid_tool_arguments",
+                    $"PreToolUse produced invalid arguments at {validation.Path}: {validation.Message}",
+                    state,
+                    context,
+                    hookContextTexts);
+            }
             nativeTool = AgentRuntimeNativeToolExecutor.CanExecute(call.Name, parameters);
             requiresApproval = ComputeRequiresApproval(parameters, call, nativeTool, permissionPolicy);
         }
@@ -1321,14 +1390,37 @@ internal static class OpenAIChatRuntime
                     RequiresApproval: requiresApproval,
                     StartedAt: startedAt)));
 
-        var result = nativeTool
-            ? await AgentRuntimeNativeToolExecutor.ExecuteAsync(
-                new NativeToolCallView(call.Id, call.Name, call.Input),
-                parameters,
+        var nestedSubAgentTask =
+            AgentRuntimeSubAgentExecutor.IsTaskTool(call.Name) &&
+            AgentRuntimeSubAgentExecutor.IsSubAgentRun(parameters);
+        RendererToolResult result;
+        if (nestedSubAgentTask)
+        {
+            var message = AgentRuntimeSubAgentExecutor.NestedTaskDeniedMessage;
+            // A provider can still emit an unadvertised tool call. Stop the leaf run
+            // immediately instead of returning a generic missing-tool error that may
+            // cause the model to retry delegation for hundreds of iterations.
+            state.RequestStop("error");
+            await AgentRuntimeTools.EmitAsync(
                 state,
                 context,
-                state.CancellationToken)
-            : CreateMissingNativeToolResult(call.Name);
+                new AgentRuntimeStreamEvent(
+                    "error",
+                    Message: message,
+                    ErrorType: "subagent_task_denied"));
+            result = new RendererToolResult(CreateStringElement(message), true, message);
+        }
+        else
+        {
+            result = nativeTool
+                ? await AgentRuntimeNativeToolExecutor.ExecuteAsync(
+                    new NativeToolCallView(call.Id, call.Name, call.Input),
+                    parameters,
+                    state,
+                    context,
+                    state.CancellationToken)
+                : CreateMissingNativeToolResult(call.Name);
+        }
         var completedAt = NowMs();
         var status = result.IsError ? "error" : "completed";
         var boundedContent = LimitToolResultContent(result.Content);
@@ -1374,7 +1466,45 @@ internal static class OpenAIChatRuntime
                 boundedContent,
                 result.IsError ? true : null),
             hookContextTexts,
-            postHook.Blocked);
+            nestedSubAgentTask || postHook.Blocked);
+    }
+
+    private static async Task<AgentRuntimeSingleToolExecutionResult> RejectToolCallBeforeExecutionAsync(
+        AgentRuntimeNativeToolCall call,
+        string code,
+        string message,
+        AgentRuntimeTools.AgentRuntimeRunState state,
+        WorkerRequestContext context,
+        List<string>? hookContextTexts = null)
+    {
+        var content = CreateStringElement($"{code}: {message}");
+        var rejectedAt = NowMs();
+        await AgentRuntimeTools.EmitAsync(
+            state,
+            context,
+            new AgentRuntimeStreamEvent(
+                "tool_use_generated",
+                ToolUseBlock: new AgentRuntimeToolUseBlock(
+                    call.Id,
+                    call.Name,
+                    call.Input,
+                    call.ExtraContent)),
+            new AgentRuntimeStreamEvent(
+                "tool_call_result",
+                ToolCall: new AgentRuntimeToolCallState(
+                    call.Id,
+                    call.Name,
+                    call.Input,
+                    "error",
+                    content,
+                    code,
+                    false,
+                    rejectedAt,
+                    rejectedAt)));
+        return new AgentRuntimeSingleToolExecutionResult(
+            new AgentRuntimeToolResult(call.Id, content, true),
+            hookContextTexts ?? [],
+            false);
     }
 
     private static void AppendHookContextText(List<string> target, AgentRuntimeHookResult hookResult)
@@ -3132,7 +3262,7 @@ internal static class OpenAIChatRuntime
             }
         }
 
-        var trailingStartIndex = summaryIndex >= 0 ? summaryIndex + 1 : boundaryIndex + 1;
+        var trailingStartIndex = Math.Max(boundaryIndex, summaryIndex) + 1;
         for (var index = Math.Max(0, trailingStartIndex); index < messages.Count; index++)
         {
             AppendCompactRequestMessage(compactMessages, seenIds, messages[index], boundaryId, summaryId);
@@ -3143,6 +3273,21 @@ internal static class OpenAIChatRuntime
 
     private static int FindCompactSummaryIndex(IReadOnlyList<JsonElement> messages, int boundaryIndex)
     {
+        // Prefer the id pairing recorded on the boundary so the pair survives
+        // sort-order normalization that may move the summary before the boundary.
+        var pairedSummaryId = GetBoundaryPairedSummaryId(messages[boundaryIndex]);
+        if (!string.IsNullOrEmpty(pairedSummaryId))
+        {
+            for (var index = 0; index < messages.Count; index++)
+            {
+                if (GetWireMessageId(messages[index]) == pairedSummaryId &&
+                    IsCompactSummaryLikeMessage(messages[index]))
+                {
+                    return index;
+                }
+            }
+        }
+
         for (var index = boundaryIndex + 1; index < messages.Count; index++)
         {
             if (IsCompactBoundaryMessage(messages[index]))
@@ -3155,6 +3300,30 @@ internal static class OpenAIChatRuntime
             }
         }
         return -1;
+    }
+
+    private static string? GetBoundaryPairedSummaryId(JsonElement boundary)
+    {
+        if (boundary.ValueKind != JsonValueKind.Object ||
+            !boundary.TryGetProperty("meta", out var meta) ||
+            meta.ValueKind != JsonValueKind.Object ||
+            !meta.TryGetProperty("compactBoundary", out var compactBoundary) ||
+            compactBoundary.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var summaryId = JsonHelpers.GetString(compactBoundary, "summaryId");
+        if (!string.IsNullOrEmpty(summaryId))
+        {
+            return summaryId;
+        }
+
+        // Legacy boundaries recorded the pairing on preservedSegment.anchorId.
+        return compactBoundary.TryGetProperty("preservedSegment", out var segment) &&
+            segment.ValueKind == JsonValueKind.Object
+            ? JsonHelpers.GetString(segment, "anchorId")
+            : null;
     }
 
     private static bool IsCompactArtifactMessage(JsonElement message)
@@ -3543,8 +3712,9 @@ internal static class OpenAIChatRuntime
             return false;
         }
 
-        var arguments = ReadString(function, "arguments");
-        var input = TryParseJsonObject(arguments ?? string.Empty, out var parsedInput)
+        var arguments = ReadString(function, "arguments") ?? string.Empty;
+        var parsed = TryParseJsonObject(arguments, out var parsedInput);
+        var input = parsed
             ? parsedInput
             : CreateEmptyObjectElement();
         toolCall = new AgentRuntimeNativeToolCall(
@@ -3552,7 +3722,9 @@ internal static class OpenAIChatRuntime
                 ? $"call_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}"
                 : id,
             name,
-            input);
+            input,
+            RawArguments: arguments,
+            ParseError: parsed ? null : "Expected a valid JSON object.");
         return true;
     }
 

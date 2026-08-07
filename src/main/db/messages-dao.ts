@@ -9,6 +9,7 @@ export interface MessageRow {
   created_at: number
   usage: string | null
   sort_order: number
+  content_bytes?: number
 }
 
 export interface MessageLocatorRow {
@@ -48,6 +49,60 @@ export interface MessageWindowResult {
   error?: string | null
 }
 
+export interface MessageIndexRow {
+  id: string
+  session_id: string
+  role: string
+  meta: string | null
+  created_at: number
+  sort_order: number
+  content_bytes: number
+}
+
+export interface MessageWindowIndexResult {
+  success: boolean
+  rows: MessageIndexRow[]
+  start: number
+  end: number
+  total: number
+  hasOlder: boolean
+  hasNewer: boolean
+  loadedBytes: number
+  error?: string | null
+}
+
+export interface MessageRangeRow {
+  id: string
+  session_id: string
+  role: string
+  content: string | null
+  preview: string | null
+  meta: string | null
+  created_at: number
+  usage: string | null
+  sort_order: number
+  content_bytes: number
+  content_state: 'full' | 'preview'
+}
+
+export interface MessageRangeResult {
+  success: boolean
+  rows: MessageRangeRow[]
+  start: number
+  end: number
+  total: number
+  hasOlder: boolean
+  hasNewer: boolean
+  loadedBytes: number
+  error?: string | null
+}
+
+export interface MessageContentResult {
+  success: boolean
+  row?: MessageRow | null
+  error?: string | null
+}
+
 export interface MessageInsertArtifactsResult {
   success: boolean
   inserted: number
@@ -60,6 +115,7 @@ export interface MessageInsertArtifactsResult {
 interface MessageMutationResult {
   success: boolean
   changed: number
+  inserted?: boolean
   error?: string | null
 }
 
@@ -117,6 +173,37 @@ export function getMessagesPage(
   )
 }
 
+export function getMessageWindowIndex(args: {
+  sessionId: string
+  direction: 'tail' | 'older' | 'newer'
+  anchorSortOrder?: number
+  byteBudget: number
+  maxRows: number
+}): Promise<MessageWindowIndexResult> {
+  return getNativeWorker().request<MessageWindowIndexResult>(
+    'db/messages-window-index',
+    args,
+    120_000
+  )
+}
+
+export function getMessageRange(args: {
+  sessionId: string
+  start: number
+  end: number
+  oversizedBytes?: number
+  includeLargeContent?: boolean
+}): Promise<MessageRangeResult> {
+  return getNativeWorker().request<MessageRangeResult>('db/messages-range', args, 120_000)
+}
+
+export function getMessageContent(args: {
+  sessionId: string
+  messageId: string
+}): Promise<MessageContentResult> {
+  return getNativeWorker().request<MessageContentResult>('db/messages-content', args, 120_000)
+}
+
 export function getMessagesRequestContext(args: {
   sessionId: string
   maxMessages: number
@@ -168,8 +255,9 @@ export async function addMessages(msgs: MessageInput[]): Promise<void> {
   await requestMutation('db/messages-add-batch', { messages: msgs })
 }
 
-export async function upsertMessage(msg: MessageInput): Promise<void> {
-  await requestMutation('db/messages-upsert', msg)
+export async function upsertMessage(msg: MessageInput): Promise<boolean> {
+  const result = await requestMutation('db/messages-upsert', msg)
+  return result.inserted === true
 }
 
 export async function updateMessage(
